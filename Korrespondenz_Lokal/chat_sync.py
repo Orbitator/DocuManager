@@ -347,8 +347,11 @@ def test_chat_sync(store):
         archive.writestr("nested/conversations-001.json", json.dumps(payload))
         archive.writestr("assets/file-abcdef1-Beleg.pdf", b"%PDF-1.4\nexample")
     with closing(store.connect()) as db, db:
-        db.execute("CREATE TABLE archivdatei(id TEXT, datei_id TEXT, dateiname TEXT)")
-        db.execute("INSERT INTO archivdatei VALUES('libfile_example','file_abcdef2','Register.pdf')")
+        db.execute("CREATE TABLE IF NOT EXISTS archivdatei(id TEXT PRIMARY KEY, datei_id TEXT NOT NULL, "
+                   "dateiname TEXT NOT NULL, mime_typ TEXT NOT NULL, groesse_bytes INTEGER NOT NULL, "
+                   "archiviert_am TEXT NOT NULL, lokaler_pfad TEXT, sha256 TEXT)")
+        db.execute("INSERT INTO archivdatei(id,datei_id,dateiname,mime_typ,groesse_bytes,archiviert_am) "
+                   "VALUES('libfile_example','file_abcdef2','Register.pdf','application/pdf',0,'2026-01-01')")
     sync = ChatSync(store)
     selection = sync.preview(buffer.getvalue())
     assert {row["id"] for row in selection["threads"]} == {"thread-1","foreign"}

@@ -70,17 +70,40 @@
       button.setAttribute('aria-pressed', String(filters[button.dataset.filter]===button.dataset.value));
     });
   }
+  // Texterkennung läuft im Hintergrund. Solange ein Dokument wartet, fragt die Ansicht den Stand ab.
+  const PENDING = ['Wartet auf Texterkennung','Texterkennung läuft'];
+  const isPending = doc => PENDING.includes(doc.ocr_status);
   function documentCard(doc) {
     const source = doc.titel_seite ? doc.titel_quelle + ' von Seite ' + doc.titel_seite : doc.titel_quelle;
     const id = Number(doc.id);
-    return `<article class="card"><h3>${escape(doc.titel)}</h3>
-      <small>${escape(doc.dateiname)} · ${escape(doc.ocr_status)}</small>
+    const failed = !isPending(doc) && doc.ocr_fehler;
+    return `<article class="card" data-doc-card="${id}"><h3>${escape(doc.titel)}</h3>
+      <small>${escape(doc.dateiname)} · <span aria-live="polite">${isPending(doc)?'⏳ ':''}${escape(doc.ocr_status)}</span></small>
       <small>Titelquelle: ${escape(source)}</small>
+      ${failed?`<details><summary>Fehlerdetails</summary><p style="white-space:pre-wrap;overflow-wrap:anywhere">${escape(doc.ocr_fehler)}</p></details>`:''}
       <div class="tools" style="margin-top:8px">
         <a href="/api/documents/${id}/original" target="_blank" rel="noopener">Original öffnen</a>
         <button type="button" data-doc-action="text" data-doc="${id}">Dokumenttext</button>
         <button type="button" data-doc-action="rename" data-doc="${id}">Titel bearbeiten</button>
+        ${isPending(doc)?'':`<button type="button" data-doc-action="ocr" data-doc="${id}">Text erneut erkennen</button>`}
       </div><div data-doc-details="${id}"></div></article>`;
+  }
+  // Aktualisiert nur geänderte Dokumentkarten, damit offene Formulare erhalten bleiben.
+  async function followRecognition(section, caseId, documents, isCurrent) {
+    while (isCurrent() && documents.some(isPending)) {
+      await new Promise(resolve => setTimeout(resolve, 2000));
+      if (!isCurrent()) return;
+      let fresh;
+      try { fresh = (await api('cases/' + caseId + '/documents')).documents; } catch { continue; }
+      for (const doc of fresh) {
+        const known = documents.find(item => item.id === doc.id);
+        if (!known || (known.ocr_status === doc.ocr_status && known.titel === doc.titel)) continue;
+        Object.assign(known, doc);
+        const card = section.querySelector('[data-doc-card="' + doc.id + '"]');
+        const busy = card && card.querySelector('[data-doc-details]').firstChild;
+        if (card && !busy) card.outerHTML = documentCard(doc);
+      }
+    }
   }
   async function startScan(caseId, button, status, isCurrent) {
     button.disabled = true;
@@ -166,6 +189,7 @@
 
       const status = section.querySelector('#local-status');
       drawCases(section, backend.cases, active);
+      if (active) followRecognition(section, active.id, documents, isCurrent);
       section.querySelector('.case-filters').addEventListener('click', event => {
         const button = event.target.closest('[data-filter]');
         if (!button) return;
@@ -278,6 +302,16 @@
         const id = Number(control.dataset.doc);
         const doc = documents.find(item=>item.id === id);
         const detail = section.querySelector('[data-doc-details="' + id + '"]');
+        if (control.dataset.docAction === 'ocr') {
+          control.disabled = true;
+          try {
+            await postJson('documents/' + id + '/ocr', {});
+            Object.assign(doc, {ocr_status:'Wartet auf Texterkennung', ocr_fehler:null});
+            section.querySelector('[data-doc-card="' + id + '"]').outerHTML = documentCard(doc);
+            followRecognition(section, active.id, documents, isCurrent);
+          } catch (error) { message(status, error.message); control.disabled = false; }
+          return;
+        }
         if (control.dataset.docAction === 'text') {
           if (detail.firstChild) { detail.replaceChildren(); return; }
           control.disabled = true;
