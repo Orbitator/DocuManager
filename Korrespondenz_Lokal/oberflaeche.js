@@ -84,7 +84,7 @@ const D = {cases: [], statuses: [], groups: [], akte: null, inbox: [], fristen: 
 
 async function loadBase() {
   const c = await api('cases');
-  Object.assign(D, {cases: c.cases, statuses: c.statuses, groups: c.groups, ocr: c.ocr});
+  Object.assign(D, {cases: c.cases, statuses: c.statuses, groups: c.groups, ocr: c.ocr, version: c.version});
   D.inbox = (await api('posteingang')).dokumente;
   D.trash = (await api('papierkorb')).eintraege;
 }
@@ -97,6 +97,7 @@ function nav() {
   $('#nav').innerHTML = items.map(([id, l, ic, n]) => `<a href="#${id}" class="${cur === id ? 'on' : ''}" ${cur === id ? 'aria-current="page"' : ''}>${I(ic)}${l}${n ? `<span class="cnt num">${n}</span>` : ''}</a>`).join('');
   $('#trashlink').innerHTML = `${I('trash')}Papierkorb${D.trash.length ? `<span class="cnt num" style="margin-left:auto">${D.trash.length}</span>` : ''}`;
   document.querySelector('.side-foot a[href="#einstellungen"]').innerHTML = `${I('gear')}Einstellungen`;
+  $('#version').textContent = D.version || '';
 }
 const VIEWS = ['uebersicht','posteingang','vorgaenge','fristen','archiv','adressbuch','papierkorb','einstellungen'];
 async function route() {

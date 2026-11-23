@@ -32,6 +32,7 @@ from mail_import import MailImport, migrate_5, test_mail
 
 ROOT = Path(__file__).resolve().parent
 PORT = 8765
+APP_VERSION = "DocuManager 0.4 · neue Oberfläche, Archiv, Apple Mail"
 MAX_UPLOAD = 25 * 1024 * 1024
 MIN_MACOS = "14.0"
 SCHEMA_VERSION = 5
@@ -629,7 +630,7 @@ class Handler(BaseHTTPRequestHandler):
         elif path == "/api/cases":
             self.send_json({"cases": self.store.list_cases(), "statuses": CASE_STATUSES, "groups": self.store.groups(),
                             "ocr": bool(self.store.ocr and self.store.ocr.is_file()),
-                            "ocr_loading": not self.store.ocr_ready.is_set()})
+                            "ocr_loading": not self.store.ocr_ready.is_set(), "version": APP_VERSION})
         elif path == "/api/mail":
             self.send_json(self.mail.status())
         elif path == "/api/chat/threads":
@@ -1018,7 +1019,10 @@ def main():
         server = LocalServer(("127.0.0.1", PORT), Handler)
     except OSError as error:
         log.error("Port %s nicht verfügbar: %s", PORT, error)
-        print(f"Die Anwendung konnte http://{Handler.host} nicht starten: {error}", flush=True)
+        print(f"\nDie Anwendung konnte nicht starten: Die Adresse http://{Handler.host} ist schon belegt.\n"
+              "Vermutlich läuft noch eine frühere Version (zum Beispiel die bisherige Korrespondenz.app).\n"
+              "Beenden Sie sie mit diesem Befehl und starten Sie danach erneut:\n\n"
+              f"    lsof -ti tcp:{PORT} | xargs kill\n", flush=True)
         raise SystemExit(1) from None
     print(f"Protokoll: {logfile}", flush=True)
 
@@ -1034,7 +1038,7 @@ def main():
             Thread(target=prepare_ocr, name="OCR vorbereiten", daemon=True).start()
         Handler.store.start_worker()
         url = f"http://{Handler.host}"
-        print(f"Korrespondenz läuft auf {url}. Beenden mit Ctrl+C.", flush=True)
+        print(f"{APP_VERSION}\nKorrespondenz läuft auf {url}. Beenden mit Ctrl+C.", flush=True)
         if args.open:
             subprocess.Popen(["/usr/bin/open", url])
         try:
