@@ -419,6 +419,9 @@ class Akte:
             if not db.execute("UPDATE bereich SET name=? WHERE name=?", (neu, alt)).rowcount:
                 raise ValueError("Bereich nicht gefunden.")
             db.execute("UPDATE vorgang SET bereich=? WHERE bereich=?", (neu, alt))
+            for tabelle in ("vorgang_bereich", "dokument_bereich"):
+                db.execute(f"UPDATE OR IGNORE {tabelle} SET bereich=? WHERE bereich=?", (neu, alt))
+                db.execute(f"DELETE FROM {tabelle} WHERE bereich=?", (alt,))
 
     def bereich_entfernen(self, name):
         with closing(self.connect()) as db, db:
@@ -427,6 +430,8 @@ class Akte:
                 raise ValueError("Der Bereich enthält noch Vorgänge.")
             if not db.execute("DELETE FROM bereich WHERE name=?", (name,)).rowcount:
                 raise ValueError("Bereich nicht gefunden.")
+            db.execute("DELETE FROM vorgang_bereich WHERE bereich=?", (name,))
+            db.execute("DELETE FROM dokument_bereich WHERE bereich=?", (name,))
 
     def schlagwoerter_setzen(self, vorgang_id, namen):
         if not isinstance(namen, list) or len(namen) > 30:
@@ -468,12 +473,54 @@ class Akte:
             felder["bereich"] = data["bereich"]
         if "status" in data:
             felder["status"] = _choice(data["status"], STATUSES, "Status")
-        if not felder:
+        bereiche = self._bereiche(data["bereiche"], True) if "bereiche" in data else None
+        if bereiche:
+            felder["bereich"] = bereiche[0]  # erster = Hauptbereich (Listen, Gruppierung)
+        kontakte = self._kontakt_ids(data["kontakte"]) if "kontakte" in data else None
+        if not felder and kontakte is None:
             raise ValueError("Keine Änderung angegeben.")
         with closing(self.connect()) as db, db:
             self._vorgang(db, vorgang_id)
-            db.execute(f"UPDATE vorgang SET {','.join(k + '=?' for k in felder)} WHERE id=?",
-                       (*felder.values(), vorgang_id))
+            if felder:
+                db.execute(f"UPDATE vorgang SET {','.join(k + '=?' for k in felder)} WHERE id=?",
+                           (*felder.values(), vorgang_id))
+            if bereiche is not None or "bereich" in felder:
+                db.execute("DELETE FROM vorgang_bereich WHERE vorgang_id=?", (vorgang_id,))
+                db.executemany("INSERT OR IGNORE INTO vorgang_bereich(vorgang_id,bereich) VALUES(?,?)",
+                               ((vorgang_id, b) for b in (bereiche or [felder["bereich"]])))
+            if kontakte is not None:  # Beteiligte: fehlende hinzufügen, abgewählte entfernen
+                vorhanden = {r[0] for r in db.execute("SELECT kontakt_id FROM beteiligter WHERE vorgang_id=?", (vorgang_id,))}
+                for k in kontakte:
+                    if k not in vorhanden:
+                        db.execute("INSERT INTO beteiligter(vorgang_id,kontakt_id,rolle) VALUES(?,?,'')", (vorgang_id, k))
+                for k in vorhanden - set(kontakte):
+                    db.execute("DELETE FROM beteiligter WHERE vorgang_id=? AND kontakt_id=?", (vorgang_id, k))
+
+    def _bereiche(self, werte, pflicht):
+        if not isinstance(werte, list):
+            raise ValueError("Bereiche: ungültige Liste.")
+        namen, gueltig = [], set(self.bereich_namen())
+        for b in werte:
+            if b not in gueltig:
+                raise ValueError(f"Unbekannter Bereich: {b}")
+            if b not in namen:
+                namen.append(b)
+        if pflicht and not namen:
+            raise ValueError("Bitte mindestens einen Bereich wählen.")
+        return namen
+
+    def _kontakt_ids(self, werte):
+        if not isinstance(werte, list):
+            raise ValueError("Kontakte: ungültige Liste.")
+        ids = []
+        with closing(self.connect()) as db:
+            for w in werte:
+                k = _id(w, "Kontakt")
+                if not k or not db.execute("SELECT 1 FROM kontakt WHERE id=? AND geloescht_am IS NULL", (k,)).fetchone():
+                    raise ValueError("Kontakt nicht gefunden.")
+                if k not in ids:
+                    ids.append(k)
+        return ids
 
     def akte(self, vorgang_id):
         """Die vollständige Vorgangsakte in einem Abruf."""
@@ -481,13 +528,15 @@ class Akte:
             v = dict(self._vorgang(db, vorgang_id))
             q = lambda sql, *a: [dict(r) for r in db.execute(sql, a)]
             v["teilvorgaenge"] = q("SELECT * FROM teilvorgang WHERE vorgang_id=? ORDER BY reihenfolge,id", vorgang_id)
+            v["bereiche"] = [v["bereich"]] + [r["bereich"] for r in q(
+                "SELECT bereich FROM vorgang_bereich WHERE vorgang_id=? AND bereich<>? ORDER BY bereich", vorgang_id, v["bereich"])]
             v["schlagwoerter"] = [r["name"] for r in q("""SELECT s.name FROM vorgang_schlagwort vs
                 JOIN schlagwort s ON s.id=vs.schlagwort_id WHERE vs.vorgang_id=? ORDER BY s.name""", vorgang_id)]
             v["beteiligte"] = q("""SELECT b.kontakt_id, b.rolle, k.name, k.kurzname, k.typ FROM beteiligter b
                 JOIN kontakt k ON k.id=b.kontakt_id WHERE b.vorgang_id=? ORDER BY k.name""", vorgang_id)
             v["referenzen"] = q("SELECT * FROM referenz WHERE vorgang_id=? ORDER BY id", vorgang_id)
             v["dokumente"] = q("""SELECT d.id,d.titel,d.dateiname,d.titel_seite,d.titel_quelle,d.ocr_status,d.mime,
-                (d.ansicht IS NOT NULL) AS gedreht,
+                (d.ansicht IS NOT NULL) AS gedreht, d.drehung_manuell,
                 d.angelegt_am,(SELECT count(*) FROM dokument_vorgang x WHERE x.dokument_id=d.id) AS vorgaenge
                 FROM dokument d JOIN dokument_vorgang dv ON dv.dokument_id=d.id
                 WHERE dv.vorgang_id=? AND d.geloescht_am IS NULL ORDER BY d.id DESC""", vorgang_id)
@@ -1115,6 +1164,14 @@ class Akte:
                 db.execute("UPDATE dokument SET dokument_datum=? WHERE id=?", (datum, dokument_id))
                 if datum:
                     db.execute("UPDATE eintrag SET ereignis_datum=? WHERE dokument_id=? AND art='eingang'", (datum, dokument_id))
+            if "bereiche" in data:  # leer = Bereiche des Vorgangs gelten
+                bereiche = self._bereiche(data["bereiche"], False)
+                db.execute("DELETE FROM dokument_bereich WHERE dokument_id=?", (dokument_id,))
+                db.executemany("INSERT INTO dokument_bereich(dokument_id,bereich) VALUES(?,?)", ((dokument_id, b) for b in bereiche))
+            if "kontakte" in data:  # weitere Kontakte zusätzlich zum Absender
+                kontakte = self._kontakt_ids(data["kontakte"])
+                db.execute("DELETE FROM dokument_kontakt WHERE dokument_id=?", (dokument_id,))
+                db.executemany("INSERT INTO dokument_kontakt(dokument_id,kontakt_id) VALUES(?,?)", ((dokument_id, k) for k in kontakte))
             if "kontakt_id" in data:
                 kontakt = _id(data.get("kontakt_id"), "Absender")
                 if kontakt and not db.execute("SELECT 1 FROM kontakt WHERE id=?", (kontakt,)).fetchone():
@@ -1122,6 +1179,17 @@ class Akte:
                 db.execute("UPDATE eintrag SET kontakt_id=?, richtung=? WHERE dokument_id=? AND art='eingang'",
                            (kontakt, "von" if kontakt else None, dokument_id))
         return {"ok": True}
+
+    def dokument_drehen(self, dokument_id, data):
+        """Dreht die Anzeige eines Dokuments von Hand um 90° (rechts) oder −90° (links). Das Original bleibt unverändert."""
+        grad = data.get("grad")
+        if grad not in (90, -90, 180):
+            raise ValueError("Drehung: 90, −90 oder 180 Grad.")
+        with closing(self.connect()) as db, db:
+            if not db.execute("UPDATE dokument SET drehung_manuell=(drehung_manuell+?+360)%360 WHERE id=?",
+                              (grad, dokument_id)).rowcount:
+                raise ValueError("Dokument nicht gefunden.")
+            return {"drehung": db.execute("SELECT drehung_manuell FROM dokument WHERE id=?", (dokument_id,)).fetchone()[0]}
 
     def dokument_fristen(self, dokument_id):
         """Im Text eines Dokuments erkannte Fristen, gerechnet ab Dokumentdatum."""
@@ -1198,7 +1266,7 @@ class Akte:
         with closing(self.connect()) as db:
             rows = [dict(r) for r in db.execute("""
                 SELECT d.id, d.titel, d.dateiname, d.mime, d.dateipfad, d.ocr_status, d.angelegt_am, d.dokument_datum,
-                       dv.vorgang_id, v.titel AS vorgang, v.system, (d.ansicht IS NOT NULL) AS gedreht, v.bereich, v.status AS vorgang_status,
+                       dv.vorgang_id, v.titel AS vorgang, v.system, (d.ansicht IS NOT NULL) AS gedreht, d.drehung_manuell, v.bereich, v.status AS vorgang_status,
                        (SELECT count(*) FROM dokumentseite s WHERE s.dokument_id=d.id) AS seiten,
                        (SELECT e.art FROM eintrag e WHERE e.dokument_id=d.id AND e.vorgang_id=dv.vorgang_id
                           AND e.geloescht_am IS NULL ORDER BY e.id LIMIT 1) AS art,
@@ -1217,10 +1285,21 @@ class Akte:
                             JOIN teilvorgang t ON t.id=et.teilvorgang_id
                             WHERE e.dokument_id=d.id AND e.vorgang_id=v.id AND e.geloescht_am IS NULL AND t.status<>'Erledigt')))
                 ORDER BY d.id DESC""")]
+            eigene, vorgang_b, kontakte = {}, {}, {}
+            for r in db.execute("SELECT dokument_id, bereich FROM dokument_bereich ORDER BY bereich"):
+                eigene.setdefault(r[0], []).append(r[1])
+            for r in db.execute("SELECT vorgang_id, bereich FROM vorgang_bereich ORDER BY bereich"):
+                vorgang_b.setdefault(r[0], []).append(r[1])
+            for r in db.execute("""SELECT dk.dokument_id, k.id, k.name FROM dokument_kontakt dk JOIN kontakt k ON k.id=dk.kontakt_id
+                ORDER BY k.name"""):
+                kontakte.setdefault(r[0], []).append({"id": r[1], "name": r[2]})
             for r in rows:
                 datei = self.store.uploads / r.pop("dateipfad")
                 r["groesse"] = datei.stat().st_size if datei.is_file() else None
                 r["datum"] = r["dokument_datum"] or r["ereignis_datum"] or r["angelegt_am"][:10]
+                r["eigene_bereiche"] = eigene.get(r["id"], [])
+                r["bereiche"] = r["eigene_bereiche"] or ([r["bereich"]] + [b for b in vorgang_b.get(r["vorgang_id"], []) if b != r["bereich"]])
+                r["kontakte"] = kontakte.get(r["id"], [])
             return rows
 
     def chat_notiz(self, vorgang_id, data):
@@ -1338,6 +1417,7 @@ def _route_table():
         ("POST", r"/api/posteingang/(\d+)/zuordnen", lambda a, m, d: {"id": a.zuordnen(i(m[1]), d)}),
         ("POST", r"/api/dokumente/(\d+)/verschieben", lambda a, m, d: a.dokument_verschieben(i(m[1]), d)),
         ("POST", r"/api/dokumente/(\d+)/aendern", lambda a, m, d: a.dokument_aendern(i(m[1]), d)),
+        ("POST", r"/api/dokumente/(\d+)/drehen", lambda a, m, d: a.dokument_drehen(i(m[1]), d)),
         ("POST", r"/api/dokumente/(\d+)/entfernen", lambda a, m, d: a.dokument_entfernen(i(m[1]), _id(d.get("vorgang_id"), "Vorgang"))),
         ("GET", r"/api/dokumente/(\d+)/fristen", lambda a, m, d: {"fristen": a.dokument_fristen(i(m[1]))}),
         ("POST", r"/api/akte/(\d+)", lambda a, m, d: a.vorgang_aendern(i(m[1]), d)),
@@ -1750,6 +1830,27 @@ def test_fristen_ablage(store):  # noqa: C901
     z = [x for x in akte.archiv() if x["id"] == d1][0]
     assert (z["titel"], z["dateiname"], z["datum"], z["absender"], z["kontakt_id"]) == (
         "Info Stadtwerke", "Stadtwerke-Info.pdf", "2026-10-01", "Finanzamt Rostock", k), z
+    # Mehrere Bereiche und weitere Kontakte am Dokument; Drehung von Hand
+    k2 = akte.kontakt_anlegen({"name": "Steuerbüro Nord"})
+    namen = store.groups()
+    akte.dokument_aendern(d1, {"bereiche": namen[:2], "kontakte": [k2]})
+    z = [x for x in akte.archiv() if x["id"] == d1][0]
+    assert z["bereiche"] == sorted(namen[:2]) and [c["name"] for c in z["kontakte"]] == ["Steuerbüro Nord"], z
+    assert akte.dokument_drehen(d1, {"grad": -90}) == {"drehung": 270}
+    assert akte.dokument_drehen(d1, {"grad": 90}) == {"drehung": 0}
+    # Vorgang: mehrere Bereiche, Beteiligte setzen
+    akte.vorgang_aendern(a, {"bereiche": [namen[1], namen[0]], "kontakte": [k, k2]})
+    va = akte.akte(a)
+    assert va["bereich"] == namen[1] and va["bereiche"] == [namen[1], namen[0]], va["bereiche"]
+    assert sorted(x["kontakt_id"] for x in va["beteiligte"]) == sorted([k, k2])
+    assert [c for c in store.list_cases() if c["id"] == a][0]["bereiche"] == [namen[1], namen[0]]
+    akte.vorgang_aendern(a, {"kontakte": [k2]})
+    assert [x["kontakt_id"] for x in akte.akte(a)["beteiligte"]] == [k2]
+    try:
+        akte.vorgang_aendern(a, {"bereiche": []})
+        raise AssertionError("Ein Vorgang braucht mindestens einen Bereich")
+    except ValueError:
+        pass
     try:
         akte.dokument_aendern(d1, {"dateiname": "../boese.pdf"})
         raise AssertionError("Pfadangaben im Dateinamen müssen abgelehnt werden")

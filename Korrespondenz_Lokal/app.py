@@ -34,10 +34,10 @@ from mail_import import MailImport, migrate_5, test_mail
 
 ROOT = Path(__file__).resolve().parent
 PORT = 8765
-APP_VERSION = "DocuManager 0.8.3 · Programm ohne Terminal, Wiederherstellen, kompakte Vorschau"
+APP_VERSION = "DocuManager 0.9 · Mehrere Bereiche und Kontakte, Drehen, Archiv nach Typ"
 MAX_UPLOAD = 25 * 1024 * 1024
 MIN_MACOS = "14.0"
-SCHEMA_VERSION = 9
+SCHEMA_VERSION = 10
 OCR_WAITING = "Wartet auf Texterkennung"
 # Scan-Ordner für Scanner-Software und „Digitale Bilder“: Dateien darin kommen automatisch in den Posteingang.
 # Bewusst nicht unter „Dokumente“: Diesen Ordner schützt macOS, ein über Launchpad gestartetes Programm bräuchte
@@ -232,8 +232,23 @@ def migrate_9(db):
         raise sqlite3.IntegrityError(f"Fremdschlüssel nach dem Umbau verletzt: {fehler[:3]}")
 
 
+def migrate_10(db):
+    """Mehrere Bereiche je Vorgang und je Dokument, weitere Kontakte je Dokument, Drehung von Hand."""
+    db.executescript("""
+        CREATE TABLE IF NOT EXISTS vorgang_bereich(vorgang_id INTEGER NOT NULL REFERENCES vorgang(id),
+            bereich TEXT NOT NULL, PRIMARY KEY(vorgang_id, bereich));
+        CREATE TABLE IF NOT EXISTS dokument_bereich(dokument_id INTEGER NOT NULL REFERENCES dokument(id),
+            bereich TEXT NOT NULL, PRIMARY KEY(dokument_id, bereich));
+        CREATE TABLE IF NOT EXISTS dokument_kontakt(dokument_id INTEGER NOT NULL REFERENCES dokument(id),
+            kontakt_id INTEGER NOT NULL REFERENCES kontakt(id), PRIMARY KEY(dokument_id, kontakt_id));
+    """)
+    if "drehung_manuell" not in columns_of(db, "dokument"):
+        db.execute("ALTER TABLE dokument ADD COLUMN drehung_manuell INTEGER NOT NULL DEFAULT 0")
+    db.execute("INSERT OR IGNORE INTO vorgang_bereich(vorgang_id,bereich) SELECT id,bereich FROM vorgang WHERE system IS NULL")
+
+
 MIGRATIONS = ((1, migrate_1), (2, migrate_2), (3, migrate_3), (4, migrate_4), (5, migrate_5), (6, migrate_6),
-              (7, migrate_7), (8, migrate_8), (9, migrate_9))
+              (7, migrate_7), (8, migrate_8), (9, migrate_9), (10, migrate_10))
 
 
 class Store:
@@ -296,9 +311,18 @@ class Store:
 
     def list_cases(self):
         with closing(self.connect()) as db:
-            return [dict(row) for row in db.execute("""SELECT v.*, (SELECT count(*) FROM dokument_vorgang dv
+            faelle = [dict(row) for row in db.execute("""SELECT v.*, (SELECT count(*) FROM dokument_vorgang dv
                 JOIN dokument d ON d.id=dv.dokument_id WHERE dv.vorgang_id=v.id AND d.geloescht_am IS NULL) AS dokumente
                 FROM vorgang v WHERE v.geloescht_am IS NULL AND v.system IS NULL ORDER BY v.id DESC""")]
+            try:
+                weitere = {}
+                for r in db.execute("SELECT vorgang_id, bereich FROM vorgang_bereich"):
+                    weitere.setdefault(r[0], []).append(r[1])
+            except sqlite3.OperationalError:
+                weitere = {}
+            for f in faelle:  # Hauptbereich zuerst, weitere danach
+                f["bereiche"] = [f["bereich"]] + sorted(b for b in weitere.get(f["id"], []) if b != f["bereich"])
+            return faelle
 
     def groups(self):
         with closing(self.connect()) as db:
@@ -363,7 +387,7 @@ class Store:
         with closing(self.connect()) as db:
             seite = db.execute("SELECT drehung FROM dokumentseite WHERE dokument_id=? ORDER BY nummer LIMIT 1",
                                (document_id,)).fetchone()
-        drehung = int(seite[0]) % 360 if seite else 0
+        drehung = ((int(seite[0]) if seite else 0) + int(row["drehung_manuell"] or 0)) % 360
         original = self.uploads / row["dateipfad"]
         if not original.is_file():
             return None

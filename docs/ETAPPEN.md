@@ -118,6 +118,13 @@ Teil 2 (umgesetzt, Schemaversion 7):
   `dokument`; `migrate_9` baut die Tabelle ohne sie neu (Zugehörigkeit regelt `dokument_vorgang`). Der Scan-Ordner
   liegt jetzt unter `~/DocuManager Scans` (nicht in „Dokumente“, das macOS für Programme gesondert schützt).
   Fehlermeldungen beim Speichern nennen die Ursache.
+- 0.9 (Schemaversion 10): Mehrere Bereiche je Vorgang (`vorgang_bereich`, erster = Hauptbereich in `vorgang.bereich`)
+  und je Dokument (`dokument_bereich`, leer = Bereiche des Vorgangs); weitere Kontakte je Dokument
+  (`dokument_kontakt`); Beteiligte im Dialog „Vorgang bearbeiten“ setzen, auch direkt aus der Vorgangsliste.
+  Archiv: Filter und Gruppierung nach Typ (Eingang, Versendet, Entwurf, Versandnachweis), Dokumente mit mehreren
+  Bereichen erscheinen in jeder Bereichsgruppe. Vorschau: Drehen um je 90° (`dokument_drehen`, gespeichert in
+  `dokument.drehung_manuell`, gilt auch für Betrachter und Vorschaubild; Original unverändert). Datumsfelder mit
+  „Heute“ einheitlich in einer Zeile.
 - 0.8.3: Archiv – Klick auf eine Zeile öffnet „Dokument bearbeiten“ (Titel, Dateiname, Dokumentdatum, Absender;
   `dokument_aendern`, Original bleibt unverändert), das Dateisymbol vor dem Namen öffnet das Dokument im Betrachter.
   Akte – „Referenz“ steht neben „Eintrag“ im Kopf der Chronik, der Filter „Fehlende Originale“ entfällt.

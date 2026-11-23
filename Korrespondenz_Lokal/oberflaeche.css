@@ -403,9 +403,23 @@ body.dragging::after{content:"Dateien hier ablegen – sie landen im Posteingang
 .ent:hover .rowacts,.ent.sel .rowacts,.ent .rowacts:focus-within{opacity:1}
 button.heute{margin-left:6px;padding:4px 8px;font-size:12px;border:1px solid var(--line-strong);border-radius:6px;background:transparent;color:inherit;cursor:pointer;white-space:nowrap}
 button.heute:hover{background:var(--surface-2,rgba(127,127,127,.18))}
-label:has(> input[type=date]){display:flex;flex-wrap:wrap;align-items:center}
-label:has(> input[type=date]) > input[type=date]{flex:1 1 140px;width:auto}
 .docname{display:flex;align-items:flex-start;gap:8px}
 .docico{flex:none;display:grid;place-items:center;width:30px;height:34px;border:1px solid var(--line-strong);border-radius:6px;background:var(--paper);color:#3341c9;cursor:pointer;padding:0}
 .docico svg{width:18px;height:18px}
 .docico:hover{outline:2px solid var(--accent)}
+.datefeld{display:flex;align-items:center;gap:6px;width:100%}
+.datefeld input[type=date]{flex:1 1 auto;min-width:0;width:auto;height:38px;padding:6px 10px;font:inherit;font-variant-numeric:tabular-nums;line-height:1.2;color-scheme:dark light;-webkit-appearance:none;appearance:none}
+.datefeld input[type=date]::-webkit-datetime-edit{padding:0}
+.datefeld input[type=date]::-webkit-calendar-picker-indicator{cursor:pointer;opacity:.7}
+.datefeld button.heute{margin:0;height:38px;flex:none}
+.frlist .datefeld input[type=date],.frlist .datefeld button.heute{height:32px}
+.multi{display:flex;flex-wrap:wrap;align-items:center;gap:6px;padding:6px 8px;border:1px solid var(--line-strong);border-radius:8px;background:var(--surface);min-height:38px}
+.mchips{display:flex;flex-wrap:wrap;gap:6px}
+.mchip{display:inline-flex;align-items:center;gap:4px;padding:2px 4px 2px 10px;border-radius:999px;background:var(--surface-2,rgba(127,127,127,.18));font-size:13px}
+.mchip button{border:0;background:transparent;color:inherit;cursor:pointer;font-size:15px;line-height:1;padding:0 4px;border-radius:999px}
+.mchip button:hover{background:rgba(127,127,127,.3)}
+.multi select.madd{border:0;background:transparent;color:var(--accent);font:inherit;font-size:13px;padding:2px 4px;max-width:220px;cursor:pointer}
+.pvrot{position:relative;overflow:hidden;height:68vh;max-height:calc(100vh - 230px);min-height:320px;background:#fff}
+.pvrot.full{height:100%;max-height:none}
+.pvrot .pvframe{height:100%;max-height:none;min-height:0}
+.pvimg{transition:transform .15s}

@@ -44,6 +44,8 @@ const P = {
   mail:'<rect x="3" y="5" width="18" height="14" rx="2"/><path d="m3 7 9 6 9-6"/>',
   move:'<path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><path d="M9 13h7M13 10l3 3-3 3"/>',
   info:'<circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8h.01"/>',
+  rotl:'<path d="M4 12a8 8 0 1 0 2.3-5.6M4 4v5h5"/>',
+  rotr:'<path d="M20 12a8 8 0 1 1-2.3-5.6M20 4v5h-5"/>',
   refresh:'<path d="M20 12a8 8 0 1 1-2.3-5.6M20 4v5h-5"/>',
   gear:'<circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9 7 7M17 17l2.1 2.1M4.9 19.1 7 17M17 7l2.1-2.1"/>'
 };
@@ -144,6 +146,36 @@ async function render() {
 }
 
 // ---------- Übersicht ----------
+// Mehrfachauswahl (Bereiche, Kontakte): gewählte Einträge als Chips, weitere über eine Auswahlliste
+const MULTI = {};
+function mehrfach(id, optionen, gewaehlt, was) {
+  MULTI[id] = {optionen: optionen.map(([v, l]) => [String(v), l]), was};
+  return `<div class="multi" data-multi="${id}"><input type="hidden" id="${id}" value="${esc(JSON.stringify(gewaehlt.map(String)))}">${multiInnen(id, gewaehlt.map(String))}</div>`;
+}
+function multiInnen(id, gewaehlt) {
+  const m = MULTI[id], label = v => (m.optionen.find(o => o[0] === v) || [v, v])[1];
+  const frei = m.optionen.filter(o => !gewaehlt.includes(o[0]));
+  return `<span class="mchips">${gewaehlt.map(v => `<span class="mchip">${esc(label(v))}<button type="button" data-act="multi-del" data-multi="${id}" data-v="${esc(v)}" aria-label="${esc(label(v))} entfernen">×</button></span>`).join('') || `<span class="muted" style="font-size:13px">keine</span>`}</span>
+   ${frei.length ? `<select class="madd" data-multi="${id}" aria-label="${esc(m.was)} hinzufügen"><option value="">+ ${esc(m.was)}</option>${frei.map(([v, l]) => `<option value="${esc(v)}">${esc(l)}</option>`).join('')}</select>` : ''}`;
+}
+function multiSetzen(id, werte) {
+  const box = document.querySelector(`.multi[data-multi="${id}"]`); if (!box) return;
+  box.querySelector('input[type=hidden]').value = JSON.stringify(werte);
+  box.querySelectorAll(':scope > :not(input)').forEach(e => e.remove());
+  box.insertAdjacentHTML('beforeend', multiInnen(id, werte));
+}
+const multiWert = id => { try { return JSON.parse(val(id) || '[]'); } catch (e) { return []; } };
+const kontaktOpt = () => [...D.kontakte].sort((x, y) => cmp(x.name, y.name)).map(k => [k.id, k.kurzname || k.name]);
+async function vorgangBearbeiten(id) {
+  const v = D.akte && D.akte.id === id ? D.akte : await api('akte/' + id);
+  if (!D.kontakte.length) D.kontakte = (await api('kontakte')).kontakte;
+  modal('Vorgang bearbeiten', `<label>Titel<input id="m-vt" value="${esc(v.titel)}" maxlength="160"></label>
+   <label>Bereiche <small class="muted">· der erste ist der Hauptbereich</small></label>${mehrfach('m-vbs', D.groups.map(b => [b, b]), v.bereiche || [v.bereich], 'Bereich')}
+   <label>Kontakte <small class="muted">· Beteiligte des Vorgangs</small></label>${mehrfach('m-vks', kontaktOpt(), v.beteiligte.map(b => b.kontakt_id), 'Kontakt')}
+   <div class="two"><label>Zuständig<input id="m-vz" value="${esc(v.zustaendig || '')}"></label><label>Nächster Schritt<input id="m-vn" value="${esc(v.naechster_schritt || '')}"></label></div><label>Beschreibung<textarea id="m-vd" rows="3">${esc(v.beschreibung)}</textarea></label>`, async () => {
+    const bereiche = multiWert('m-vbs'); if (!bereiche.length) { toast('Bitte mindestens einen Bereich wählen.'); return false; }
+    closeModal(); await act(() => api('akte/' + v.id, {titel: val('m-vt'), bereiche, kontakte: multiWert('m-vks').map(Number), zustaendig: val('m-vz'), naechster_schritt: val('m-vn'), beschreibung: val('m-vd')}), 'Vorgang gespeichert.'); return false; });
+}
 // Erledigte Vorgänge verlassen die Liste „Vorgänge“ und stehen nur noch im Archiv.
 const aktiv = () => D.cases.filter(c => c.status !== 'Erledigt');
 // Auswahl aus allen bestehenden Vorgängen: laufende zuerst, erledigte (im Archiv) darunter
@@ -155,9 +187,24 @@ const vorgangOptionen = (cur, ohne) => {
 };
 // Originale passend verkleinert: Bilder als <img> (ganz sichtbar), PDFs mit „ganze Seite“
 const alsBild = d => /^image\/(jpeg|png)$/.test(d.mime || '') || (d.mime === 'image/tiff' && !d.gedreht);
-const originalHtml = (d, titel) => alsBild(d)
-  ? `<div class="pvimgwrap"><img class="pvimg" src="/api/documents/${d.id}/original" alt="${esc(titel || d.titel || 'Original')}"></div>`
-  : `<iframe class="pvframe" src="/api/documents/${d.id}/original#view=Fit&amp;navpanes=0" title="Original ${esc(titel || d.titel || '')}"></iframe>`;
+const originalHtml = (d, titel, voll) => alsBild(d)
+  ? `<div class="pvimgwrap ${voll ? 'full' : ''}" data-rot="${d.drehung_manuell || 0}"><img class="pvimg" src="/api/documents/${d.id}/original" alt="${esc(titel || d.titel || 'Original')}"></div>`
+  : `<div class="pvrot ${voll ? 'full' : ''}" data-rot="${d.drehung_manuell || 0}"><iframe class="pvframe" src="/api/documents/${d.id}/original#view=Fit&amp;navpanes=0" title="Original ${esc(titel || d.titel || '')}"></iframe></div>`;
+// Drehung von Hand anzeigen: Bild bzw. PDF-Rahmen drehen und dabei vollständig einpassen
+function drehungAnwenden(root = document) {
+  for (const box of root.querySelectorAll('[data-rot]')) {
+    const grad = +box.dataset.rot || 0, quer = grad % 180 !== 0, el = box.querySelector('img, iframe'); if (!el) continue;
+    if (el.tagName === 'IMG') {
+      el.style.transform = grad ? `rotate(${grad}deg)` : '';
+      el.style.maxWidth = quer ? box.clientHeight + 'px' : ''; el.style.maxHeight = quer ? box.clientWidth + 'px' : '';
+    } else {
+      const w = box.clientWidth, h = box.clientHeight;
+      Object.assign(el.style, quer ? {position: 'absolute', width: h + 'px', height: w + 'px', left: (w - h) / 2 + 'px', top: (h - w) / 2 + 'px', transform: `rotate(${grad}deg)`}
+        : {position: '', width: '', height: '', left: '', top: '', transform: grad ? `rotate(${grad}deg)` : ''});
+    }
+  }
+}
+addEventListener('resize', () => drehungAnwenden());
 function vHome() {
   const offen = D.fristen.filter(f => !f.erledigt_am);
   const ueber = offen.filter(f => tage(f.faellig_am) < 0), bald = offen.filter(f => tage(f.faellig_am) >= 0 && tage(f.faellig_am) <= 14);
@@ -272,22 +319,22 @@ const cmp = (a, b) => String(a ?? '').localeCompare(String(b ?? ''), 'de', {nume
 function vList() {
   const bs = ['alle', ...new Set([...D.groups, ...aktiv().map(c => c.bereich)])];
   const erledigt = D.cases.length - aktiv().length;
-  let list = aktiv().filter(c => (S.vb === 'alle' || c.bereich === S.vb) && (S.vs === 'alle' || c.status === S.vs));
+  let list = aktiv().filter(c => (S.vb === 'alle' || (c.bereiche || [c.bereich]).includes(S.vb)) && (S.vs === 'alle' || c.status === S.vs));
   const key = {titel: c => c.titel, bereich: c => c.bereich, status: c => ST_ORDER.indexOf(c.status), frist: c => c.naechste_frist || '9999', akt: c => c.angelegt_am}[S.sortV.k];
   list.sort((a, b) => (typeof key(a) === 'number' ? key(a) - key(b) : cmp(key(a), key(b))) * S.sortV.d || cmp(a.titel, b.titel));
   return `<div class="head" style="justify-content:space-between"><h1>Vorgänge</h1><button class="btn pri" data-act="new-vorgang">${I('plus')}Neuer Vorgang</button></div>
   <div class="filters"><span class="lbl">Bereich</span>${bs.map(b => `<button class="fchip ${S.vb === b ? 'on' : ''}" data-act="vb" data-id="${esc(b)}">${b === 'alle' ? 'Alle' : esc(b)}</button>`).join('')}<button class="fchip" data-act="b-add" style="border-style:dashed">+ Bereich</button></div>
   <div class="filters" style="margin-top:-6px"><span class="lbl">Status</span>${['alle', ...ST_ORDER.filter(s => s !== 'Erledigt')].map(s => `<button class="fchip ${S.vs === s ? 'on' : ''}" data-act="vs" data-id="${esc(s)}">${s === 'alle' ? 'Alle' : esc(stLabel(s))}</button>`).join('')}</div>
   <div class="tbl-wrap"><table><thead><tr>${sortTh('V','titel','Vorgang')}${sortTh('V','bereich','Bereich')}${sortTh('V','status','Status')}${sortTh('V','frist','Nächste Frist')}${sortTh('V','akt','Angelegt')}<th><span class="sr">Aktionen</span></th></tr></thead><tbody>
-  ${list.map(c => `<tr data-act="open-v" data-id="${c.id}"><td><b>${esc(c.titel)}</b><div class="muted" style="font-size:12.5px">${c.dokumente} Dokument${c.dokumente === 1 ? '' : 'e'}</div></td><td>${esc(c.bereich)}</td>
+  ${list.map(c => `<tr data-act="open-v" data-id="${c.id}"><td><b>${esc(c.titel)}</b><div class="muted" style="font-size:12.5px">${c.dokumente} Dokument${c.dokumente === 1 ? '' : 'e'}</div></td><td>${esc((c.bereiche || [c.bereich]).join(', '))}</td>
    <td><span class="st-${ST_KEY[c.status] || 'offen'}" style="display:flex;align-items:center;gap:6px;font-size:13px"><span class="dot"></span><span style="color:var(--fg)">${esc(stLabel(c.status))}</span></span></td>
    <td class="num">${c.naechste_frist ? `<span style="color:${tage(c.naechste_frist) < 0 ? 'var(--crit)' : tage(c.naechste_frist) <= 7 ? 'var(--warn)' : 'inherit'}">${dt(c.naechste_frist)}</span>` : '–'}</td><td class="num">${dt(c.angelegt_am)}</td>
-   <td><button class="iconbtn" data-act="v-del" data-id="${c.id}" title="Vorgang löschen" aria-label="${esc(c.titel)} löschen">${I('trash')}</button></td></tr>`).join('') || '<tr><td colspan="6" class="muted">Keine laufenden Vorgänge für diese Filter.</td></tr>'}
+   <td style="white-space:nowrap"><button class="iconbtn sm" data-act="v-edit" data-id="${c.id}" title="Vorgang bearbeiten" aria-label="${esc(c.titel)} bearbeiten">${I('draft')}</button><button class="iconbtn" data-act="v-del" data-id="${c.id}" title="Vorgang löschen" aria-label="${esc(c.titel)} löschen">${I('trash')}</button></td></tr>`).join('') || '<tr><td colspan="6" class="muted">Keine laufenden Vorgänge für diese Filter.</td></tr>'}
   </tbody></table></div>${erledigt ? `<p class="muted" style="margin:10px 2px 0;font-size:13px">Erledigte Vorgänge werden hier nicht mehr geführt; ihre Dokumente stehen im <a href="#archiv">Archiv</a>.</p>` : ''}`;
 }
 
 // ---------- Vorgangsakte ----------
-function paintAkte() { $('#view').innerHTML = vAkte(); mailTexte(); textPanes(); }
+function paintAkte() { $('#view').innerHTML = vAkte(); mailTexte(); textPanes(); drehungAnwenden(); }
 const teilName = id => D.akte.teilvorgaenge.find(t => t.id === id)?.name || '';
 const kontaktName = id => { const k = D.kontakte.find(x => x.id === id); return k ? (k.kurzname || k.name) : ''; };
 function visibleEntries() {
@@ -389,6 +436,7 @@ function preview() {
     <span class="sp"></span>
     <button class="iconbtn ${S.pvInfo ? 'on' : ''}" data-act="pv-info" title="Dokumentdetails" aria-label="Dokumentdetails" aria-pressed="${!!S.pvInfo}">${I('info')}</button>
     ${mail ? '' : `<button class="iconbtn" data-act="ocr-retry" data-doc="${d.id}" title="Text neu erkennen" aria-label="Text neu erkennen">${I('refresh')}</button>`}
+    ${mail ? '' : `<button class="iconbtn" data-act="drehen" data-grad="-90" data-doc="${d.id}" title="90° nach links drehen" aria-label="90 Grad nach links drehen">${I('rotl')}</button><button class="iconbtn" data-act="drehen" data-grad="90" data-doc="${d.id}" title="90° nach rechts drehen" aria-label="90 Grad nach rechts drehen">${I('rotr')}</button>`}
     <button class="iconbtn" data-act="doc-move" data-doc="${d.id}" title="In anderen Vorgang verschieben" aria-label="In anderen Vorgang verschieben">${I('move')}</button>
     <button class="iconbtn" data-act="doc-remove" data-doc="${d.id}" title="Aus diesem Vorgang löschen" aria-label="Aus diesem Vorgang löschen">${I('trash')}</button>
     <button class="iconbtn" data-act="view" data-doc="${d.id}" title="Groß öffnen" aria-label="Groß öffnen">${I('expand')}</button></div>${info}
@@ -644,23 +692,29 @@ function vFristen() {
 function vArchiv() {
   const q = S.aText.toLowerCase();
   const jahre = [...new Set(D.archiv.map(d => d.datum.slice(0, 4)))].sort().reverse();
-  const bereiche = [...new Set(D.archiv.map(d => d.bereich))].sort(cmp);
-  let list = D.archiv.filter(d => (S.aBereich === 'alle' || d.bereich === S.aBereich) && (S.aJahr === 'alle' || d.datum.startsWith(S.aJahr))
+  const bereiche = [...new Set(D.archiv.flatMap(d => d.bereiche || [d.bereich]))].sort(cmp);
+  const typName = d => (KIND[d.art] || ['Ohne Typ'])[0];
+  const typen = [...new Set([...['eingang', 'ausgang', 'entwurf', 'nachweis'].map(k => KIND[k][0]), ...D.archiv.map(typName)])];
+  if (S.aTyp && S.aTyp !== 'alle' && !typen.includes(S.aTyp)) S.aTyp = 'alle';
+  let list = D.archiv.filter(d => (S.aBereich === 'alle' || (d.bereiche || [d.bereich]).includes(S.aBereich)) && (S.aJahr === 'alle' || d.datum.startsWith(S.aJahr))
+    && (!S.aTyp || S.aTyp === 'alle' || typName(d) === S.aTyp)
     && (!S.aErledigt || d.vorgang_status === 'Erledigt') && (!q || [d.titel, d.dateiname, d.vorgang, d.absender].join(' ').toLowerCase().includes(q)));
   const so = S.sortA, key = {titel: d => d.titel, datum: d => d.datum, absender: d => d.absender || '~', vorgang: d => d.vorgang, groesse: d => d.groesse || 0}[so.k];
   list.sort((x, y) => (so.k === 'groesse' ? key(x) - key(y) : cmp(key(x), key(y))) * so.d);
-  const gkey = {vorgang: d => d.vorgang, bereich: d => d.bereich, absender: d => d.absender || 'Absender unbekannt', jahr: d => d.datum.slice(0, 4), keine: () => ''}[S.aGroup];
+  // Bei mehreren Bereichen erscheint ein Dokument in jeder seiner Bereichsgruppen
+  const gkey = {vorgang: d => [d.vorgang], bereich: d => d.bereiche || [d.bereich], typ: d => [typName(d)], absender: d => [d.absender || 'Absender unbekannt'], jahr: d => [d.datum.slice(0, 4)], keine: () => ['']}[S.aGroup];
   const groups = [];
-  for (const d of list) { const k = gkey(d); let g = groups.find(x => x.k === k); if (!g) groups.push(g = {k, items: []}); g.items.push(d); }
+  for (const d of list) for (const k of gkey(d)) { let g = groups.find(x => x.k === k); if (!g) groups.push(g = {k, items: []}); g.items.push(d); }
   if (S.aGroup === 'jahr') groups.sort((x, y) => cmp(y.k, x.k)); else if (S.aGroup !== 'keine') groups.sort((x, y) => cmp(x.k, y.k));
-  const row = d => `<tr data-act="arch-edit" data-doc="${d.id}" title="Klicken zum Bearbeiten"><td><div class="docname"><button class="docico" data-act="view" data-doc="${d.id}" title="Dokument ansehen" aria-label="${esc(d.titel)} ansehen">${I('doc')}</button><div style="min-width:0"><b>${esc(d.titel)}</b><div class="muted" style="font-size:12.5px">${esc(d.dateiname)}</div></div></div></td><td class="num">${dt(d.datum)}</td><td>${esc(d.absender || '–')}</td><td>${esc(d.vorgang)}<div class="muted" style="font-size:12.5px">${esc(d.bereich)}</div></td><td class="num">${groesse(d.groesse)}</td>
+  const row = d => `<tr data-act="arch-edit" data-doc="${d.id}" title="Klicken zum Bearbeiten"><td><div class="docname"><button class="docico" data-act="view" data-doc="${d.id}" title="Dokument ansehen" aria-label="${esc(d.titel)} ansehen">${I('doc')}</button><div style="min-width:0"><b>${esc(d.titel)}</b><div class="muted" style="font-size:12.5px">${esc(d.dateiname)}</div></div></div></td><td class="num">${dt(d.datum)}<div class="muted" style="font-size:12px">${esc(typName(d))}</div></td><td>${esc(d.absender || '–')}${(d.kontakte || []).length ? `<div class="muted" style="font-size:12.5px">+ ${esc(d.kontakte.map(k => k.name).join(', '))}</div>` : ''}</td><td>${esc(d.vorgang)}<div class="muted" style="font-size:12.5px">${esc((d.bereiche || [d.bereich]).join(', '))}</div></td><td class="num">${groesse(d.groesse)}</td>
     <td style="white-space:nowrap"><button class="iconbtn sm" data-act="arch-move" data-doc="${d.id}" data-v="${d.vorgang_id}" data-t="${esc(d.titel)}" title="In anderen Vorgang verschieben" aria-label="${esc(d.titel)} verschieben">${I('move')}</button><button class="iconbtn sm" data-act="arch-del" data-doc="${d.id}" data-v="${d.vorgang_id}" data-t="${esc(d.titel)}" title="Löschen" aria-label="${esc(d.titel)} löschen">${I('trash')}</button></td></tr>`;
   const thead = `<thead><tr>${sortTh('A','titel','Dokument')}${sortTh('A','datum','Datum')}${sortTh('A','absender','Absender')}${sortTh('A','vorgang','Vorgang')}${sortTh('A','groesse','Größe')}<th><span class="sr">Aktionen</span></th></tr></thead>`;
   return `<h1>Archiv</h1><p class="muted" style="margin:6px 0 0">${D.archiv.length} archivierte Dokumente. Wird ein Vorgang erledigt, verschwindet er aus „Vorgänge“; seine Dokumente stehen hier. ${list.length !== D.archiv.length ? `${list.length} passen zu den Filtern.` : ''}</p>
 
-  <div class="filters"><span class="lbl">Gruppieren</span>${[['vorgang','Vorgang'],['bereich','Bereich'],['absender','Absender'],['jahr','Jahr'],['keine','Keine']].map(([k, l]) => `<button class="fchip ${S.aGroup === k ? 'on' : ''}" data-act="agroup" data-id="${k}">${l}</button>`).join('')}
+  <div class="filters"><span class="lbl">Gruppieren</span>${[['vorgang','Vorgang'],['bereich','Bereich'],['typ','Typ'],['absender','Absender'],['jahr','Jahr'],['keine','Keine']].map(([k, l]) => `<button class="fchip ${S.aGroup === k ? 'on' : ''}" data-act="agroup" data-id="${k}">${l}</button>`).join('')}
    <span style="flex:1"></span><input class="inp" id="atext" type="search" placeholder="Im Archiv filtern" value="${esc(S.aText)}" style="max-width:240px" aria-label="Im Archiv filtern"></div>
   <div class="filters" style="margin-top:-6px"><span class="lbl">Bereich</span>${['alle', ...bereiche].map(b => `<button class="fchip ${S.aBereich === b ? 'on' : ''}" data-act="abereich" data-id="${esc(b)}">${b === 'alle' ? 'Alle' : esc(b)}</button>`).join('')}</div>
+  <div class="filters" style="margin-top:-6px"><span class="lbl">Typ</span>${['alle', ...typen].map(t => `<button class="fchip ${(S.aTyp || 'alle') === t ? 'on' : ''}" data-act="atyp" data-id="${esc(t)}">${t === 'alle' ? 'Alle' : esc(t)}</button>`).join('')}</div>
   <div class="filters" style="margin-top:-6px"><span class="lbl">Jahr</span>${['alle', ...jahre].map(j => `<button class="fchip ${S.aJahr === j ? 'on' : ''}" data-act="ajahr" data-id="${j}">${j === 'alle' ? 'Alle' : j}</button>`).join('')}
    <label class="chk" style="margin-left:12px"><input type="checkbox" id="aerl" ${S.aErledigt ? 'checked' : ''}>nur abgeschlossene Vorgänge</label></div>
   ${groups.length ? groups.map(g => `${S.aGroup !== 'keine' ? `<div class="agrp"><h3>${esc(g.k)}</h3><span class="muted num">${g.items.length}</span></div>` : ''}<div class="tbl-wrap" style="margin-bottom:16px"><table>${thead}<tbody>${g.items.map(row).join('')}</tbody></table></div>`).join('') : '<div class="panel muted">Keine Dokumente für diese Filter.</div>'}`;
@@ -726,9 +780,8 @@ function openViewer(docId, title) {
   const w = $('#viewer');
   w.innerHTML = `<div class="vbar"><b>${esc(title || 'Original')}</b><a class="btn sm" href="/api/documents/${docId}/original" target="_blank" rel="noopener">In neuem Fenster</a><button class="btn sm" data-act="vw-close">Schließen</button></div>
    <div class="vbody" style="padding:0">${(() => { const d = [...D.inbox, ...(D.akte?.dokumente || []), ...D.archiv].find(x => x.id === +docId);
-     return d && alsBild(d) ? `<div class="pvimgwrap full"><img class="pvimg" src="/api/documents/${docId}/original" alt="Original"></div>`
-       : `<iframe src="/api/documents/${docId}/original#view=Fit&amp;navpanes=0" title="Original" style="width:100%;height:100%;border:0;background:#fff"></iframe>`; })()}</div>`;
-  w.hidden = false; w.querySelector('[data-act=vw-close]').focus();
+     return originalHtml(d || {id: docId}, 'Original', true); })()}</div>`;
+  w.hidden = false; w.querySelector('[data-act=vw-close]').focus(); requestAnimationFrame(() => drehungAnwenden(w));
 }
 const closeViewer = () => { const w = $('#viewer'); w.hidden = true; w.innerHTML = ''; };
 const bereichSelect = (id, cur) => `<label>Bereich<select id="${id}">${D.groups.map(b => `<option ${b === cur ? 'selected' : ''}>${esc(b)}</option>`).join('')}</select></label>`;
@@ -797,10 +850,12 @@ function archivBearbeiten(docId) {
    <label>Dateiname<input id="m-an" maxlength="200" value="${esc(d.dateiname)}"></label>
    <div class="two"><label>Dokumentdatum<input id="m-ad" type="date" value="${esc(d.dokument_datum || d.datum || '')}"></label>
     <label>Absender<select id="m-ak"><option value="">– unbekannt –</option>${kontakte.map(k => `<option value="${k.id}" ${k.id === d.kontakt_id ? 'selected' : ''}>${esc(k.kurzname || k.name)}</option>`).join('')}</select></label></div>
+   <label>Bereiche <small class="muted">· leer = Bereiche des Vorgangs${d.system === 'ablage' ? '' : ` (${esc((d.bereiche || []).join(', '))})`}</small></label>${mehrfach('m-abs', D.groups.map(b => [b, b]), d.eigene_bereiche || [], 'Bereich')}
+   <label>Weitere Kontakte</label>${mehrfach('m-aks', kontaktOpt(), (d.kontakte || []).map(k => k.id), 'Kontakt')}
    <p class="muted" style="margin:0;font-size:13px">Vorgang: ${d.system === 'ablage' ? 'ohne Vorgang' : `${esc(d.vorgang)} · <button class="linkbtn" data-act="arch-akte" data-v="${d.vorgang_id}" data-doc="${d.id}">Akte öffnen</button>`} · <button class="linkbtn" data-act="view" data-doc="${d.id}">Dokument ansehen</button></p>
    <p class="muted" style="margin:0;font-size:12.5px">Die Originaldatei bleibt unverändert; der Dateiname gilt für Anzeige und Export.</p>`, async () => {
     const titel = val('m-at').trim(); if (!titel) { $('#m-at').focus(); return false; }
-    try { await api(`dokumente/${docId}/aendern`, {titel, dateiname: val('m-an').trim(), datum: val('m-ad') || null, kontakt_id: val('m-ak') ? +val('m-ak') : null}); closeModal(); toast('Gespeichert.'); await render(); }
+    try { await api(`dokumente/${docId}/aendern`, {titel, dateiname: val('m-an').trim(), datum: val('m-ad') || null, kontakt_id: val('m-ak') ? +val('m-ak') : null, bereiche: multiWert('m-abs'), kontakte: multiWert('m-aks').map(Number)}); closeModal(); toast('Gespeichert.'); await render(); }
     catch (e) { toast(e.message); }
     return false;
   }, 'Speichern');
@@ -878,6 +933,9 @@ document.addEventListener('click', async ev => {
   case 'beenden': modal('DocuManager beenden?', '<p style="margin:0">Die Anwendung wird beendet. Starten Sie sie wieder über das Programm „DocuManager“.</p>', async () => {
       closeModal(); try { await api('beenden', {}); } catch (e) { /* Server bereits weg */ }
       document.body.innerHTML = '<div style="display:grid;place-items:center;height:100vh;font:16px system-ui;color:#999;background:#111">DocuManager ist beendet. Sie können dieses Fenster schließen.</div>'; return false; }, 'Beenden'); break;
+  case 'drehen': { const doc = +el.dataset.doc; try { const r = await api(`dokumente/${doc}/drehen`, {grad: +el.dataset.grad});
+      for (const liste of [D.akte?.dokumente || [], D.archiv, D.inbox]) for (const x of liste) if (x.id === doc) x.drehung_manuell = r.drehung;
+      if (S.view === 'akte') paintAkte(); else drehungAnwenden(); } catch (e) { toast(e.message); } break; }
   case 'pv-info': S.pvInfo = !S.pvInfo; paintAkte(); break;
   case 'restore-file': $('#restoreinp').click(); break;
   case 'restore-list': wiederherstellenFrage(el.dataset.name, null); break;
@@ -894,9 +952,8 @@ document.addEventListener('click', async ev => {
   case 'new-vorgang': newVorgang(); break;
   case 'v-del': modal('Vorgang löschen?', '<p style="margin:0">Der Vorgang wird in den Papierkorb verschoben und lässt sich dort wiederherstellen.</p>', async () => {
       closeModal(); await act(() => api(`vorgang/${id}/loeschen`, {}), 'Vorgang in den Papierkorb verschoben.'); if (S.view === 'akte') location.hash = 'vorgaenge'; return false; }, 'In den Papierkorb'); break;
-  case 'v-edit': { const v = D.akte; modal('Vorgang bearbeiten', `<label>Titel<input id="m-vt" value="${esc(v.titel)}" maxlength="160"></label>${bereichSelect('m-vb', v.bereich)}
-      <div class="two"><label>Zuständig<input id="m-vz" value="${esc(v.zustaendig || '')}"></label><label>Nächster Schritt<input id="m-vn" value="${esc(v.naechster_schritt || '')}"></label></div><label>Beschreibung<textarea id="m-vd" rows="3">${esc(v.beschreibung)}</textarea></label>`, async () => {
-      closeModal(); await act(() => api('akte/' + v.id, {titel: val('m-vt'), bereich: val('m-vb'), zustaendig: val('m-vz'), naechster_schritt: val('m-vn'), beschreibung: val('m-vd')}), 'Vorgang gespeichert.'); return false; }); break; }
+  case 'v-edit': await vorgangBearbeiten(el.dataset.id ? +el.dataset.id : D.akte.id); break;
+  case 'multi-del': { const w = multiWert(el.dataset.multi).filter(x => x !== el.dataset.v); multiSetzen(el.dataset.multi, w); break; }
   case 'tab': S.tab = el.dataset.id; await render(); break;
   case 'teil': S.teil = el.dataset.id === 'all' ? 'all' : +el.dataset.id; S.entry = null; paintAkte(); break;
   case 'ktype': S.ktype = el.dataset.id; S.entry = null; paintAkte(); break;
@@ -949,6 +1006,7 @@ document.addEventListener('click', async ev => {
   case 'agroup': S.aGroup = el.dataset.id; $('#view').innerHTML = vArchiv(); break;
   case 'abereich': S.aBereich = el.dataset.id; $('#view').innerHTML = vArchiv(); break;
   case 'ajahr': S.aJahr = el.dataset.id; $('#view').innerHTML = vArchiv(); break;
+  case 'atyp': S.aTyp = el.dataset.id; $('#view').innerHTML = vArchiv(); break;
   case 'arch-edit': if (ev.target.closest('[data-act=view], [data-act=arch-move], [data-act=arch-del]')) break; archivBearbeiten(+el.dataset.doc); break;
   case 'arch-akte': closeModal(); S.v = +el.dataset.v; S.tab = 'chronik'; S.teil = 'all'; S.ktype = 'alle';
     S.entry = null; location.hash = 'akte-' + el.dataset.v; setTimeout(() => { const e = D.akte?.eintraege.find(x => x.dokument_id === +el.dataset.doc); if (e) { S.entry = e.id; paintAkte(); } }, 400); break;
@@ -996,6 +1054,7 @@ document.addEventListener('change', async ev => {
   if (el.id === 'mailflag') await act(() => api('mail/markierung', {markierung: +el.value}), 'Markierung gespeichert.');
   if (el.id === 'aerl') { S.aErledigt = el.checked; $('#view').innerHTML = vArchiv(); }
   if (el.id === 'fileinp') { const files = [...el.files]; el.value = ''; await importFiles(files, el.dataset.ziel === 'archiv' ? 'archiv' : el.dataset.ziel ? +el.dataset.ziel : null); }
+  if (el.classList.contains('madd') && el.value) { const id = el.dataset.multi; multiSetzen(id, [...multiWert(id), el.value]); }
   if (el.id === 'restoreinp') { const f = el.files[0]; el.value = ''; if (f) wiederherstellenFrage(null, f); }
   if (el.dataset.ib) { const d = draft[+el.dataset.id]; if (d) d[el.dataset.ib] = el.value; }
   if (el.dataset.fr) { const f = draft[+el.dataset.id]?.fristen[+el.dataset.i]; if (f) f[el.dataset.fr] = el.type === 'checkbox' ? el.checked : el.value; }
@@ -1074,7 +1133,8 @@ function heuteKnoepfe(root) {
     inp.dataset.heute = '1';
     const b = document.createElement('button');
     b.type = 'button'; b.className = 'heute'; b.dataset.act = 'heute'; b.textContent = 'Heute'; b.title = 'Heutiges Datum einsetzen';
-    inp.insertAdjacentElement('afterend', b);
+    const feld = document.createElement('span'); feld.className = 'datefeld';
+    inp.replaceWith(feld); feld.append(inp, b);
   }
 }
 new MutationObserver(() => heuteKnoepfe(document.body)).observe(document.body, {childList: true, subtree: true});
