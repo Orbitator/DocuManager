@@ -57,7 +57,7 @@ Die Prüfung auf dem Mac mit echter Texterkennung beschreibt [docs/TESTANLEITUNG
 
 ## Daten
 
-Alle Daten liegen in `Korrespondenz_Lokal/Daten/` und sind von Git ausgeschlossen.
+Alle Daten liegen in `Daten/` neben `app.py` – nach der Installation als Programm also in `~/DocuManager/Daten/`, sonst in `Korrespondenz_Lokal/Daten/`. Sie sind von Git ausgeschlossen.
 
 | Inhalt | Ort |
 |---|---|
