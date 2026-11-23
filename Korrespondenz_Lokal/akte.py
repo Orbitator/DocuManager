@@ -154,6 +154,114 @@ def migrate_3(db):
     db.execute("INSERT INTO suche(art,ref_id,seite,text) SELECT 'dokument',id,NULL,titel||' '||dateiname FROM dokument")
 
 
+def migrate_4(db):
+    """Posteingang: ein interner Vorgang trägt noch nicht zugeordnete Dokumente. Dokumentdatum je Dokument."""
+    for table, column in (("vorgang", "system"), ("dokument", "dokument_datum")):
+        if column not in _columns(db, table):
+            db.execute(f"ALTER TABLE {table} ADD COLUMN {column} TEXT")
+    db.execute("CREATE TABLE IF NOT EXISTS einstellung(schluessel TEXT PRIMARY KEY, wert TEXT NOT NULL)")
+    if not db.execute("SELECT 1 FROM vorgang WHERE system='posteingang'").fetchone():
+        db.execute("""INSERT INTO vorgang(titel,bereich,beschreibung,status,system)
+            VALUES('Posteingang','Anderes','Interner Vorgang für noch nicht zugeordnete Dokumente','Offen','posteingang')""")
+    db.execute("DELETE FROM suche WHERE art='vorgang' AND ref_id=(SELECT id FROM vorgang WHERE system='posteingang')")
+
+
+# --- Vorschläge für den Posteingang ------------------------------------------------------
+MONATE = {"januar": 1, "februar": 2, "märz": 3, "maerz": 3, "april": 4, "mai": 5, "juni": 6, "juli": 7,
+          "august": 8, "september": 9, "oktober": 10, "november": 11, "dezember": 12}
+_DATUM = re.compile(r"\b(\d{1,2})\.\s?(\d{1,2})\.\s?(\d{4}|\d{2})\b")
+_DATUM_LANG = re.compile(r"\b(\d{1,2})\.\s*(" + "|".join(MONATE) + r")\s+(\d{4})\b", re.I)
+_KEIN_DOKUMENTDATUM = re.compile(r"\b(bis|frist|fällig|zahlbar|spätestens|vom)\b", re.I)
+_ALLGEMEIN = {"versicherung", "gmbh", "steuerberatung", "ingenieurbüro", "autohaus", "finanzamt", "kanzlei",
+              "köln", "berlin", "mitte", "solutions"}
+_REF_LABEL = re.compile(r"(aktenzeichen|az\.|ihr zeichen|unser zeichen|schaden-?\s?(?:nummer|nr\.?)|"
+                        r"kunden-?\s?(?:nummer|nr\.?)|rechnungs-?\s?(?:nummer|nr\.?)|vertrags-?\s?(?:nummer|nr\.?)|"
+                        r"versicherungs-?\s?(?:nummer|nr\.?)|steuer-?\s?(?:nummer|nr\.?)|HR[AB])\s*[:.]?\s*"
+                        r"([A-Z0-9][A-Z0-9/.\-]{2,24})", re.I)
+
+
+def flach(text):
+    """Ohne Leerraum, Bindestriche und Trennzeichen – gleicht OCR-Eigenheiten aus (Idee aus Tender AI)."""
+    return re.sub(r"[\s\u00ad\-_–/.]+", "", (text or "").lower())
+
+
+def daten_in(zeile):
+    gefunden = []
+    for t, m, j in _DATUM.findall(zeile):
+        j = "20" + j if len(j) == 2 else j
+        try:
+            gefunden.append(date(int(j), int(m), int(t)).isoformat())
+        except ValueError:
+            pass
+    for t, mon, j in _DATUM_LANG.findall(zeile):
+        try:
+            gefunden.append(date(int(j), MONATE[mon.lower()], int(t)).isoformat())
+        except ValueError:
+            pass
+    return gefunden
+
+
+_PLZ_ORT = re.compile(r"\b\d{5}\s+[A-ZÄÖÜ][\wäöüß\-.]+")
+_TRENNER = re.compile(r"\s+[·•|–]\s+|\s+-\s+|\s{3,}|,\s+")
+_BEHOERDE = re.compile(
+    r"\b(Amtsgericht|Landgericht|Oberlandesgericht|Sozialgericht|Arbeitsgericht|Verwaltungsgericht|Finanzgericht|"
+    r"Registergericht|Finanzamt|Hauptzollamt|Jobcenter|Familienkasse|Bürgeramt|Standesamt|Ordnungsamt|"
+    r"Straßenverkehrsamt|Landratsamt|Stadtverwaltung|Gemeindeverwaltung)(?:e?s)?\s+"
+    r"([A-ZÄÖÜ][\wäöüß]+(?:[- ](?:an der |am |im )?[A-ZÄÖÜ][\wäöüß]+)?)")
+_ORGANISATION = re.compile(
+    r"\b(GmbH|AG|KG|OHG|e\.\s?V\.|eG|mbH|SE|Versicherung|Bank|Sparkasse|Kasse|Kanzlei|Rechtsanw|Steuerberat|"
+    r"Notar|Verwaltung|Stadtwerke|Werke|Verlag|Institut|Universität|Klinik|Praxis|Hausverwaltung|Vermietung|Amt)\b", re.I)
+_GRUSS = re.compile(r"^(mit freundlichen grüßen|freundliche grüße|mit besten grüßen|hochachtungsvoll|viele grüße)", re.I)
+
+
+def absender_erkennen(text, eigene=()):
+    """Sucht den Absender dort, wo er in einem Schreiben steht: Absenderzeile über der Anschrift,
+    Behörde oder Gericht im Briefkopf, Organisation in der ersten Zeile, Name unter der Grußformel.
+    Eigene Angaben (Einstellungen) werden nie als Absender vorgeschlagen."""
+    zeilen = [re.sub(r"\s+", " ", z).strip() for z in (text or "").splitlines() if z.strip()]
+    eigen = [flach(e) for e in eigene if len(flach(e)) >= 4]
+    ist_eigen = lambda z: any(e in flach(z) for e in eigen)
+    for z in zeilen[:15]:  # DIN-5008-Absenderzeile: „Firma · Straße 1 · 12345 Ort“
+        if _PLZ_ORT.search(z) and _TRENNER.search(z) and len(z) <= 160 and not ist_eigen(z):
+            teile = [t.strip() for t in _TRENNER.split(z) if t.strip()]
+            if len(teile) >= 2 and not re.match(r"^\d", teile[0]) and not _PLZ_ORT.search(teile[0]):
+                return {"name": teile[0], "anschrift": "\n".join(teile), "quelle": "Absenderzeile"}
+    for z in zeilen[:20]:  # Behörde oder Gericht, auch im Genitiv („des Amtsgerichts Rostock“)
+        m = _BEHOERDE.search(z)
+        if m and not ist_eigen(z):
+            return {"name": f"{m[1]} {m[2]}", "anschrift": None, "quelle": "Behörde im Briefkopf"}
+    for i, z in enumerate(zeilen[:6]):  # Organisation im Briefkopf, Anschrift aus den Folgezeilen
+        if _ORGANISATION.search(z) and len(z) <= 90 and not ist_eigen(z) and not re.match(r"^(betreff|ihr|unser)", z, re.I):
+            anschrift = [z]
+            for f in zeilen[i + 1:i + 4]:
+                anschrift.append(f)
+                if _PLZ_ORT.search(f):
+                    break
+            return {"name": z, "anschrift": "\n".join(anschrift) if _PLZ_ORT.search(anschrift[-1]) else None,
+                    "quelle": "Briefkopf"}
+    for i, z in enumerate(zeilen):  # Unter der Grußformel
+        if _GRUSS.match(z):
+            for f in zeilen[i + 1:i + 4]:
+                if _ORGANISATION.search(f) and not ist_eigen(f):
+                    return {"name": f, "anschrift": None, "quelle": "Grußformel"}
+    return None
+
+
+def dokumentdatum(text):
+    """Datum des Schreibens, nicht eine darin genannte Frist."""
+    zeilen = [re.sub(r"\s+", " ", z).strip() for z in text.splitlines() if z.strip()]
+    for z in zeilen[:30]:
+        if _KEIN_DOKUMENTDATUM.search(z):
+            continue
+        d = daten_in(z)
+        if d and (len(z) < 45 or re.match(r"datum", z, re.I) or re.search(r",\s*(den\s*)?\d", z)):
+            return d[0], "Datumszeile"
+    for z in zeilen:
+        if not re.search(r"\b(bis|frist|fällig|zahlbar|spätestens)\b", z, re.I) and daten_in(z):
+            return daten_in(z)[0], "erstes Datum im Text"
+    return None, None
+
+
 # --- Prüfhilfen ---------------------------------------------------------------------------
 def _text(value, label, limit, required=False):
     if value is None:
@@ -207,7 +315,7 @@ class Akte:
     def bereiche(self):
         with closing(self.connect()) as db:
             return [dict(r) for r in db.execute("""SELECT b.name, count(v.id) AS vorgaenge FROM bereich b
-                LEFT JOIN vorgang v ON v.bereich=b.name COLLATE NOCASE AND v.geloescht_am IS NULL
+                LEFT JOIN vorgang v ON v.bereich=b.name COLLATE NOCASE AND v.geloescht_am IS NULL AND v.system IS NULL
                 GROUP BY b.id ORDER BY b.id""")]
 
     def bereich_namen(self):
@@ -231,7 +339,8 @@ class Akte:
 
     def bereich_entfernen(self, name):
         with closing(self.connect()) as db, db:
-            if db.execute("SELECT 1 FROM vorgang WHERE bereich=? AND geloescht_am IS NULL", (name,)).fetchone():
+            if db.execute("SELECT 1 FROM vorgang WHERE bereich=? AND geloescht_am IS NULL AND system IS NULL",
+                          (name,)).fetchone():
                 raise ValueError("Der Bereich enthält noch Vorgänge.")
             if not db.execute("DELETE FROM bereich WHERE name=?", (name,)).rowcount:
                 raise ValueError("Bereich nicht gefunden.")
@@ -256,7 +365,7 @@ class Akte:
     # --- Vorgang ---------------------------------------------------------------------------
     def _vorgang(self, db, vorgang_id, deleted_ok=False):
         row = db.execute("SELECT * FROM vorgang WHERE id=?", (vorgang_id,)).fetchone()
-        if not row or (row["geloescht_am"] and not deleted_ok):
+        if not row or row["system"] or (row["geloescht_am"] and not deleted_ok):
             raise ValueError("Vorgang nicht gefunden.")
         return row
 
@@ -658,7 +767,8 @@ class Akte:
     def papierkorb(self):
         with closing(self.connect()) as db:
             teile = []
-            for typ, sql in (("vorgang", "SELECT id, titel AS bezeichnung, geloescht_am, NULL AS vorgang FROM vorgang"),
+            for typ, sql in (("vorgang", "SELECT id, titel AS bezeichnung, geloescht_am, NULL AS vorgang FROM vorgang "
+                                         "WHERE system IS NULL AND 1"),
                              ("dokument", "SELECT id, titel, geloescht_am, NULL FROM dokument"),
                              ("eintrag", "SELECT e.id, e.titel, e.geloescht_am, v.titel FROM eintrag e "
                                          "JOIN vorgang v ON v.id=e.vorgang_id"),
@@ -666,7 +776,8 @@ class Akte:
                                        "JOIN vorgang v ON v.id=f.vorgang_id"),
                              ("kontakt", "SELECT id, name, geloescht_am, NULL FROM kontakt")):
                 alias = "e." if typ == "eintrag" else "f." if typ == "frist" else ""
-                for r in db.execute(sql + f" WHERE {alias}geloescht_am IS NOT NULL"):
+                verbinder = " AND " if " WHERE " in sql else " WHERE "
+                for r in db.execute(sql + f"{verbinder}{alias}geloescht_am IS NOT NULL"):
                     teile.append({"typ": typ, "id": r[0], "bezeichnung": r[1], "geloescht_am": r[2], "vorgang": r[3]})
             return sorted(teile, key=lambda t: t["geloescht_am"], reverse=True)
 
@@ -689,6 +800,151 @@ class Akte:
             else:
                 db.execute("DELETE FROM frist_verlauf WHERE frist_id=?", (objekt_id,))
                 db.execute("DELETE FROM frist WHERE id=?", (objekt_id,))
+
+    # --- Posteingang ------------------------------------------------------------------------
+    def posteingang(self):
+        """Noch nicht zugeordnete Dokumente mit Vorschlägen für Datum, Absender, Referenz und Vorgang."""
+        with closing(self.connect()) as db:
+            rows = [dict(r) for r in db.execute("""SELECT d.id,d.titel,d.titel_quelle,d.titel_seite,d.dateiname,d.mime,
+                d.dateipfad,d.ocr_status,d.ocr_fehler,d.angelegt_am,d.dokument_datum FROM dokument d
+                JOIN vorgang v ON v.id=d.vorgang_id AND v.system='posteingang'
+                WHERE d.geloescht_am IS NULL ORDER BY d.id DESC""")]
+            for r in rows:
+                datei = self.store.uploads / r.pop("dateipfad")
+                r["groesse"] = datei.stat().st_size if datei.is_file() else None
+                seiten = [dict(s) for s in db.execute(
+                    "SELECT nummer,methode,text FROM dokumentseite WHERE dokument_id=? ORDER BY nummer", (r["id"],))]
+                r["seiten"] = seiten
+                r["vorschlag"] = self._vorschlag(db, "\n".join(s["text"] for s in seiten))
+            return rows
+
+    def eigene_angaben(self):
+        with closing(self.connect()) as db:
+            row = db.execute("SELECT wert FROM einstellung WHERE schluessel='eigene_angaben'").fetchone()
+            return row[0] if row else ""
+
+    def eigene_angaben_setzen(self, wert):
+        wert = _text(wert, "Eigene Angaben", 1000) or ""
+        with closing(self.connect()) as db, db:
+            db.execute("INSERT OR REPLACE INTO einstellung(schluessel,wert) VALUES('eigene_angaben',?)", (wert,))
+
+    def _vorschlag(self, db, text):
+        datum, datum_quelle = dokumentdatum(text)
+        eigene = (db.execute("SELECT wert FROM einstellung WHERE schluessel='eigene_angaben'").fetchone() or [""])[0]
+        absender = absender_erkennen(text, eigene.splitlines())
+        if absender:
+            # Ein erkannter Absender entscheidet. Bekannte Kontakte werden über den Namen zugeordnet.
+            name = flach(absender["name"])
+            absender["kontakt"] = None
+            for k in db.execute("SELECT id,name,kurzname FROM kontakt WHERE geloescht_am IS NULL"):
+                namen = [flach(k["name"]), flach(k["kurzname"] or "")]
+                if any(len(n) >= 4 and (n in name or name in n) for n in namen):
+                    absender["kontakt"] = dict(k)
+                    break
+            return self._vorschlag_mit(db, text, datum, datum_quelle, absender["kontakt"], absender)
+        unten, kopf = text.lower(), "\n".join(text.splitlines()[:15]).lower()
+        ganz, kopf_flach = flach(text), flach(kopf)
+        bester, punkte = None, 0
+        for k in db.execute("SELECT id,name,kurzname FROM kontakt WHERE geloescht_am IS NULL"):
+            p = 5 if k["name"].lower() in unten or flach(k["name"]) in ganz else 0
+            for w in re.split(r"[\s\-]+", (k["name"] + " " + (k["kurzname"] or "")).lower()):
+                if len(w) >= 4 and w not in _ALLGEMEIN:
+                    p += 3 if (w in kopf or flach(w) in kopf_flach) else 1 if w in unten else 0
+            for (mail,) in db.execute("SELECT email FROM kontakt_abteilung WHERE kontakt_id=? AND email LIKE '%@%'",
+                                      (k["id"],)):
+                if mail.split("@", 1)[1].lower() in unten:
+                    p += 4
+            if p > punkte:
+                bester, punkte = k, p
+        kontakt = dict(bester) if bester and punkte >= 3 else None
+        return self._vorschlag_mit(db, text, datum, datum_quelle, kontakt, None)
+
+    def _vorschlag_mit(self, db, text, datum, datum_quelle, kontakt, absender):
+        ganz = flach(text)
+        vorschlaege, gesehen = [], set()
+        for r in db.execute("""SELECT r.bezeichnung,r.wert,r.vorgang_id,v.titel FROM referenz r JOIN vorgang v
+            ON v.id=r.vorgang_id WHERE v.geloescht_am IS NULL AND v.system IS NULL"""):
+            if len(flach(r["wert"])) >= 4 and flach(r["wert"]) in ganz and r["vorgang_id"] not in gesehen:
+                gesehen.add(r["vorgang_id"])
+                vorschlaege.append({"vorgang_id": r["vorgang_id"], "titel": r["titel"],
+                                    "grund": f"{r['bezeichnung']} {r['wert']} im Text"})
+        if kontakt:
+            for r in db.execute("""SELECT v.id,v.titel FROM beteiligter b JOIN vorgang v ON v.id=b.vorgang_id
+                WHERE b.kontakt_id=? AND v.geloescht_am IS NULL ORDER BY v.id DESC""", (kontakt["id"],)):
+                if r["id"] not in gesehen:
+                    gesehen.add(r["id"])
+                    vorschlaege.append({"vorgang_id": r["id"], "titel": r["titel"],
+                                        "grund": f"{kontakt['kurzname'] or kontakt['name']} ist beteiligt"})
+        referenz = next(((m[0], m[1].rstrip(".-")) for m in _REF_LABEL.findall(text) if re.search(r"\d", m[1])), None)
+        return {"datum": datum, "datum_quelle": datum_quelle, "kontakt": kontakt, "absender": absender,
+                "referenz": {"bezeichnung": referenz[0], "wert": referenz[1]} if referenz else None,
+                "vorgaenge": vorschlaege[:4]}
+
+    def zuordnen(self, dokument_id, data):
+        """Ordnet ein Dokument aus dem Posteingang einem Vorgang zu und legt den Eingang in der Chronik an."""
+        vorgang_id = _id(data.get("vorgang_id"), "Vorgang")
+        if not vorgang_id:
+            raise ValueError("Bitte einen Vorgang wählen.")
+        with closing(self.connect()) as db, db:
+            d = db.execute("""SELECT d.* FROM dokument d JOIN vorgang v ON v.id=d.vorgang_id AND v.system='posteingang'
+                WHERE d.id=? AND d.geloescht_am IS NULL""", (dokument_id,)).fetchone()
+            if not d:
+                raise ValueError("Das Dokument liegt nicht im Posteingang.")
+            self._vorgang(db, vorgang_id)
+            teile = self._teile(db, vorgang_id, data.get("teile"))
+            titel = _text(data.get("titel"), "Titel", 160) or d["titel"]
+            datum = _date(data.get("datum"), "Dokumentdatum", False)
+            kontakt = _id(data.get("kontakt_id"), "Absender")
+            neu = data.get("neuer_absender")
+            if neu and not kontakt:  # Erkannten Absender als Kontakt im Adressbuch anlegen
+                if not isinstance(neu, dict):
+                    raise ValueError("Absender: ungültige Angabe.")
+                kontakt = db.execute("INSERT INTO kontakt(name) VALUES(?)",
+                                     (_text(neu.get("name"), "Absender", 160, True),)).lastrowid
+                self._abteilung(db, kontakt, {"anschrift": neu.get("anschrift")})
+            db.execute("UPDATE dokument SET vorgang_id=?, dokument_datum=? WHERE id=?", (vorgang_id, datum, dokument_id))
+            if titel != d["titel"]:
+                db.execute("UPDATE dokument SET titel=?, titel_seite=NULL, titel_quelle='Manuell' WHERE id=?",
+                           (titel, dokument_id))
+            db.execute("INSERT OR IGNORE INTO dokument_vorgang(dokument_id,vorgang_id) VALUES(?,?)",
+                       (dokument_id, vorgang_id))
+            if kontakt and not db.execute("SELECT 1 FROM beteiligter WHERE vorgang_id=? AND kontakt_id=?",
+                                          (vorgang_id, kontakt)).fetchone():
+                db.execute("INSERT INTO beteiligter(vorgang_id,kontakt_id,rolle) VALUES(?,?,'')", (vorgang_id, kontakt))
+            eid = db.execute("""INSERT INTO eintrag(vorgang_id,art,titel,ereignis_datum,richtung,kontakt_id,dokument_id)
+                VALUES(?,?,?,?,?,?,?)""", (vorgang_id, "eingang", titel, datum or self.today(),
+                                           "von" if kontakt else None, kontakt, dokument_id)).lastrowid
+            db.executemany("INSERT INTO eintrag_teil VALUES(?,?)", ((eid, t) for t in teile))
+            return eid
+
+    def archiv(self):
+        """Alle abgelegten Dokumente mit Vorgang, Bereich, Absender und Daten – Grundlage der Archivansicht."""
+        with closing(self.connect()) as db:
+            rows = [dict(r) for r in db.execute("""
+                SELECT d.id, d.titel, d.dateiname, d.mime, d.dateipfad, d.ocr_status, d.angelegt_am, d.dokument_datum,
+                       dv.vorgang_id, v.titel AS vorgang, v.bereich, v.status AS vorgang_status,
+                       (SELECT count(*) FROM dokumentseite s WHERE s.dokument_id=d.id) AS seiten,
+                       (SELECT e.art FROM eintrag e WHERE e.dokument_id=d.id AND e.vorgang_id=dv.vorgang_id
+                          AND e.geloescht_am IS NULL ORDER BY e.id LIMIT 1) AS art,
+                       (SELECT k.name FROM eintrag e JOIN kontakt k ON k.id=e.kontakt_id WHERE e.dokument_id=d.id
+                          AND e.geloescht_am IS NULL ORDER BY e.id LIMIT 1) AS absender,
+                       (SELECT min(e.ereignis_datum) FROM eintrag e WHERE e.dokument_id=d.id AND e.geloescht_am IS NULL)
+                          AS ereignis_datum
+                FROM dokument d JOIN dokument_vorgang dv ON dv.dokument_id=d.id JOIN vorgang v ON v.id=dv.vorgang_id
+                WHERE d.geloescht_am IS NULL AND v.geloescht_am IS NULL AND v.system IS NULL
+                ORDER BY d.id DESC""")]
+            for r in rows:
+                datei = self.store.uploads / r.pop("dateipfad")
+                r["groesse"] = datei.stat().st_size if datei.is_file() else None
+                r["datum"] = r["dokument_datum"] or r["ereignis_datum"] or r["angelegt_am"][:10]
+            return rows
+
+    def fristen_alle(self):
+        with closing(self.connect()) as db:
+            return [dict(r) for r in db.execute("""SELECT f.*, v.titel AS vorgang, t.name AS teilvorgang
+                FROM frist f JOIN vorgang v ON v.id=f.vorgang_id LEFT JOIN teilvorgang t ON t.id=f.teilvorgang_id
+                WHERE f.geloescht_am IS NULL AND v.geloescht_am IS NULL
+                ORDER BY f.erledigt_am IS NOT NULL, f.faellig_am""")]
 
     # --- Suche -----------------------------------------------------------------------------
     def suche(self, begriff, limit=30):
@@ -745,7 +1001,7 @@ class Akte:
                 WHERE r.id=? AND v.geloescht_am IS NULL""", (ref,)).fetchone()
         else:
             row = db.execute("""SELECT NULL AS dokument_id, titel, id AS vorgang_id, titel AS vorgang FROM vorgang
-                WHERE id=? AND geloescht_am IS NULL""", (ref,)).fetchone()
+                WHERE id=? AND geloescht_am IS NULL AND system IS NULL""", (ref,)).fetchone()
         return dict(row) if row else None
 
 
@@ -760,6 +1016,12 @@ def _route_table():
         ("GET", r"/api/kontakte/dubletten", lambda a, m, d: {"dubletten": a.moegliche_dubletten(d.get("name"))}),
         ("GET", r"/api/papierkorb", lambda a, m, d: {"eintraege": a.papierkorb()}),
         ("GET", r"/api/suche", lambda a, m, d: {"treffer": a.suche(d.get("q"))}),
+        ("GET", r"/api/posteingang", lambda a, m, d: {"dokumente": a.posteingang()}),
+        ("GET", r"/api/fristen", lambda a, m, d: {"fristen": a.fristen_alle()}),
+        ("GET", r"/api/archiv", lambda a, m, d: {"dokumente": a.archiv()}),
+        ("GET", r"/api/einstellungen", lambda a, m, d: {"eigene_angaben": a.eigene_angaben()}),
+        ("POST", r"/api/einstellungen", lambda a, m, d: a.eigene_angaben_setzen(d.get("eigene_angaben"))),
+        ("POST", r"/api/posteingang/(\d+)/zuordnen", lambda a, m, d: {"id": a.zuordnen(i(m[1]), d)}),
         ("POST", r"/api/akte/(\d+)", lambda a, m, d: a.vorgang_aendern(i(m[1]), d)),
         ("POST", r"/api/akte/(\d+)/schlagwoerter", lambda a, m, d: {"schlagwoerter": a.schlagwoerter_setzen(i(m[1]), d.get("namen"))}),
         ("POST", r"/api/akte/(\d+)/teilvorgaenge", lambda a, m, d: {"id": a.teilvorgang_anlegen(i(m[1]), d)}),
@@ -967,3 +1229,121 @@ def test_akte(store):
     assert route_akte(akte, "GET", "/api/unbekannt", None) is None
     result, _ = route_akte(akte, "GET", "/api/suche", {"q": "KV 778812"})
     assert result["treffer"][0]["vorgang_id"] == kia
+
+
+def test_posteingang(store):
+    """Posteingang: Import ohne Vorgang, Vorschläge, Zuordnung mit Chronik-Eintrag."""
+    from contextlib import closing as _closing
+    akte = Akte(store, today=lambda: "2026-11-23")
+    vorgang = store.create_case("Unitask – Rechnungsklärung", "Versicherungen", "")
+    teil = akte.teilvorgang_anlegen(vorgang, {"name": "Rechnung"})
+    kontakt = akte.kontakt_anlegen({"name": "Unitask GmbH", "kurzname": "Unitask",
+                                    "abteilungen": [{"email": "buchhaltung@unitask.example"}]})
+    akte.beteiligter_setzen(vorgang, kontakt, "Vertragspartner")
+    akte.referenz_anlegen(vorgang, {"bezeichnung": "Kundennr.", "wert": "UT-30418"})
+    raw = b"%PDF-1.4\nPosteingang-Test"
+    doc, neu = store.import_document(None, "Rechnung_korrigiert.pdf", raw)
+    assert neu and store.import_document(None, "Kopie.pdf", raw) == (doc, False)
+    assert doc not in [d["id"] for c in store.list_cases() for d in store.case_documents(c["id"])]
+    assert all(c["titel"] != "Posteingang" for c in store.list_cases())
+    with _closing(store.connect()) as db, db:
+        db.execute("INSERT INTO dokumentseite(dokument_id,nummer,methode,text) VALUES(?,?,?,?)", (doc, 1, "pdf",
+                   "Unitask GmbH · Friedrichstraße 140\nKundennummer: UT 30418\nBerlin, 22.11.2026\n"
+                   "Betreff: Korrigierte Rechnung\nGuten Tag,\nzahlbar bis 06.12.2026."))
+    eingang = akte.posteingang()
+    assert [e["id"] for e in eingang] == [doc] and eingang[0]["groesse"] == len(raw)
+    v = eingang[0]["vorschlag"]
+    assert v["datum"] == "2026-11-22" and v["datum_quelle"] == "Datumszeile", v
+    assert v["kontakt"]["id"] == kontakt, v
+    assert v["vorgaenge"][0]["vorgang_id"] == vorgang and "UT-30418" in v["vorgaenge"][0]["grund"], v
+    try:
+        akte.zuordnen(doc, {})
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("Zuordnung ohne Vorgang wurde angenommen.")
+    eintrag = akte.zuordnen(doc, {"vorgang_id": vorgang, "teile": [teil], "titel": "Korrigierte Rechnung",
+                                  "datum": v["datum"], "kontakt_id": kontakt})
+    assert akte.posteingang() == []
+    a = akte.akte(vorgang)
+    assert [d["id"] for d in a["dokumente"]] == [doc] and a["dokumente"][0]["titel"] == "Korrigierte Rechnung"
+    e = [x for x in a["eintraege"] if x["id"] == eintrag][0]
+    assert e["art"] == "eingang" and e["ereignis_datum"] == "2026-11-22" and e["teile"] == [teil]
+    assert any(t["dokument_id"] == doc for t in akte.suche("Korrigierte Rechnung"))
+    try:
+        akte.zuordnen(doc, {"vorgang_id": vorgang})
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("Bereits zugeordnetes Dokument wurde erneut zugeordnet.")
+    f = akte.frist_anlegen(vorgang, {"art": "wiedervorlage", "titel": "Nachfassen", "faellig_am": "2026-12-03"})
+    assert any(x["id"] == f and x["vorgang"] == "Unitask – Rechnungsklärung" for x in akte.fristen_alle())
+    assert dokumentdatum("Ihr Schreiben vom 02.11.2026\nKöln, den 18. November 2026") == ("2026-11-18", "Datumszeile")
+
+
+def test_absender(store):
+    """Der Absender kommt aus dem Briefkopf, nicht aus einer beliebigen Erwähnung im Text."""
+    store = type(store)(store.data / "Absendertest", store.ocr)  # eigene, leere Datenbank
+    akte = Akte(store, today=lambda: "2026-11-23")
+    akte.eigene_angaben_setzen("A. Mustermann\nLindenweg 4\n50733 Köln")
+    hr = ("Handelsregister B des Amtsgerichts Rostock\nAbteilung B\nAusdruck\nNummer der Firma: HRB 11893\n"
+          "1. Anzahl der bisherigen Eintragungen\n2. a) Firma: unitask solutions GmbH\nb) Sitz: Rostock")
+    assert absender_erkennen(hr)["name"] == "Amtsgericht Rostock"
+    brief = ("Allsicher Versicherung AG · Rheinuferstraße 12 · 50668 Köln\nA. Mustermann\nLindenweg 4\n"
+             "50733 Köln\nKöln, 18.11.2026\nIhr Schadenfall\nSehr geehrte Damen und Herren,\n"
+             "die Unitask GmbH hat uns informiert.")
+    a = absender_erkennen(brief, ["A. Mustermann", "Lindenweg 4"])
+    assert a["name"] == "Allsicher Versicherung AG" and "50668 Köln" in a["anschrift"], a
+    eigener = "A. Mustermann · Lindenweg 4 · 50733 Köln\nUnitask GmbH\nFriedrichstraße 140\n10117 Berlin\nWiderspruch"
+    a = absender_erkennen(eigener, ["A. Mustermann"])
+    assert a is None or "Mustermann" not in a["name"], a
+    kopf = "Stadtwerke Rostock AG\nSchmarler Damm 5\n18069 Rostock\nIhre Jahresabrechnung"
+    a = absender_erkennen(kopf)
+    assert a["name"] == "Stadtwerke Rostock AG" and a["anschrift"].endswith("18069 Rostock"), a
+
+    # Posteingang: bekannter Kontakt wird über den Absendernamen erkannt, Erwähnungen zählen nicht
+    vorgang = store.create_case("Kia-Schaden", "Versicherungen", "")
+    allsicher = akte.kontakt_anlegen({"name": "Allsicher Versicherung AG", "kurzname": "Allsicher"})
+    unitask = akte.kontakt_anlegen({"name": "Unitask Solutions GmbH", "kurzname": "Unitask"})
+    akte.beteiligter_setzen(vorgang, allsicher, "Versicherung")
+    from contextlib import closing as _closing
+    doc, _ = store.import_document(None, "Schreiben.pdf", b"%PDF-1.4\nAbsendertest")
+    with _closing(store.connect()) as db, db:
+        db.execute("INSERT INTO dokumentseite VALUES(?,?,?,?)", (doc, 1, "ocr", brief))
+    v = [d for d in akte.posteingang() if d["id"] == doc][0]["vorschlag"]
+    assert v["kontakt"]["id"] == allsicher and v["absender"]["quelle"] == "Absenderzeile", v
+    assert v["vorgaenge"][0]["vorgang_id"] == vorgang
+
+    # Unbekannter Absender: wird beim Zuordnen als neuer Kontakt mit Anschrift angelegt
+    doc2, _ = store.import_document(None, "Registerauszug.pdf", b"%PDF-1.4\nRegister")
+    with _closing(store.connect()) as db, db:
+        db.execute("INSERT INTO dokumentseite VALUES(?,?,?,?)", (doc2, 1, "pdf", hr))
+    v = [d for d in akte.posteingang() if d["id"] == doc2][0]["vorschlag"]
+    assert v["absender"]["name"] == "Amtsgericht Rostock" and v["kontakt"] is None, v
+    assert v["kontakt"] is None or v["kontakt"]["id"] != unitask
+    akte.zuordnen(doc2, {"vorgang_id": vorgang, "neuer_absender": {"name": "Amtsgericht Rostock",
+                                                                     "anschrift": "Amtsgericht Rostock\nZochstraße 13\n18057 Rostock"}})
+    neu = [k for k in akte.kontakte() if k["name"] == "Amtsgericht Rostock"][0]
+    assert neu["abteilungen"][0]["anschriften"][0]["zeilen"].endswith("18057 Rostock")
+    assert any(b["kontakt_id"] == neu["id"] for b in akte.akte(vorgang)["beteiligte"])
+
+
+def test_archiv(store):
+    """Archiv: alle zugeordneten Dokumente, je Vorgang eine Zeile, mit Absender und Datum."""
+    store = type(store)(store.data / "Archivtest", store.ocr)
+    akte = Akte(store, today=lambda: "2026-11-23")
+    a = store.create_case("Kia-Schaden", "Versicherungen", "")
+    b = store.create_case("Steuer 2025", "Finanzamt und Steuern", "")
+    k = akte.kontakt_anlegen({"name": "Allsicher Versicherung AG"})
+    doc, _ = store.import_document(a, "Gutachten.pdf", b"%PDF-1.4\nArchiv")
+    akte.eintrag_anlegen(a, {"art": "eingang", "titel": "Gutachten", "datum": "2026-11-10", "dokument_id": doc,
+                             "kontakt_id": k, "richtung": "von"})
+    store.import_document(b, "Gutachten.pdf", b"%PDF-1.4\nArchiv")  # verknüpft
+    inbox, _ = store.import_document(None, "Neu.pdf", b"%PDF-1.4\nNoch im Posteingang")
+    rows = akte.archiv()
+    assert sorted(r["vorgang"] for r in rows) == ["Kia-Schaden", "Steuer 2025"]
+    assert all(r["id"] == doc for r in rows) and inbox not in [r["id"] for r in rows]
+    kia = [r for r in rows if r["vorgang_id"] == a][0]
+    assert kia["absender"] == "Allsicher Versicherung AG" and kia["datum"] == "2026-11-10" and kia["art"] == "eingang"
+    akte.loeschen("dokument", doc)
+    assert akte.archiv() == []

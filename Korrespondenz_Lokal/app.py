@@ -25,14 +25,15 @@ from pathlib import Path
 from threading import Event, Lock, Thread
 from urllib.parse import parse_qsl, unquote, urlsplit
 
-from akte import Akte, ROUTES as AKTE_ROUTES, STATUSES, migrate_3, route_akte, test_akte
+from akte import (Akte, ROUTES as AKTE_ROUTES, STATUSES, migrate_3, migrate_4, route_akte, test_absender, test_akte,
+                  test_archiv, test_posteingang)
 from chat_sync import ChatSync, MAX_EXPORT, test_chat_sync
 
 ROOT = Path(__file__).resolve().parent
 PORT = 8765
 MAX_UPLOAD = 25 * 1024 * 1024
 MIN_MACOS = "14.0"
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 OCR_WAITING = "Wartet auf Texterkennung"
 OCR_RUNNING = "Texterkennung läuft"
 log = logging.getLogger("korrespondenz")
@@ -169,7 +170,7 @@ def migrate_2(db):
         db.execute("ALTER TABLE dokument ADD COLUMN ocr_aktualisiert_am TEXT")
 
 
-MIGRATIONS = ((1, migrate_1), (2, migrate_2), (3, migrate_3))
+MIGRATIONS = ((1, migrate_1), (2, migrate_2), (3, migrate_3), (4, migrate_4))
 
 
 class Store:
@@ -232,7 +233,7 @@ class Store:
         with closing(self.connect()) as db:
             return [dict(row) for row in db.execute("""SELECT v.*, (SELECT count(*) FROM dokument_vorgang dv
                 JOIN dokument d ON d.id=dv.dokument_id WHERE dv.vorgang_id=v.id AND d.geloescht_am IS NULL) AS dokumente
-                FROM vorgang v WHERE v.geloescht_am IS NULL ORDER BY v.id DESC""")]
+                FROM vorgang v WHERE v.geloescht_am IS NULL AND v.system IS NULL ORDER BY v.id DESC""")]
 
     def groups(self):
         with closing(self.connect()) as db:
@@ -389,16 +390,27 @@ class Store:
         if self.worker:
             self.queue.put(doc_id)
 
+    def inbox_id(self, db):
+        """Interner Vorgang, der noch nicht zugeordnete Dokumente des Posteingangs trägt."""
+        return db.execute("SELECT id FROM vorgang WHERE system='posteingang'").fetchone()[0]
+
     def import_document(self, case_id, name, raw):
+        """Legt ein Original ab. Ohne Vorgang (case_id=None) landet es im Posteingang."""
         name = unicodedata.normalize("NFC", name)
         if not name or len(name) > 240 or any(c in name for c in "/\\") or any(ord(c) < 32 for c in name):
             raise ValueError("Ungültiger Dateiname.")
         suffix = file_type(name, raw)
         digest = hashlib.sha256(raw).hexdigest()
+        inbox = case_id is None
         with closing(self.connect()) as db:
-            if not db.execute("SELECT 1 FROM vorgang WHERE id=?", (case_id,)).fetchone():
-                raise ValueError("Vorgang nicht gefunden.")
-            if db.execute("SELECT geloescht_am FROM vorgang WHERE id=?", (case_id,)).fetchone()[0]:
+            if inbox:
+                case_id = self.inbox_id(db)
+                same = db.execute("SELECT id FROM dokument WHERE sha256=? AND geloescht_am IS NULL ORDER BY id",
+                                  (digest,)).fetchone()
+                if same:  # Identische Datei liegt schon vor: keine zweite Kopie im Posteingang
+                    return same["id"], False
+            row = db.execute("SELECT geloescht_am, system FROM vorgang WHERE id=?", (case_id,)).fetchone()
+            if not row or row["geloescht_am"] or (row["system"] and not inbox):
                 raise ValueError("Vorgang nicht gefunden.")
             existing = db.execute("""SELECT d.id FROM dokument d JOIN dokument_vorgang dv ON dv.dokument_id=d.id
                 WHERE dv.vorgang_id=? AND d.sha256=?""", (case_id, digest)).fetchone()
@@ -430,8 +442,10 @@ class Store:
                 dateipfad,sha256,ocr_status) VALUES(?,?,?,?,?,?,?,?,?)""",
                 (case_id, name, Path(name).stem[:160], None, "Dateiname", TYPES[suffix], path.name, digest,
                  OCR_WAITING)).lastrowid
-            db.execute("INSERT INTO dokument_vorgang(dokument_id,vorgang_id) VALUES(?,?)", (doc_id, case_id))
-        log.info("Dokument %s in Vorgang %s abgelegt (%s Bytes).", doc_id, case_id, len(raw))
+            if not inbox:
+                db.execute("INSERT INTO dokument_vorgang(dokument_id,vorgang_id) VALUES(?,?)", (doc_id, case_id))
+        log.info("Dokument %s %s abgelegt (%s Bytes).", doc_id,
+                 "im Posteingang" if inbox else f"in Vorgang {case_id}", len(raw))
         if self.worker:
             self.queue.put(doc_id)
         return doc_id, True
@@ -456,7 +470,7 @@ class Scanner:
             self._finish(self.job["id"])
             if self.job["result"] is None:
                 raise ValueError("Der macOS-Scandialog ist bereits geöffnet.")
-        if not any(item["id"] == case_id for item in self.store.list_cases()):
+        if case_id is not None and not any(item["id"] == case_id for item in self.store.list_cases()):
             raise ValueError("Vorgang nicht gefunden.")
         binary = build_scanner()
         if not binary:
@@ -815,6 +829,9 @@ def self_test(ocr=None, image=None):
         assert not scan_folder.exists()
         test_chat_sync(store)
         test_akte(store)
+        test_posteingang(store)
+        test_absender(store)
+        test_archiv(store)
         with closing(store.connect()) as db:
             assert db.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
             assert not db.execute("PRAGMA foreign_key_check").fetchall()
