@@ -1,0 +1,51 @@
+[
+  {
+    "id": "synthetischer-chat-001",
+    "title": "Rechtsberatung · Testfall",
+    "current_node": "a01",
+    "create_time": 1760000000,
+    "update_time": 1760000001,
+    "mapping": {
+      "u01": {
+        "parent": null,
+        "message": {
+          "id": "u01",
+          "author": {
+            "role": "user"
+          },
+          "create_time": 1760000000,
+          "content": {
+            "content_type": "text",
+            "parts": [
+              "Bitte prüfe die rein synthetischen Musterunterlagen."
+            ]
+          },
+          "metadata": {
+            "attachments": [
+              {
+                "id": "file-testbeleg01",
+                "name": "Musterbeleg.pdf"
+              }
+            ]
+          }
+        }
+      },
+      "a01": {
+        "parent": "u01",
+        "message": {
+          "id": "a01",
+          "author": {
+            "role": "assistant"
+          },
+          "create_time": 1760000001,
+          "content": {
+            "content_type": "text",
+            "parts": [
+              "Die Musterunterlagen wurden für den Importtest erfasst."
+            ]
+          }
+        }
+      }
+    }
+  }
+]
