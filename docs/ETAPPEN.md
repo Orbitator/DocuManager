@@ -89,7 +89,15 @@ Teil 2 (umgesetzt, Schemaversion 7):
 - Chat-Notizen als eigener Menüpunkt; importierte ChatGPT-Unterhaltungen lassen sich in Vorgänge übernehmen.
 - Abschlussprüfung bei „Erledigt“: offene Fristen, nicht versendete Entwürfe, fehlende Originale, ungeprüfte Chats.
 - Archiv: Dokumente werden erst archiviert, wenn ihr Vorgang oder alle ihre Teilvorgänge auf „Erledigt“ stehen.
-  Wird ein Vorgang wieder geöffnet, verlässt das Dokument das Archiv.
+  Ein erledigter Vorgang verschwindet aus „Vorgänge“, der Übersicht, allen Auswahllisten und den Vorschlägen
+  im Posteingang; nach dem Abschluss springt die Anwendung ins Archiv. Chronik, Briefe und Fristen werden dabei
+  nicht vernichtet: Über ein archiviertes Dokument lässt sich die Akte weiterhin öffnen und bei Bedarf
+  wieder aufnehmen (Status ändern).
+- Scannen: Der Scan-Dialog sucht auch Netzwerkscanner (Bonjour/AirScan) und bietet „Digitale Bilder“ als Ausweg.
+  Zusätzlich überwacht die Anwendung den Ordner `~/Documents/DocuManager Scans`: Was die Scanner-Software dort
+  ablegt, kommt nach wenigen Sekunden in den Posteingang und wird nach „Übernommen“ verschoben.
+- Kacheln im Posteingang zeigen ein echtes Vorschaubild der ersten Seite, aufrecht gedreht (auf dem Mac mit `sips`,
+  zwischengespeichert in `Daten/Vorschau/`).
 - Aktenexport als ZIP mit Chronik.pdf, akte.json und ausgewählten Originalen.
 - Datensicherung unter Einstellungen: erstellen, prüfen, herunterladen; Wiederherstellen im Terminal mit
   `python3 app.py --wiederherstellen <Datei.zip>`.

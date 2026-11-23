@@ -898,14 +898,14 @@ class Akte:
         ganz = flach(text)
         vorschlaege, gesehen = [], set()
         for r in db.execute("""SELECT r.bezeichnung,r.wert,r.vorgang_id,v.titel FROM referenz r JOIN vorgang v
-            ON v.id=r.vorgang_id WHERE v.geloescht_am IS NULL AND v.system IS NULL"""):
+            ON v.id=r.vorgang_id WHERE v.geloescht_am IS NULL AND v.system IS NULL AND v.status<>'Erledigt'"""):
             if len(flach(r["wert"])) >= 4 and flach(r["wert"]) in ganz and r["vorgang_id"] not in gesehen:
                 gesehen.add(r["vorgang_id"])
                 vorschlaege.append({"vorgang_id": r["vorgang_id"], "titel": r["titel"],
                                     "grund": f"{r['bezeichnung']} {r['wert']} im Text"})
         if kontakt:
             for r in db.execute("""SELECT v.id,v.titel FROM beteiligter b JOIN vorgang v ON v.id=b.vorgang_id
-                WHERE b.kontakt_id=? AND v.geloescht_am IS NULL ORDER BY v.id DESC""", (kontakt["id"],)):
+                WHERE b.kontakt_id=? AND v.geloescht_am IS NULL AND v.status<>'Erledigt' ORDER BY v.id DESC""", (kontakt["id"],)):
                 if r["id"] not in gesehen:
                     gesehen.add(r["id"])
                     vorschlaege.append({"vorgang_id": r["id"], "titel": r["titel"],

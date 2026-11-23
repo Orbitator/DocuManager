@@ -110,16 +110,26 @@ Erst wenn Schritt 2 bis 4 funktionieren. Die bisherige Anwendung vorher beenden.
 2. Einen Eingang wählen, in der Vorschau auf **Text & Fundstellen** umschalten. Ein Datum mit der Maus markieren,
    im kleinen Menü **Als Frist**. Erwartet: Frist mit Fundstelle (Zitat, Seite).
 3. Status des Vorgangs auf **Erledigt** setzen. Erwartet: Hinweis auf offene Frist und Entwurf.
-   **Abbrechen** lässt den Status unverändert. Erst nach **Trotzdem abschließen** erscheinen die Dokumente im **Archiv**.
+   **Abbrechen** lässt den Status unverändert. Nach **Trotzdem abschließen** springt die Anwendung ins **Archiv**;
+   der Vorgang steht nicht mehr unter **Vorgänge**, seine Dokumente stehen im Archiv.
 4. **Exportieren** in der Akte: Es wird eine ZIP mit Chronik.pdf heruntergeladen.
 5. **Einstellungen → Datensicherung → Sicherung erstellen**, danach **Prüfen**. Erwartet: „In Ordnung …“.
 
-## 9. Automatische Drehung
+## 9. Scanner
+
+1. **Dokument importieren → Scannen …**. Erwartet: Nach einigen Sekunden steht Ihr Scanner in der Liste oben,
+   auch wenn er nur im WLAN hängt.
+2. Falls nicht: Unten links **„Digitale Bilder“ öffnen**, dort links den Scanner wählen und bei „Scannen nach“ den
+   Ordner **DocuManager Scans** (in Dokumente) einstellen. Scannen. Erwartet: Nach wenigen Sekunden erscheint der Scan
+   im Posteingang. Den Ordner öffnet auch **Dokument importieren → Scan-Ordner öffnen**.
+3. Bitte mitteilen, ob Ihr Scanner in Schritt 1 erscheint, und den Inhalt von `Daten/Logs/scanner.log`.
+
+## 10. Automatische Drehung
 
 1. Einen Brief verkehrt herum (auf dem Kopf) scannen oder ein solches PDF importieren. Bereits vorhandene
    Scans werden nach dem ersten Start dieses Stands einmal automatisch neu geprüft (einige Minuten).
 2. Warten, bis die Texterkennung fertig ist, dann das Dokument in der Akte oder im Posteingang öffnen.
-3. Erwartet: Das Dokument steht aufrecht, daneben „automatisch gedreht“. „Original ungedreht“ zeigt die
+3. Erwartet: Schon die Kachel im Posteingang zeigt das Dokument aufrecht. In der Akte steht daneben „automatisch gedreht“. „Original ungedreht“ zeigt die
    unveränderte Datei. Der erkannte Text (Text & Fundstellen) ist lesbar.
 4. Falls die Texterkennung gar nicht mehr läuft: die letzten Zeilen aus `Daten/Logs/korrespondenz.log` schicken
    (der Helfer wird bei diesem Stand neu gebaut).

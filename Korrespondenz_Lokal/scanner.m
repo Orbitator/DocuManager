@@ -10,6 +10,7 @@
 @property(nonatomic, strong) NSTextField *status;
 @property(nonatomic, strong) NSButton *accept;
 @property(nonatomic, strong) NSURL *directory;
+@property(nonatomic, copy) NSString *hotFolder;
 @property(nonatomic, strong) NSMutableArray<ICScannerDevice *> *devices;
 @property(nonatomic, strong) NSMutableOrderedSet<NSString *> *files;
 @end
@@ -36,6 +37,8 @@
     self.accept = [NSButton buttonWithTitle:@"Scans übernehmen" target:self action:@selector(finish:)];
     self.accept.enabled = NO;
     NSButton *cancel = [NSButton buttonWithTitle:@"Abbrechen" target:self action:@selector(cancel:)];
+    // Ausweg, falls ein Scanner hier nicht erscheint: „Digitale Bilder“ von macOS oder die Software des Herstellers
+    NSButton *capture = [NSButton buttonWithTitle:@"„Digitale Bilder“ öffnen" target:self action:@selector(openImageCapture:)];
     self.scanner = [[IKScannerDeviceView alloc] initWithFrame:NSZeroRect];
     self.scanner.delegate = self;
     self.scanner.hasDisplayModeSimple = YES;
@@ -49,7 +52,7 @@
     self.scanner.hidden = YES;
 
     NSView *content = self.window.contentView;
-    for (NSView *view in @[self.picker, self.scanner, self.status, self.accept, cancel]) {
+    for (NSView *view in @[self.picker, self.scanner, self.status, self.accept, cancel, capture]) {
         view.translatesAutoresizingMaskIntoConstraints = NO;
         [content addSubview:view];
     }
@@ -66,12 +69,18 @@
         [self.accept.trailingAnchor constraintEqualToAnchor:content.trailingAnchor constant:-14],
         [self.accept.bottomAnchor constraintEqualToAnchor:content.bottomAnchor constant:-12],
         [cancel.trailingAnchor constraintEqualToAnchor:self.accept.leadingAnchor constant:-8],
-        [cancel.centerYAnchor constraintEqualToAnchor:self.accept.centerYAnchor]
+        [cancel.centerYAnchor constraintEqualToAnchor:self.accept.centerYAnchor],
+        [capture.leadingAnchor constraintEqualToAnchor:content.leadingAnchor constant:14],
+        [capture.centerYAnchor constraintEqualToAnchor:self.accept.centerYAnchor]
     ]];
     self.browser = [[ICDeviceBrowser alloc] init];
     self.browser.delegate = self;
-    self.browser.browsedDeviceTypeMask = ICDeviceTypeMaskScanner | ICDeviceLocationTypeMaskLocal | ICDeviceLocationTypeMaskShared;
+    // Auch Netzwerkscanner (Bonjour/AirScan, die meisten Multifunktionsgeräte im WLAN) und entfernte Geräte suchen.
+    self.browser.browsedDeviceTypeMask = (ICDeviceTypeMask)(ICDeviceTypeMaskScanner | ICDeviceLocationTypeMaskLocal |
+        ICDeviceLocationTypeMaskShared | ICDeviceLocationTypeMaskBonjour | ICDeviceLocationTypeMaskRemote);
     [self.browser start];
+    // Erscheint nach einiger Zeit kein Scanner, den Ausweg über den Scan-Ordner nennen.
+    [self performSelector:@selector(noScannerHint) withObject:nil afterDelay:12];
     // Aus dem Terminal gestartet, holt macOS 14 das Fenster nicht von selbst nach vorne.
     // Deshalb schwebt es über dem Browser und wird ausdrücklich in den Vordergrund gebracht.
     self.window.level = NSFloatingWindowLevel;
@@ -81,6 +90,32 @@
     [NSRunningApplication.currentApplication activateWithOptions:NSApplicationActivateAllWindows];
 }
 
+- (NSString *)folderHint {
+    return self.hotFolder.length
+        ? [NSString stringWithFormat:@" Alternativ mit „Digitale Bilder“ oder der Scanner-Software in den Ordner „%@“ scannen; "
+           @"Dateien dort kommen automatisch in den Posteingang.", self.hotFolder.lastPathComponent]
+        : @"";
+}
+
+- (void)noScannerHint {
+    if (self.devices.count == 0) {
+        self.status.stringValue = [@"Kein Scanner gefunden. Ist er eingeschaltet und im selben Netz? In den Systemeinstellungen "
+            @"unter „Drucker & Scanner“ muss er aufgeführt sein." stringByAppendingString:[self folderHint]];
+    }
+}
+
+- (void)openImageCapture:(id)sender {
+    NSURL *app = [NSWorkspace.sharedWorkspace URLForApplicationWithBundleIdentifier:@"com.apple.Image_Capture"];
+    if (app) [NSWorkspace.sharedWorkspace openApplicationAtURL:app configuration:[NSWorkspaceOpenConfiguration configuration]
+                                             completionHandler:nil];
+    if (self.hotFolder.length) {
+        [[NSFileManager defaultManager] createDirectoryAtPath:self.hotFolder withIntermediateDirectories:YES attributes:nil error:nil];
+        self.status.stringValue = [NSString stringWithFormat:@"In „Digitale Bilder“ links den Scanner wählen und bei „Scannen nach“ "
+            @"den Ordner „%@“ (in Dokumente) einstellen. Die Scans erscheinen dann von selbst im Posteingang.",
+            self.hotFolder.lastPathComponent];
+    }
+}
+
 - (void)refreshDevices {
     ICScannerDevice *selected = self.scanner.scannerDevice;
     if (selected && ![self.devices containsObject:selected]) self.scanner.scannerDevice = nil;
@@ -88,9 +123,9 @@
     for (ICScannerDevice *device in self.devices) [self.picker addItemWithTitle:device.name ?: @"Scanner"];
     self.picker.enabled = self.devices.count > 0;
     if (self.devices.count == 0) {
-        [self.picker addItemWithTitle:@"Kein Scanner gefunden"];
+        [self.picker addItemWithTitle:@"Scanner werden gesucht …"];
         self.scanner.hidden = YES;
-        self.status.stringValue = @"Schalte deinen Scanner ein und prüfe in macOS, ob er als Scanner verfügbar ist.";
+        self.status.stringValue = @"Scanner werden gesucht, auch im Netzwerk. Das kann einige Sekunden dauern.";
         return;
     }
     NSUInteger index = selected ? [self.devices indexOfObject:selected] : NSNotFound;
@@ -99,6 +134,7 @@
 }
 
 - (void)deviceBrowser:(ICDeviceBrowser *)browser didAddDevice:(ICDevice *)device moreComing:(BOOL)moreComing {
+    NSLog(@"Gerät gefunden: %@ (Typ %lu)", device.name, (unsigned long)device.type);
     if ([device isKindOfClass:ICScannerDevice.class]) [self.devices addObject:(ICScannerDevice *)device];
     if (!moreComing) [self refreshDevices];
 }
@@ -162,11 +198,12 @@
 
 int main(int argc, const char *argv[]) {
     @autoreleasepool {
-        if (argc != 2) return 1;
+        if (argc < 2) return 1;
         NSApplication *application = NSApplication.sharedApplication;
         [application setActivationPolicy:NSApplicationActivationPolicyRegular];
         ScanWindow *controller = [ScanWindow new];
         controller.directory = [NSURL fileURLWithPath:@(argv[1]) isDirectory:YES];
+        if (argc > 2) controller.hotFolder = @(argv[2]);
         application.delegate = controller;
         [application run];
     }

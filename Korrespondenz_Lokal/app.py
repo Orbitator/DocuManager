@@ -33,11 +33,13 @@ from mail_import import MailImport, migrate_5, test_mail
 
 ROOT = Path(__file__).resolve().parent
 PORT = 8765
-APP_VERSION = "DocuManager 0.5.1 · Briefe, Fundstellen, Abschluss, Sicherung, Drehung"
+APP_VERSION = "DocuManager 0.6 · Archiv für Erledigtes, Scan-Ordner, Netzwerkscanner"
 MAX_UPLOAD = 25 * 1024 * 1024
 MIN_MACOS = "14.0"
 SCHEMA_VERSION = 8
 OCR_WAITING = "Wartet auf Texterkennung"
+# Scan-Ordner für Scanner-Software und „Digitale Bilder“: Dateien darin kommen automatisch in den Posteingang.
+SCAN_ORDNER = Path.home() / "Documents" / "DocuManager Scans"
 OCR_RUNNING = "Texterkennung läuft"
 log = logging.getLogger("korrespondenz")
 # Die ersten drei Werte und die Vorgabe „Schreiben verfassen“ stammen aus dem bisherigen Stand und bleiben gleich.
@@ -323,6 +325,39 @@ class Store:
             return [dict(row) for row in db.execute("""SELECT nummer,methode,text,drehung FROM dokumentseite
                     WHERE dokument_id=? ORDER BY nummer""", (document_id,))]
 
+    def vorschaubild(self, document_id):
+        """Kleines JPEG der ersten Seite, aufrecht gedreht. None, wenn keins erzeugt werden kann.
+        Auf dem Mac mit `sips` (PDF, JPEG, PNG, TIFF); sonst nur für unveränderte JPEG/PNG das Original."""
+        row = self.document(document_id)
+        if not row or row["mime"] == "message/rfc822":
+            return None
+        with closing(self.connect()) as db:
+            seite = db.execute("SELECT drehung FROM dokumentseite WHERE dokument_id=? ORDER BY nummer LIMIT 1",
+                               (document_id,)).fetchone()
+        drehung = int(seite[0]) % 360 if seite else 0
+        original = self.uploads / row["dateipfad"]
+        if not original.is_file():
+            return None
+        ziel = self.data / "Vorschau" / f"{row['sha256']}-{drehung}.jpg"
+        if ziel.is_file():
+            return ziel.read_bytes()
+        sips = Path("/usr/bin/sips")
+        if not sips.exists():
+            return original.read_bytes() if drehung == 0 and row["mime"] in ("image/jpeg", "image/png") else None
+        ziel.parent.mkdir(exist_ok=True)
+        stage = ziel.with_suffix(".tmp.jpg")
+        befehl = [str(sips), "-s", "format", "jpeg", "-s", "formatOptions", "70", "-Z", "520"]
+        if drehung:
+            befehl += ["-r", str(drehung)]  # sips dreht im Uhrzeigersinn
+        try:
+            subprocess.run(befehl + [str(original), "--out", str(stage)], capture_output=True, timeout=60, check=True)
+            os.replace(stage, ziel)
+            return ziel.read_bytes()
+        except (subprocess.SubprocessError, OSError) as error:
+            log.warning("Vorschaubild für Dokument %s nicht erzeugt: %s", document_id, error)
+            stage.unlink(missing_ok=True)
+            return None
+
     def rename_document(self, document_id, title):
         title = title.strip()
         if not 1 <= len(title) <= 160:
@@ -543,7 +578,7 @@ class Scanner:
         logs.mkdir(parents=True, exist_ok=True)
         output = open(logs / "scanner.log", "ab")  # Ausgabe des Scandialogs für die Fehlersuche
         try:
-            process = subprocess.Popen([str(binary), str(folder)], stdin=subprocess.DEVNULL,
+            process = subprocess.Popen([str(binary), str(folder), str(SCAN_ORDNER)], stdin=subprocess.DEVNULL,
                                        stdout=output, stderr=subprocess.STDOUT)
         except OSError:
             output.close()
@@ -616,6 +651,7 @@ class Handler(BaseHTTPRequestHandler):
     akte = None
     mail = None
     mail_lock = Lock()
+    scanordner = None
     scanner = None
     chat = None
     host = f"127.0.0.1:{PORT}"
@@ -677,6 +713,9 @@ class Handler(BaseHTTPRequestHandler):
             self.send_json({"cases": self.store.list_cases(), "statuses": CASE_STATUSES, "groups": self.store.groups(),
                             "ocr": bool(self.store.ocr and self.store.ocr.is_file()),
                             "ocr_loading": not self.store.ocr_ready.is_set(), "version": APP_VERSION})
+        elif path == "/api/scanordner":
+            ordner = self.scanordner.ordner if self.scanordner else SCAN_ORDNER
+            self.send_json({"pfad": str(ordner), "zuletzt": self.scanordner.zuletzt if self.scanordner else None})
         elif path == "/api/mail":
             self.send_json(self.mail.status())
         elif match := re.fullmatch(r"/api/akte/(\d+)/export", path):
@@ -723,6 +762,12 @@ class Handler(BaseHTTPRequestHandler):
                                 "attachment; filename*=" + encode_rfc2231(name, "utf-8"))
         elif match := re.fullmatch(r"/api/cases/(\d+)/documents", path):
             self.send_json({"documents": self.store.case_documents(int(match[1]))})
+        elif match := re.fullmatch(r"/api/documents/(\d+)/vorschaubild", path):
+            bild = self.store.vorschaubild(int(match[1]))
+            if bild is None:
+                self.send_json({"error": "Kein Vorschaubild."}, 404)
+            else:
+                self.send_bytes(200, "image/jpeg" if bild[:2] == b"\xff\xd8" else "image/png", bild)
         elif match := re.fullmatch(r"/api/documents/(\d+)/(original|pages)", path):
             doc_id = int(match[1])
             row = self.store.document(doc_id)
@@ -797,6 +842,12 @@ class Handler(BaseHTTPRequestHandler):
             elif path == "/api/mail/abholen":
                 with self.mail_lock:  # ein Abruf zur Zeit
                     self.send_json(self.mail.abholen())
+            elif path == "/api/scanordner/oeffnen":
+                ordner = self.scanordner.ordner if self.scanordner else SCAN_ORDNER
+                ordner.mkdir(parents=True, exist_ok=True)
+                if Path("/usr/bin/open").exists():
+                    subprocess.Popen(["/usr/bin/open", str(ordner)])
+                self.send_json({"pfad": str(ordner)})
             elif path == "/api/mail/markierung":
                 self.mail.markierung_setzen(int(json.loads(self.read_body(4000))["markierung"]))
                 self.send_json({"ok": True})
@@ -884,6 +935,58 @@ def build_ocr():
         print("OCR ist derzeit nicht verfügbar. Das Anlegen von Vorgängen und der Import bleiben möglich. "
               "Details stehen in Daten/Logs/korrespondenz.log.", flush=True)
     return binary
+
+
+class ScanOrdner:
+    """Überwachter Ordner: Was die Scanner-Software dort ablegt, landet automatisch im Posteingang.
+    Eine Datei wird erst übernommen, wenn sich ihre Größe zwischen zwei Durchläufen nicht mehr ändert
+    (der Scanner schreibt fertig). Übernommene Dateien wandern in den Unterordner „Übernommen“."""
+    ENDUNGEN = {".pdf", ".jpg", ".jpeg", ".png", ".tif", ".tiff"}
+
+    def __init__(self, store, ordner):
+        self.store, self.ordner = store, Path(ordner)
+        self.groessen = {}
+        self.zuletzt = None
+
+    def einmal(self, jetzt=None):
+        jetzt = jetzt or time.time()
+        self.ordner.mkdir(parents=True, exist_ok=True)
+        fertig = self.ordner / "Übernommen"
+        neu = 0
+        for datei in sorted(self.ordner.iterdir()):
+            if datei.name.startswith(".") or not datei.is_file() or datei.suffix.lower() not in self.ENDUNGEN:
+                continue
+            stat = datei.stat()
+            if self.groessen.get(datei) != stat.st_size or jetzt - stat.st_mtime < 3:
+                self.groessen[datei] = stat.st_size
+                continue
+            try:
+                self.store.import_document(None, datei.name, datei.read_bytes())
+            except ValueError as error:
+                log.warning("Scan-Ordner: %s nicht übernommen: %s", datei.name, error)
+                fertig = self.ordner / "Nicht übernommen"
+            fertig.mkdir(exist_ok=True)
+            ziel = fertig / datei.name
+            if ziel.exists():
+                ziel = fertig / f"{datei.stem} {time.strftime('%Y-%m-%d %H%M%S')}{datei.suffix}"
+            os.replace(datei, ziel)
+            self.groessen.pop(datei, None)
+            fertig = self.ordner / "Übernommen"
+            neu += 1
+        if neu:
+            self.zuletzt = time.strftime("%Y-%m-%d %H:%M:%S")
+            log.info("Scan-Ordner: %s Datei(en) übernommen.", neu)
+        return neu
+
+    def starten(self):
+        def schleife():
+            while True:
+                try:
+                    self.einmal()
+                except OSError as error:
+                    log.warning("Scan-Ordner nicht lesbar: %s", error)
+                time.sleep(4)
+        Thread(target=schleife, name="Scan-Ordner", daemon=True).start()
 
 
 def build_scanner():
@@ -1068,6 +1171,20 @@ def test_foundation(folder):
     assert (gedreht.ansicht / drow["ansicht"]).read_bytes() == b"%PDF-1.4 aufrecht"
     assert (gedreht.uploads / drow["dateipfad"]).read_bytes() == b"%PDF-1.4\nkopf"  # Original unverändert
     assert not list(gedreht.ansicht.glob("*.tmp"))
+    # Scan-Ordner: fertige Dateien kommen in den Posteingang, halbfertige erst im nächsten Durchlauf
+    so = ScanOrdner(gedreht, folder / "Scanordner")
+    so.ordner.mkdir()
+    (so.ordner / "Scan 1.pdf").write_bytes(b"%PDF-1.4\nScanordner")
+    (so.ordner / "notiz.txt").write_text("nein")
+    assert so.einmal(time.time() + 10) == 0  # erster Blick: Größe merken
+    assert so.einmal(time.time() + 10) == 1
+    assert (so.ordner / "Übernommen" / "Scan 1.pdf").is_file() and (so.ordner / "notiz.txt").is_file()
+    assert any(d["dateiname"] == "Scan 1.pdf" for d in Akte(gedreht).posteingang())
+    (so.ordner / "kaputt.pdf").write_bytes(b"kein pdf")
+    so.einmal(time.time() + 10); so.einmal(time.time() + 10)
+    assert (so.ordner / "Nicht übernommen" / "kaputt.pdf").is_file()
+    if not Path("/usr/bin/sips").exists():  # ohne sips: Vorschaubild nur für unverändertes JPEG/PNG
+        assert gedreht.vorschaubild(ddoc) is None
     # Bild auf dem Kopf: Ansichtsfassung als JPEG, damit Kachel und Vorschau es als Bild zeigen
     bild = folder / "fake-ocr-bild"
     bild.write_text("#!" + sys.executable + "\nimport json,sys\nif len(sys.argv)==4: open(sys.argv[3],'wb').write(b'\\xff\\xd8\\xff jpeg')\n"
@@ -1167,6 +1284,7 @@ def main():
     Handler.chat = ChatSync(Handler.store)
     Handler.akte = Akte(Handler.store)
     Handler.mail = MailImport(Handler.store)
+    Handler.scanordner = ScanOrdner(Handler.store, SCAN_ORDNER)
     try:
         server = LocalServer(("127.0.0.1", PORT), Handler)
     except OSError as error:
@@ -1189,6 +1307,7 @@ def main():
             Handler.store.ocr_ready.clear()
             Thread(target=prepare_ocr, name="OCR vorbereiten", daemon=True).start()
         Handler.store.start_worker()
+        Handler.scanordner.starten()
         url = f"http://{Handler.host}"
         print(f"{APP_VERSION}\nKorrespondenz läuft auf {url}. Beenden mit Ctrl+C.", flush=True)
         if args.open:

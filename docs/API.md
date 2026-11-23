@@ -21,6 +21,8 @@ Die bisherigen Schnittstellen (`/api/cases`, Dokumente, Scan, Chat) bleiben unve
 | GET `/api/einstellungen` | Eigene Angaben für die Absendererkennung |
 | GET `/api/mail` | Markierungsfarbe, Anzahl übernommener E-Mails, `letzter_abruf` (`zeit`, `neu`, `bereits_vorhanden`) |
 | GET `/api/documents/{id}/original` | Original zur Anzeige; lag eine Seite gedreht, die aufrecht gedrehte Ansichtsfassung. `?fassung=original` liefert immer die unveränderte Datei |
+| GET `/api/documents/{id}/vorschaubild` | JPEG der ersten Seite, aufrecht gedreht (404, wenn keins erzeugt werden kann) |
+| GET `/api/scanordner` | Pfad des überwachten Scan-Ordners und letzte Übernahme; POST `/api/scanordner/oeffnen` öffnet ihn im Finder |
 | GET `/api/documents/{id}/pages` | Erkannter Text je Seite mit `methode` und `drehung` (0, 90, 180, 270) |
 | GET `/api/eintraege/{id}/brief` | Brief eines Entwurfs als druckfertige Seite nach DIN 5008 |
 | GET `/api/akte/{id}/export?docs=alle\|1,2` | Akte als ZIP: Chronik.pdf, akte.json, ausgewählte Originale |
