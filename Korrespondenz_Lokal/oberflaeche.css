@@ -439,3 +439,15 @@ button.heute:hover{background:var(--surface-2,rgba(127,127,127,.18))}
 #modalroot .backdrop,#modalroot > div:first-child{backdrop-filter:blur(2px)}
 .iconbtn.lg{width:36px;height:36px}
 .iconbtn.lg svg{width:19px;height:19px}
+.kopfrechts{display:flex;align-items:center;gap:8px;margin-left:auto;flex-wrap:wrap;justify-content:flex-end}
+#werkzeuge{display:flex;align-items:center;gap:8px}
+#werkzeuge .search{flex:none;max-width:none;display:flex;align-items:center}
+#werkzeuge .search>svg{display:none}
+#werkzeuge .search input{display:none;width:0;padding:8px 12px;transition:width .15s}
+#werkzeuge .search.offen input{display:block;width:280px}
+#werkzeuge .search.offen [data-act=suche-auf]{display:none}
+#werkzeuge .search .results{right:0;left:auto;width:min(520px,90vw);top:calc(100% + 6px)}
+.prio{display:inline-block;padding:1px 9px;border-radius:999px;font-size:12px;font-weight:600}
+.prio-hoch{background:rgba(230,150,30,.18);color:#c77d06}
+.prio-sehrhoch{background:rgba(220,60,60,.18);color:#d63a3a}
+@media (max-width:720px){#werkzeuge .search.offen input{width:min(220px,60vw)}}

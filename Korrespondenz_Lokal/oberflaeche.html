@@ -19,8 +19,8 @@
     </div>
   </aside>
   <div class="main">
-    <header class="top">
-      <div class="search">
+    <div id="parkplatz" hidden><span id="werkzeuge">
+      <div class="search"><button class="iconbtn" data-act="suche-auf" title="Dokumente und Akten suchen" aria-label="Suchen"><svg class="i" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg></button>
         <svg class="i" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
         <input id="q" type="search" placeholder="Dokumente und Aktenzeichen suchen" autocomplete="off" aria-label="Suche">
         <div class="results" id="results" hidden></div>
@@ -32,10 +32,10 @@
           <button role="menuitem" data-act="scan-folder"><b>Scan-Ordner öffnen</b><small>Für „Digitale Bilder“ und Scanner-Software</small></button>
           <button role="menuitem" data-act="mail-get"><b>Aus Apple Mail holen</b><small>E-Mails mit der Markierung „Erfasster Beleg“</small></button>
         </div></div>
+    </span></div>
       <input type="file" id="fileinp" multiple accept=".pdf,.jpg,.jpeg,.png,.tif,.tiff,.docx,.eml" hidden>
       <input type="file" id="chatinp" accept=".zip,.json,application/zip,application/json" hidden>
       <input type="file" id="restoreinp" accept=".zip,application/zip" hidden>
-    </header>
     <main class="view" id="view"><p class="muted">Wird geladen …</p></main>
   </div>
 </div>

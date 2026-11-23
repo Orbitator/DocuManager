@@ -118,6 +118,11 @@ Teil 2 (umgesetzt, Schemaversion 7):
   `dokument`; `migrate_9` baut die Tabelle ohne sie neu (Zugehörigkeit regelt `dokument_vorgang`). Der Scan-Ordner
   liegt jetzt unter `~/DocuManager Scans` (nicht in „Dokumente“, das macOS für Programme gesondert schützt).
   Fehlermeldungen beim Speichern nennen die Ursache.
+- 0.12 (Schemaversion 13): Priorität je Vorgang (keine, hoch, sehr hoch; `vorgang.prioritaet`), nur in der
+  Vorgangsliste als Spalte, sortier- und gruppierbar, gesetzt im Dialog „Vorgang bearbeiten“. Vorgangsliste
+  gruppierbar nach Bereich, Status, Priorität und Empfänger (Empfänger der Dokumente des Vorgangs). Suche als Symbol
+  in der Kopfzeile jeder Ansicht neben deren Knöpfen; ein Klick öffnet das Eingabefeld. Die eigene Kopfleiste
+  entfällt.
 - 0.11 (Schemaversion 12): Archiv mit vollem Import-Menü (Datei, Scan, Apple Mail landen direkt im Archiv;
   Scan-Ordner weiter über den Posteingang). Ankreuzfeld „nur erledigte Vorgänge“ entfernt. „Einem Vorgang
   zuordnen …“ im Archiv-Dialog holt Dokumente in laufende Vorgänge zurück. Empfänger je Dokument

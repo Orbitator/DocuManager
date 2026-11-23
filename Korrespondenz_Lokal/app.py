@@ -36,10 +36,10 @@ from mail_import import MailImport, migrate_5, test_mail
 
 ROOT = Path(__file__).resolve().parent
 PORT = 8765
-APP_VERSION = "DocuManager 0.11 · Archiv wie Posteingang, Empfänger, Dialogfarbe"
+APP_VERSION = "DocuManager 0.12 · Priorität, Gruppieren in Vorgängen, kompakte Suche"
 MAX_UPLOAD = 25 * 1024 * 1024
 MIN_MACOS = "14.0"
-SCHEMA_VERSION = 12
+SCHEMA_VERSION = 13
 OCR_WAITING = "Wartet auf Texterkennung"
 # Scan-Ordner für Scanner-Software und „Digitale Bilder“: Dateien darin kommen automatisch in den Posteingang.
 # Bewusst nicht unter „Dokumente“: Diesen Ordner schützt macOS, ein über Launchpad gestartetes Programm bräuchte
@@ -342,8 +342,15 @@ def migrate_12(db):
         db.execute("UPDATE dokument SET empfaenger=? WHERE id=? AND empfaenger IS NULL", (empfaenger_erkennen(d[1]), d[0]))
 
 
+def migrate_13(db):
+    """Priorität je Vorgang: keine, hoch, sehr hoch."""
+    if "prioritaet" not in columns_of(db, "vorgang"):
+        db.execute("ALTER TABLE vorgang ADD COLUMN prioritaet TEXT NOT NULL DEFAULT 'keine'")
+
+
 MIGRATIONS = ((1, migrate_1), (2, migrate_2), (3, migrate_3), (4, migrate_4), (5, migrate_5), (6, migrate_6),
-              (7, migrate_7), (8, migrate_8), (9, migrate_9), (10, migrate_10), (11, migrate_11), (12, migrate_12))
+              (7, migrate_7), (8, migrate_8), (9, migrate_9), (10, migrate_10), (11, migrate_11), (12, migrate_12),
+              (13, migrate_13))
 
 
 class Store:
@@ -419,7 +426,16 @@ class Store:
             for r in db.execute("""SELECT dv.vorgang_id, d.mime, count(*) FROM dokument_vorgang dv JOIN dokument d
                 ON d.id=dv.dokument_id WHERE d.geloescht_am IS NULL GROUP BY dv.vorgang_id, d.mime"""):
                 typen.setdefault(r[0], {})[r[1]] = r[2]
+            empfaenger = {}
+            try:
+                for r in db.execute("""SELECT dv.vorgang_id, d.empfaenger, count(*) AS n FROM dokument_vorgang dv
+                    JOIN dokument d ON d.id=dv.dokument_id WHERE d.geloescht_am IS NULL AND d.empfaenger IS NOT NULL
+                    GROUP BY dv.vorgang_id, d.empfaenger ORDER BY n DESC"""):
+                    empfaenger.setdefault(r[0], []).append(r[1])
+            except sqlite3.OperationalError:
+                pass
             for f in faelle:  # Hauptbereich zuerst, weitere danach
+                f["empfaenger"] = empfaenger.get(f["id"], [])
                 f["bereiche"] = [f["bereich"]] + sorted(b for b in weitere.get(f["id"], []) if b != f["bereich"])
                 f["typen"] = typen.get(f["id"], {})
             return faelle

@@ -132,15 +132,17 @@ async function render() {
     if (S.view === 'chat') { D.chats = (await api('chatnotizen')).notizen; D.threads = (await api('chat/threads')).threads || []; }
   } catch (e) {
     if (token !== renderToken) return;
-    $('#view').innerHTML = `<div class="notice crit">${I('alert')}<p>${esc(e.message)}</p></div>`;
+    werkzeugeParken(); $('#view').innerHTML = `<div class="notice crit">${I('alert')}<p>${esc(e.message)}</p></div>`;
     if (S.view === 'akte') { location.hash = 'vorgaenge'; }
     return;
   }
   if (token !== renderToken) return;
   nav();
+  werkzeugeParken();
   $('#view').innerHTML = ({uebersicht: vHome, posteingang: vInbox, vorgaenge: vList, akte: vAkte, fristen: vFristen,
     archiv: vArchiv, adressbuch: vAb, chat: vChat, papierkorb: vTrash, einstellungen: vSettings})[S.view]();
   textPanes();
+  werkzeugeEinsetzen();
   document.querySelector('.imp').hidden = !['posteingang', 'archiv'].includes(S.view);
   $('#impbtn').firstChild.textContent = S.view === 'archiv' ? 'Im Archiv ablegen ' : 'Dokument importieren ';
   if (S.view === 'archiv' && D.archiv.some(d => /Wartet|läuft/.test(d.ocr_status || ''))) { clearTimeout(followTimer); followTimer = setTimeout(() => { if (S.view === 'archiv' && !$('#modalroot').innerHTML) render(); }, 3000); }
@@ -174,10 +176,11 @@ async function vorgangBearbeiten(id) {
   if (!D.kontakte.length) D.kontakte = (await api('kontakte')).kontakte;
   modal('Vorgang bearbeiten', `<label>Titel<input id="m-vt" value="${esc(v.titel)}" maxlength="160"></label>
    <label>Bereiche <small class="muted">· der erste ist der Hauptbereich</small></label>${mehrfach('m-vbs', D.groups.map(b => [b, b]), v.bereiche || [v.bereich], 'Bereich')}
+   <label>Priorität<select id="m-vprio">${Object.keys(PRIO).map(p => `<option value="${p}" ${(v.prioritaet || 'keine') === p ? 'selected' : ''}>${p === 'keine' ? 'Keine' : PRIO[p][1]}</option>`).join('')}</select></label>
    <label>Kontakte <small class="muted">· Beteiligte des Vorgangs</small></label>${mehrfach('m-vks', kontaktOpt(), v.beteiligte.map(b => b.kontakt_id), 'Kontakt')}
    <div class="two"><label>Zuständig<input id="m-vz" value="${esc(v.zustaendig || '')}"></label><label>Nächster Schritt<input id="m-vn" value="${esc(v.naechster_schritt || '')}"></label></div><label>Beschreibung<textarea id="m-vd" rows="3">${esc(v.beschreibung)}</textarea></label>`, async () => {
     const bereiche = multiWert('m-vbs'); if (!bereiche.length) { toast('Bitte mindestens einen Bereich wählen.'); return false; }
-    closeModal(); await act(() => api('akte/' + v.id, {titel: val('m-vt'), bereiche, kontakte: multiWert('m-vks').map(Number), zustaendig: val('m-vz'), naechster_schritt: val('m-vn'), beschreibung: val('m-vd')}), 'Vorgang gespeichert.'); return false; });
+    closeModal(); await act(() => api('akte/' + v.id, {titel: val('m-vt'), bereiche, prioritaet: val('m-vprio'), kontakte: multiWert('m-vks').map(Number), zustaendig: val('m-vz'), naechster_schritt: val('m-vn'), beschreibung: val('m-vd')}), 'Vorgang gespeichert.'); return false; });
 }
 // Erledigte Vorgänge verlassen die Liste „Vorgänge“ und stehen nur noch im Archiv.
 const aktiv = () => D.cases.filter(c => c.status !== 'Erledigt');
@@ -354,25 +357,51 @@ function sortTh(t, k, label) {
   return `<th aria-sort="${on ? (so.d > 0 ? 'ascending' : 'descending') : 'none'}"><button class="thsort ${on ? 'on' : ''}" data-act="tsort" data-t="${t}" data-k="${k}">${label}<span class="arr" aria-hidden="true">${on ? (so.d > 0 ? '▲' : '▼') : '↕'}</span></button></th>`;
 }
 const cmp = (a, b) => String(a ?? '').localeCompare(String(b ?? ''), 'de', {numeric: true, sensitivity: 'base'});
+const PRIO = {'keine': [0, ''], 'hoch': [1, 'Hoch'], 'sehr hoch': [2, 'Sehr hoch']};
+const prioPill = p => p && p !== 'keine' ? `<span class="prio prio-${p === 'hoch' ? 'hoch' : 'sehrhoch'}">${PRIO[p][1]}</span>` : '<span class="muted">–</span>';
 function vList() {
   const bs = ['alle', ...new Set([...D.groups, ...aktiv().map(c => c.bereich)])];
   const erledigt = D.cases.length - aktiv().length;
   let list = aktiv().filter(c => (S.vb === 'alle' || (c.bereiche || [c.bereich]).includes(S.vb)) && (S.vs === 'alle' || c.status === S.vs));
-  const key = {titel: c => c.titel, bereich: c => c.bereich, status: c => ST_ORDER.indexOf(c.status), frist: c => c.naechste_frist || '9999', akt: c => c.angelegt_am}[S.sortV.k];
+  const key = {titel: c => c.titel, bereich: c => c.bereich, prio: c => -(PRIO[c.prioritaet || 'keine'] || [0])[0], status: c => ST_ORDER.indexOf(c.status), frist: c => c.naechste_frist || '9999', akt: c => c.angelegt_am}[S.sortV.k] || (c => c.titel);
   list.sort((a, b) => (typeof key(a) === 'number' ? key(a) - key(b) : cmp(key(a), key(b))) * S.sortV.d || cmp(a.titel, b.titel));
-  return `<div class="head" style="justify-content:space-between"><h1>Vorgänge</h1><button class="btn pri" data-act="new-vorgang">${I('plus')}Neuer Vorgang</button></div>
-  <div class="filters"><span class="lbl">Bereich</span>${bs.map(b => `<button class="fchip ${S.vb === b ? 'on' : ''}" data-act="vb" data-id="${esc(b)}">${b === 'alle' ? 'Alle' : esc(b)}</button>`).join('')}<button class="fchip" data-act="b-add" style="border-style:dashed">+ Bereich</button></div>
-  <div class="filters" style="margin-top:-6px"><span class="lbl">Status</span>${['alle', ...ST_ORDER.filter(s => s !== 'Erledigt')].map(s => `<button class="fchip ${S.vs === s ? 'on' : ''}" data-act="vs" data-id="${esc(s)}">${s === 'alle' ? 'Alle' : esc(stLabel(s))}</button>`).join('')}</div>
-  <div class="tbl-wrap"><table><thead><tr>${sortTh('V','titel','Vorgang')}${sortTh('V','bereich','Bereich')}${sortTh('V','status','Status')}${sortTh('V','frist','Nächste Frist')}${sortTh('V','akt','Angelegt')}<th><span class="sr">Aktionen</span></th></tr></thead><tbody>
-  ${list.map(c => `<tr data-act="open-v" data-id="${c.id}"><td><b>${esc(c.titel)}</b><div class="muted" style="font-size:12.5px">${c.dokumente} Dokument${c.dokumente === 1 ? '' : 'e'}${c.dokumente ? ' · ' : ''}${typBadges(c.typen)}</div></td><td>${esc((c.bereiche || [c.bereich]).join(', '))}</td>
+  // Gruppieren: ein Vorgang mit mehreren Bereichen bzw. Empfängern erscheint in jeder seiner Gruppen
+  const gkey = {keine: () => [''], bereich: c => c.bereiche || [c.bereich], status: c => [stLabel(c.status)],
+    prio: c => [PRIO[c.prioritaet || 'keine'][1] || 'Keine Priorität'], empfaenger: c => (c.empfaenger || []).length ? c.empfaenger : ['Empfänger unbekannt']}[S.vGroup || 'keine'];
+  const groups = [];
+  for (const c of list) for (const k of gkey(c)) { let g = groups.find(x => x.k === k); if (!g) groups.push(g = {k, items: []}); g.items.push(c); }
+  if (S.vGroup === 'prio') groups.sort((x, y) => ['Sehr hoch', 'Hoch', 'Keine Priorität'].indexOf(x.k) - ['Sehr hoch', 'Hoch', 'Keine Priorität'].indexOf(y.k));
+  else if (S.vGroup === 'status') groups.sort((x, y) => ST_ORDER.map(stLabel).indexOf(x.k) - ST_ORDER.map(stLabel).indexOf(y.k));
+  else if (S.vGroup && S.vGroup !== 'keine') groups.sort((x, y) => cmp(x.k, y.k));
+  const thead = `<thead><tr>${sortTh('V','titel','Vorgang')}${sortTh('V','prio','Priorität')}${sortTh('V','bereich','Bereich')}${sortTh('V','status','Status')}${sortTh('V','frist','Nächste Frist')}${sortTh('V','akt','Angelegt')}<th><span class="sr">Aktionen</span></th></tr></thead>`;
+  const row = c => `<tr data-act="open-v" data-id="${c.id}"><td><b>${esc(c.titel)}</b><div class="muted" style="font-size:12.5px">${c.dokumente} Dokument${c.dokumente === 1 ? '' : 'e'}${c.dokumente ? ' · ' : ''}${typBadges(c.typen)}${(c.empfaenger || []).length ? ` · an ${esc(c.empfaenger.join(', '))}` : ''}</div></td>
+   <td>${prioPill(c.prioritaet)}</td><td>${esc((c.bereiche || [c.bereich]).join(', '))}</td>
    <td><span class="st-${ST_KEY[c.status] || 'offen'}" style="display:flex;align-items:center;gap:6px;font-size:13px"><span class="dot"></span><span style="color:var(--fg)">${esc(stLabel(c.status))}</span></span></td>
    <td class="num">${c.naechste_frist ? `<span style="color:${tage(c.naechste_frist) < 0 ? 'var(--crit)' : tage(c.naechste_frist) <= 7 ? 'var(--warn)' : 'inherit'}">${dt(c.naechste_frist)}</span>` : '–'}</td><td class="num">${dt(c.angelegt_am)}</td>
-   <td style="white-space:nowrap"><button class="iconbtn sm" data-act="v-edit" data-id="${c.id}" title="Vorgang bearbeiten" aria-label="${esc(c.titel)} bearbeiten">${I('draft')}</button><button class="iconbtn" data-act="v-del" data-id="${c.id}" title="Vorgang löschen" aria-label="${esc(c.titel)} löschen">${I('trash')}</button></td></tr>`).join('') || '<tr><td colspan="6" class="muted">Keine laufenden Vorgänge für diese Filter.</td></tr>'}
-  </tbody></table></div>${erledigt ? `<p class="muted" style="margin:10px 2px 0;font-size:13px">Erledigte Vorgänge werden hier nicht mehr geführt; ihre Dokumente stehen im <a href="#archiv">Archiv</a>.</p>` : ''}`;
+   <td style="white-space:nowrap"><button class="iconbtn" data-act="v-edit" data-id="${c.id}" title="Vorgang bearbeiten" aria-label="${esc(c.titel)} bearbeiten">${I('draft')}</button><button class="iconbtn" data-act="v-del" data-id="${c.id}" title="Vorgang löschen" aria-label="${esc(c.titel)} löschen">${I('trash')}</button></td></tr>`;
+  const tabelle = items => `<div class="tbl-wrap" style="margin-bottom:16px"><table>${thead}<tbody>${items.map(row).join('')}</tbody></table></div>`;
+  return `<div class="head" style="justify-content:space-between"><h1>Vorgänge</h1><button class="btn pri" data-act="new-vorgang">${I('plus')}Neuer Vorgang</button></div>
+  <div class="filters"><span class="lbl">Gruppieren</span>${[['keine','Keine'],['bereich','Bereich'],['status','Status'],['prio','Priorität'],['empfaenger','Empfänger']].map(([k, l]) => `<button class="fchip ${(S.vGroup || 'keine') === k ? 'on' : ''}" data-act="vgroup" data-id="${k}">${l}</button>`).join('')}</div>
+  <div class="filters" style="margin-top:-6px"><span class="lbl">Bereich</span>${bs.map(b => `<button class="fchip ${S.vb === b ? 'on' : ''}" data-act="vb" data-id="${esc(b)}">${b === 'alle' ? 'Alle' : esc(b)}</button>`).join('')}<button class="fchip" data-act="b-add" style="border-style:dashed">+ Bereich</button></div>
+  <div class="filters" style="margin-top:-6px"><span class="lbl">Status</span>${['alle', ...ST_ORDER.filter(s => s !== 'Erledigt')].map(s => `<button class="fchip ${S.vs === s ? 'on' : ''}" data-act="vs" data-id="${esc(s)}">${s === 'alle' ? 'Alle' : esc(stLabel(s))}</button>`).join('')}</div>
+  ${!list.length ? '<div class="panel muted">Keine laufenden Vorgänge für diese Filter.</div>' : (S.vGroup || 'keine') === 'keine' ? tabelle(list)
+    : groups.map(g => `<div class="agrp"><h3>${esc(g.k)}</h3><span class="muted num">${g.items.length}</span></div>${tabelle(g.items)}`).join('')}
+  ${erledigt ? `<p class="muted" style="margin:10px 2px 0;font-size:13px">Erledigte Vorgänge werden hier nicht mehr geführt; ihre Dokumente stehen im <a href="#archiv">Archiv</a>.</p>` : ''}`;
 }
 
 // ---------- Vorgangsakte ----------
-function paintAkte() { $('#view').innerHTML = vAkte(); mailTexte(); textPanes(); drehungAnwenden(); }
+function paintAkte() { werkzeugeParken(); $('#view').innerHTML = vAkte(); mailTexte(); textPanes(); drehungAnwenden(); werkzeugeEinsetzen(); }
+// Suche (als Symbol) und Import sitzen in der Kopfzeile der jeweiligen Ansicht, neben deren Knöpfen.
+// Vor dem Neuaufbau der Ansicht werden sie geparkt, damit Eingaben und Zustand erhalten bleiben.
+function werkzeugeParken() { const w = $('#werkzeuge'); if (w && w.parentElement !== $('#parkplatz')) $('#parkplatz').append(w); }
+function werkzeugeEinsetzen() {
+  const w = $('#werkzeuge'), kopf = document.querySelector('#view .head') || document.querySelector('#view h1');
+  if (!w || !kopf) return;
+  if (kopf.tagName === 'H1') { const h = document.createElement('div'); h.className = 'head'; kopf.replaceWith(h); h.append(kopf); return werkzeugeEinsetzen(); }
+  const rechts = document.createElement('span'); rechts.className = 'kopfrechts';
+  const letzter = kopf.children.length > 1 ? kopf.lastElementChild : null;
+  if (letzter && letzter.tagName !== 'H1' && !letzter.matches('.crumb')) { letzter.replaceWith(rechts); rechts.append(w, letzter); } else { kopf.append(rechts); rechts.append(w); }
+}
 const teilName = id => D.akte.teilvorgaenge.find(t => t.id === id)?.name || '';
 const kontaktName = id => { const k = D.kontakte.find(x => x.id === id); return k ? (k.kurzname || k.name) : ''; };
 function visibleEntries() {
@@ -972,7 +1001,7 @@ function fristModal() {
 // ---------- Aktionen ----------
 document.addEventListener('click', async ev => {
   const el = ev.target.closest('[data-act]');
-  if (!ev.target.closest('.search')) $('#results').hidden = true;
+  if (!ev.target.closest('.search')) { $('#results').hidden = true; if (!$('#q').value) document.querySelector('#werkzeuge .search')?.classList.remove('offen'); }
   if (!ev.target.closest('.imp')) { $('#impmenu').hidden = true; $('#impbtn').setAttribute('aria-expanded', 'false'); }
   if (!el) return;
   const a = el.dataset.act, id = el.dataset.id ? (isNaN(+el.dataset.id) ? el.dataset.id : +el.dataset.id) : null;
@@ -1020,6 +1049,8 @@ document.addEventListener('click', async ev => {
   case 'view': openViewer(el.dataset.doc, el.closest('tr')?.querySelector('b')?.textContent || D.inbox.find(p => p.id === +el.dataset.doc)?.titel); break;
   case 'vw-close': closeViewer(); break;
   case 'tsort': { const k = 'sort' + el.dataset.t, cur = S[k]; S[k] = cur.k === el.dataset.k ? {k: cur.k, d: -cur.d} : {k: el.dataset.k, d: 1}; await render(); break; }
+  case 'suche-auf': { const box = el.closest('.search'); box.classList.add('offen'); $('#q').focus(); break; }
+  case 'vgroup': S.vGroup = el.dataset.id; await render(); break;
   case 'vb': S.vb = id === null ? 'alle' : String(el.dataset.id); await render(); break;
   case 'vs': S.vs = el.dataset.id; await render(); break;
   case 'open-v': location.hash = 'akte-' + id; break;

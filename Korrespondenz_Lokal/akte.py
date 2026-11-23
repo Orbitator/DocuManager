@@ -513,6 +513,8 @@ class Akte:
             felder["bereich"] = data["bereich"]
         if "status" in data:
             felder["status"] = _choice(data["status"], STATUSES, "Status")
+        if "prioritaet" in data:
+            felder["prioritaet"] = _choice(data["prioritaet"] or "keine", ("keine", "hoch", "sehr hoch"), "Priorität")
         bereiche = self._bereiche(data["bereiche"], True) if "bereiche" in data else None
         if bereiche:
             felder["bereich"] = bereiche[0]  # erster = Hauptbereich (Listen, Gruppierung)
@@ -1996,6 +1998,15 @@ def test_fristen_ablage(store):  # noqa: C901
     assert [x for x in akte.archiv() if x["id"] == d1][0]["empfaenger"] == "Privat"
     akte.empfaenger_setzen([])
     assert [x for x in akte.archiv() if x["id"] == d1][0]["empfaenger"] == "Privat"  # von Hand gesetzt bleibt
+    # Priorität je Vorgang; Empfänger je Vorgang in der Liste
+    akte.vorgang_aendern(b, {"prioritaet": "sehr hoch"})
+    fall = [c for c in store.list_cases() if c["id"] == b][0]
+    assert fall["prioritaet"] == "sehr hoch" and "empfaenger" in fall
+    try:
+        akte.vorgang_aendern(b, {"prioritaet": "dringend"})
+        raise AssertionError("Unbekannte Priorität muss abgelehnt werden")
+    except ValueError:
+        pass
     # Eigene Eintragsart
     assert akte.eintragsart_anlegen("Ortstermin") == "Ortstermin"
     try:

@@ -10,7 +10,7 @@ Die bisherigen Schnittstellen (`/api/cases`, Dokumente, Scan, Chat) bleiben unve
 |---|---|
 | GET `/api/akte/{id}` | Vollständige Akte: Vorgang, Teilvorgänge, Schlagwörter, Beteiligte, Referenzen, Dokumente, Chronik (mit Teilvorgängen, Versand, „nacherfasst“), Fristen mit Verlauf |
 | GET `/api/akte/{id}/offen?teil={teilvorgang}` | Was vor dem Abschluss offen ist: Fristen, nicht versendete Entwürfe, fehlende Originale, ungeprüfte Chat-Notizen |
-| POST `/api/akte/{id}` | Vorgang ändern: `titel`, `bereich` oder `bereiche` (Liste, erster = Hauptbereich), `kontakte` (Beteiligte), `status`, `zustaendig`, `naechster_schritt`, `beschreibung` |
+| POST `/api/akte/{id}` | Vorgang ändern: `titel`, `prioritaet` (keine, hoch, sehr hoch), `bereich` oder `bereiche` (Liste, erster = Hauptbereich), `kontakte` (Beteiligte), `status`, `zustaendig`, `naechster_schritt`, `beschreibung` |
 | GET `/api/bereiche` | Bereiche mit Anzahl der Vorgänge |
 | GET `/api/kontakte` | Kontakte mit Abteilungen, Anschriften (aktuelle zuerst, mit Gültigkeit und Verwendung) und Vorgängen |
 | GET `/api/kontakte/dubletten?name=…` | Mögliche Dubletten vor dem Anlegen |
