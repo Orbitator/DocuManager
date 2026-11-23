@@ -23,7 +23,27 @@ Keine neuen Fachfunktionen, nur Betriebssicherheit.
 (Testbild `Testdaten/OCR_Stellungnahme.png`). Der Pixelpuffer-Fehler aus der Übergabe trat nur in der
 eingeschränkten Entwicklungsumgebung auf.
 
-## Etappe 2 · Datenmodell aus dem Prototyp
+## Etappe 2 · Datenmodell aus dem Prototyp (umgesetzt, Schemaversion 3)
+
+Neues Modul `Korrespondenz_Lokal/akte.py`, Schnittstellen in [API.md](API.md). Die Oberfläche folgt in Etappe 3;
+bis dahin sind die neuen Daten über die Schnittstellen und den Selbsttest prüfbar.
+
+Bestehendes Verhalten bleibt: Vorgabestatus „Schreiben verfassen“, bisherige Schnittstellen, Dubletten im
+selben Vorgang. Neu ist, dass dieselbe Datei in einem zweiten Vorgang verknüpft statt erneut angelegt wird.
+Der Bestand wird beim ersten Start übernommen (Dokumentzuordnungen, Bereiche, Suchindex), vorher entsteht
+automatisch eine Sicherung.
+
+Der Selbsttest prüft die Kriterien aus dem Konzept:
+
+| Kriterium | Prüfung |
+|---|---|
+| 1. Schadennummer aus einem Scan führt zur Akte und zum Original | Suche nach „KFZ-2026-1842“, „KFZ 2026 1842“ und „kfz2026“ findet Vorgang, Dokument und Seite |
+| 2. Gutachten in zwei Teilvorgängen, kein zweites Exemplar | ein Dokument, ein Eintrag in beiden Teilvorgängen, erneuter Import in einen anderen Vorgang verknüpft |
+| 3. Eingang, Entwurf, versendete Fassung und Nachweis chronologisch | Reihenfolge der Chronik, Entwurf verweist auf die versendete Fassung, Nachweis auf den Versand |
+| 4. Zwei Teilvorgänge mit eigener Zuständigkeit, Status und Fristen | getrennte Werte und getrennte offene Fristen |
+| 5. Empfänger in zwei Vorgängen, alte Anschrift bleibt nach Änderung sichtbar | Versand speichert die Anschrift, Kennzeichen „Anschrift geändert“, Versand an abgelaufene Anschrift wird abgelehnt |
+
+Bestandteile:
 
 - Teilvorgänge mit eigenem Status, Zuständigkeit und nächstem Schritt
 - Chronik-Einträge: Eingang, Ausgang, Entwurf, Versandnachweis, Telefonat, Notiz, Entscheidung, Chat-Notiz,

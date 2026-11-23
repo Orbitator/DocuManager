@@ -23,20 +23,22 @@ from email.utils import encode_rfc2231
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from threading import Event, Lock, Thread
-from urllib.parse import unquote, urlsplit
+from urllib.parse import parse_qsl, unquote, urlsplit
 
+from akte import Akte, ROUTES as AKTE_ROUTES, STATUSES, migrate_3, route_akte, test_akte
 from chat_sync import ChatSync, MAX_EXPORT, test_chat_sync
 
 ROOT = Path(__file__).resolve().parent
 PORT = 8765
 MAX_UPLOAD = 25 * 1024 * 1024
 MIN_MACOS = "14.0"
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 OCR_WAITING = "Wartet auf Texterkennung"
 OCR_RUNNING = "Texterkennung läuft"
 log = logging.getLogger("korrespondenz")
-CASE_STATUSES = ("Schreiben verfassen", "Recherchieren", "Schreiben abgeschickt")
-CASE_GROUPS = ("Rechtliche Angelegenheiten", "Finanzamt und Steuern", "Versicherungen", "Anderes")
+# Die ersten drei Werte und die Vorgabe „Schreiben verfassen“ stammen aus dem bisherigen Stand und bleiben gleich.
+CASE_STATUSES = STATUSES
+DEFAULT_STATUS = "Schreiben verfassen"
 TYPES = {
     ".pdf": "application/pdf",
     ".jpg": "image/jpeg",
@@ -167,7 +169,7 @@ def migrate_2(db):
         db.execute("ALTER TABLE dokument ADD COLUMN ocr_aktualisiert_am TEXT")
 
 
-MIGRATIONS = ((1, migrate_1), (2, migrate_2))
+MIGRATIONS = ((1, migrate_1), (2, migrate_2), (3, migrate_3))
 
 
 class Store:
@@ -228,16 +230,20 @@ class Store:
 
     def list_cases(self):
         with closing(self.connect()) as db:
-            return [dict(row) for row in db.execute("""SELECT v.*, count(d.id) AS dokumente
-                FROM vorgang v LEFT JOIN dokument d ON d.vorgang_id=v.id
-                GROUP BY v.id ORDER BY v.id DESC""")]
+            return [dict(row) for row in db.execute("""SELECT v.*, (SELECT count(*) FROM dokument_vorgang dv
+                JOIN dokument d ON d.id=dv.dokument_id WHERE dv.vorgang_id=v.id AND d.geloescht_am IS NULL) AS dokumente
+                FROM vorgang v WHERE v.geloescht_am IS NULL ORDER BY v.id DESC""")]
 
-    def create_case(self, title, group, description, status=CASE_STATUSES[0], due=None):
+    def groups(self):
+        with closing(self.connect()) as db:
+            return [row["name"] for row in db.execute("SELECT name FROM bereich ORDER BY id")]
+
+    def create_case(self, title, group, description, status=DEFAULT_STATUS, due=None):
         title = title.strip()
-        group = group.strip() or CASE_GROUPS[-1]
+        group = group.strip() or "Anderes"
         if not title or len(title) > 160 or len(description) > 4000:
             raise ValueError("Prüfe Titel und Beschreibung.")
-        if group not in CASE_GROUPS:
+        if group not in self.groups():
             raise ValueError("Wähle einen Bereich aus der Liste.")
         if status not in CASE_STATUSES:
             raise ValueError("Wähle einen Status aus der Liste.")
@@ -253,7 +259,7 @@ class Store:
                 raise ValueError("Vorgang nicht gefunden.")
 
     def change_case_group(self, case_id, group):
-        if group not in CASE_GROUPS:
+        if group not in self.groups():
             raise ValueError("Wähle einen Bereich aus der Liste.")
         with closing(self.connect()) as db, db:
             if not db.execute("UPDATE vorgang SET bereich=? WHERE id=?", (group, case_id)).rowcount:
@@ -267,9 +273,10 @@ class Store:
 
     def case_documents(self, case_id):
         with closing(self.connect()) as db:
-            return [dict(row) for row in db.execute("""SELECT id,titel,dateiname,titel_seite,
-                    titel_quelle,ocr_status,ocr_fehler,mime,angelegt_am FROM dokument
-                    WHERE vorgang_id=? ORDER BY id DESC""", (case_id,))]
+            return [dict(row) for row in db.execute("""SELECT d.id,d.titel,d.dateiname,d.titel_seite,
+                    d.titel_quelle,d.ocr_status,d.ocr_fehler,d.mime,d.angelegt_am FROM dokument d
+                    JOIN dokument_vorgang dv ON dv.dokument_id=d.id
+                    WHERE dv.vorgang_id=? AND d.geloescht_am IS NULL ORDER BY d.id DESC""", (case_id,))]
 
     def document(self, document_id):
         with closing(self.connect()) as db:
@@ -391,9 +398,21 @@ class Store:
         with closing(self.connect()) as db:
             if not db.execute("SELECT 1 FROM vorgang WHERE id=?", (case_id,)).fetchone():
                 raise ValueError("Vorgang nicht gefunden.")
-            existing = db.execute("SELECT id FROM dokument WHERE vorgang_id=? AND sha256=?", (case_id, digest)).fetchone()
+            if db.execute("SELECT geloescht_am FROM vorgang WHERE id=?", (case_id,)).fetchone()[0]:
+                raise ValueError("Vorgang nicht gefunden.")
+            existing = db.execute("""SELECT d.id FROM dokument d JOIN dokument_vorgang dv ON dv.dokument_id=d.id
+                WHERE dv.vorgang_id=? AND d.sha256=?""", (case_id, digest)).fetchone()
             if existing:
                 return existing["id"], False
+            # Dieselbe Datei aus einem anderen Vorgang: verknüpfen statt ein zweites Dokument anzulegen.
+            elsewhere = db.execute("SELECT id FROM dokument WHERE sha256=? AND geloescht_am IS NULL ORDER BY id",
+                                   (digest,)).fetchone()
+            if elsewhere:
+                with db:
+                    db.execute("INSERT OR IGNORE INTO dokument_vorgang(dokument_id,vorgang_id) VALUES(?,?)",
+                               (elsewhere["id"], case_id))
+                log.info("Dokument %s zusätzlich mit Vorgang %s verknüpft.", elsewhere["id"], case_id)
+                return elsewhere["id"], False
         path = self.uploads / (digest + suffix)
         if not path.is_file():
             with tempfile.NamedTemporaryFile(mode="wb", dir=self.uploads, delete=False) as stage:
@@ -411,6 +430,7 @@ class Store:
                 dateipfad,sha256,ocr_status) VALUES(?,?,?,?,?,?,?,?,?)""",
                 (case_id, name, Path(name).stem[:160], None, "Dateiname", TYPES[suffix], path.name, digest,
                  OCR_WAITING)).lastrowid
+            db.execute("INSERT INTO dokument_vorgang(dokument_id,vorgang_id) VALUES(?,?)", (doc_id, case_id))
         log.info("Dokument %s in Vorgang %s abgelegt (%s Bytes).", doc_id, case_id, len(raw))
         if self.worker:
             self.queue.put(doc_id)
@@ -518,6 +538,7 @@ class Scanner:
 
 class Handler(BaseHTTPRequestHandler):
     store = None
+    akte = None
     scanner = None
     chat = None
     host = f"127.0.0.1:{PORT}"
@@ -569,7 +590,7 @@ class Handler(BaseHTTPRequestHandler):
             name, mime = static[path]
             self.send_bytes(200, mime, (ROOT / name).read_bytes())
         elif path == "/api/cases":
-            self.send_json({"cases": self.store.list_cases(), "statuses": CASE_STATUSES, "groups": CASE_GROUPS,
+            self.send_json({"cases": self.store.list_cases(), "statuses": CASE_STATUSES, "groups": self.store.groups(),
                             "ocr": bool(self.store.ocr and self.store.ocr.is_file()),
                             "ocr_loading": not self.store.ocr_ready.is_set()})
         elif path == "/api/chat/threads":
@@ -601,7 +622,15 @@ class Handler(BaseHTTPRequestHandler):
                     encoded = encode_rfc2231(row["dateiname"], "utf-8")
                     self.send_bytes(200, row["mime"], file.read_bytes(), "inline; filename*=" + encoded)
         else:
-            self.send_json({"error": "Seite nicht gefunden."}, 404)
+            try:
+                found = route_akte(self.akte, "GET", path, dict(parse_qsl(urlsplit(self.path).query)))
+            except ValueError as error:
+                self.send_json({"error": str(error)}, 404)
+                return
+            if found is None:
+                self.send_json({"error": "Seite nicht gefunden."}, 404)
+            else:
+                self.send_json(*found)
 
     def do_POST(self):
         if not self.permitted():
@@ -622,7 +651,7 @@ class Handler(BaseHTTPRequestHandler):
             elif path == "/api/cases":
                 data = json.loads(self.read_body(24000))
                 case_id = self.store.create_case(data["title"], data.get("group", ""), data.get("description", ""),
-                                                 data.get("status", CASE_STATUSES[0]), data.get("due"))
+                                                 data.get("status", DEFAULT_STATUS), data.get("due"))
                 self.send_json({"id": case_id}, 201)
             elif match := re.fullmatch(r"/api/cases/(\d+)/due", path):
                 self.store.change_case_due_date(int(match[1]), json.loads(self.read_body(4000))["due"])
@@ -647,6 +676,11 @@ class Handler(BaseHTTPRequestHandler):
             elif match := re.fullmatch(r"/api/documents/(\d+)/ocr", path):
                 self.store.retry_ocr(int(match[1]))
                 self.send_json({"ok": True})
+            elif any(method == "POST" and pattern.fullmatch(path) for method, pattern, _ in AKTE_ROUTES):
+                data = json.loads(self.read_body(64000)) if self.headers.get("Content-Length", "0") != "0" else {}
+                if not isinstance(data, dict):
+                    raise ValueError("Ungültige Eingabe.")
+                self.send_json(*route_akte(self.akte, "POST", path, data))
             else:
                 self.send_json({"error": "Seite nicht gefunden."}, 404)
         except (ValueError, KeyError, AttributeError, TypeError) as error:
@@ -780,8 +814,10 @@ def self_test(ocr=None, image=None):
         assert len(store.case_documents(case_id)) == 2
         assert not scan_folder.exists()
         test_chat_sync(store)
+        test_akte(store)
         with closing(store.connect()) as db:
             assert db.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
+            assert not db.execute("PRAGMA foreign_key_check").fetchall()
         test_foundation(folder)
     print("Selbsttest erfolgreich" + (" einschließlich echter Bilderkennung." if image else "."))
 
@@ -799,8 +835,21 @@ def test_foundation(folder):
         db.executescript("""CREATE TABLE vorgang(id INTEGER PRIMARY KEY, titel TEXT NOT NULL,
             bereich TEXT NOT NULL, beschreibung TEXT NOT NULL,
             angelegt_am TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
-            INSERT INTO vorgang(titel,bereich,beschreibung) VALUES('Altvorgang','Anderes','');""")
+            INSERT INTO vorgang(titel,bereich,beschreibung) VALUES('Altvorgang','Altbereich','');
+            CREATE TABLE dokument(id INTEGER PRIMARY KEY, vorgang_id INTEGER NOT NULL REFERENCES vorgang(id),
+                dateiname TEXT NOT NULL, titel TEXT NOT NULL, titel_seite INTEGER, titel_quelle TEXT NOT NULL,
+                mime TEXT NOT NULL, dateipfad TEXT NOT NULL, sha256 TEXT NOT NULL, ocr_status TEXT NOT NULL,
+                angelegt_am TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, UNIQUE(vorgang_id, sha256));
+            CREATE TABLE dokumentseite(dokument_id INTEGER NOT NULL REFERENCES dokument(id), nummer INTEGER NOT NULL,
+                methode TEXT NOT NULL, text TEXT NOT NULL, PRIMARY KEY(dokument_id, nummer));
+            INSERT INTO dokument(vorgang_id,dateiname,titel,titel_quelle,mime,dateipfad,sha256,ocr_status)
+                VALUES(1,'Bescheid.pdf','Bescheid','Betreff','application/pdf','abc.pdf','abc','PDF-Text übernommen');
+            INSERT INTO dokumentseite VALUES(1,1,'pdf','Steuernummer 217/5123/4567 Einkommensteuerbescheid');""")
     old = Store(legacy, None)
+    # Bestand aus dem bisherigen Stand: Dokument bleibt im Vorgang, Text ist durchsuchbar, Bereich bleibt wählbar.
+    assert [d["titel"] for d in old.case_documents(1)] == ["Bescheid"]
+    assert Akte(old).suche("Einkommensteuerbescheid")[0]["dokument_id"] == 1
+    assert "Altbereich" in old.groups()
     assert old.list_cases()[0]["titel"] == "Altvorgang" and old.list_cases()[0]["status"] == "Schreiben verfassen"
     with closing(old.connect()) as db:
         assert db.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION
@@ -856,7 +905,7 @@ def test_foundation(folder):
     assert failing.document(doc_id)["titel"] == "Foto"
 
     # 4. Der Server beantwortet Anfragen, während eine andere Anfrage noch hängt.
-    Handler.store, Handler.scanner, Handler.chat = queued, Scanner(queued), ChatSync(queued)
+    Handler.store, Handler.scanner, Handler.chat, Handler.akte = queued, Scanner(queued), ChatSync(queued), Akte(queued)
     server = LocalServer(("127.0.0.1", 0), Handler)
     saved_host = Handler.host
     Handler.host = f"127.0.0.1:{server.server_address[1]}"
@@ -902,6 +951,7 @@ def main():
         raise SystemExit(1) from None
     Handler.scanner = Scanner(Handler.store)
     Handler.chat = ChatSync(Handler.store)
+    Handler.akte = Akte(Handler.store)
     try:
         server = LocalServer(("127.0.0.1", PORT), Handler)
     except OSError as error:
