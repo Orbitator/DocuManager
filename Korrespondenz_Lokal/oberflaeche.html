@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Korrespondenz</title>
+<link rel="stylesheet" href="/oberflaeche.css">
+</head>
+<body>
+<div class="app">
+  <aside class="side">
+    <div class="brand"><svg class="i" viewBox="0 0 24 24"><path d="M3 13l3-8h12l3 8v6a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1z"/><path d="M3 13h5l1 3h6l1-3h5"/></svg>Korrespondenz</div>
+    <nav class="nav" id="nav" aria-label="Hauptmenü"></nav>
+    <div class="side-foot">
+      <a class="btn ghost" href="#papierkorb" id="trashlink">Papierkorb</a>
+      <a class="btn ghost" href="#einstellungen">Einstellungen</a>
+      <a class="btn ghost" href="/alt" title="Chat-Import und Rechtsberatung aus der bisherigen Oberfläche">Bisherige Ansicht</a>
+    </div>
+  </aside>
+  <div class="main">
+    <header class="top">
+      <div class="search">
+        <svg class="i" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+        <input id="q" type="search" placeholder="Dokumente und Aktenzeichen suchen" autocomplete="off" aria-label="Suche">
+        <div class="results" id="results" hidden></div>
+      </div>
+      <div class="imp"><button class="btn pri" data-act="import" aria-haspopup="menu" aria-expanded="false" id="impbtn">Dokument importieren <svg class="i" viewBox="0 0 24 24" style="width:16px;height:16px"><path d="m6 9 6 6 6-6"/></svg></button>
+        <div class="impmenu" id="impmenu" role="menu" hidden>
+          <button role="menuitem" data-act="imp-file"><b>Datei auswählen …</b><small>PDF, JPEG, PNG oder TIFF bis 25 MB</small></button>
+          <button role="menuitem" data-act="imp-scan"><b>Scannen …</b><small>Scan-Dialog von macOS</small></button>
+        </div></div>
+      <input type="file" id="fileinp" multiple accept=".pdf,.jpg,.jpeg,.png,.tif,.tiff" hidden>
+    </header>
+    <main class="view" id="view"><p class="muted">Wird geladen …</p></main>
+  </div>
+</div>
+<div id="modalroot"></div>
+<div id="viewer" hidden role="dialog" aria-modal="true" aria-label="Originalansicht"></div>
+<div id="toast" hidden role="status"></div>
+<script src="/oberflaeche.js"></script>
+</body>
+</html>

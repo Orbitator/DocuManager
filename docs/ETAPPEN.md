@@ -57,7 +57,24 @@ Bestandteile:
 - Volltextsuche mit SQLite FTS5 über Dokumentseiten, Notizen und Chat-Notizen
 - Status ergänzt um „Offen“, „Wartet auf Antwort“ und „Erledigt“
 
-## Etappe 3 · Eine Oberfläche
+## Etappe 3 · Eine Oberfläche (Teil 1 umgesetzt, Schemaversion 4)
+
+Neue Oberfläche unter http://127.0.0.1:8765 (`oberflaeche.html`, `oberflaeche.js`, `oberflaeche.css`).
+Die bisherige Oberfläche bleibt unter `/alt` erreichbar (Chat-Import, Rechtsberatung).
+
+Umgesetzt: Übersicht, Posteingang (Kacheln, Details neben dem Dokument, Vorschläge für Titel, Datum,
+Absender und Vorgang, Zuordnen oder neuer Vorgang), Vorgänge (Filter, sortierbare Spalten), Vorgangsakte
+(Teilvorgänge, Chronik mit Typfilter, Vorschau des Originals, Einträge, Antwort-Entwurf, Versand, Fristen,
+Beteiligte, Referenzen, Schlagwörter), Fristen, Archiv (gruppiert nach Vorgang, Bereich, Absender oder Jahr,
+filterbar, sortierbar), Adressbuch (Anschriftenverlauf, Dublettenhinweis), Papierkorb, Einstellungen
+(Bereiche, eigene Angaben für die Absendererkennung), Volltextsuche, Import per Datei, Ziehen und Scan.
+
+Absendererkennung: Absenderzeile über der Anschrift, Behörde oder Gericht im Kopf, Organisation im
+Briefkopf, Grußformel. Eigene Angaben werden nie vorgeschlagen. Unbekannte Absender werden beim
+Zuordnen als Kontakt mit Anschrift angelegt.
+
+Offen für Teil 2: Briefvorlagen mit Vorschau, Markieren von Text in der Vorschau, Chat-Notizen in der
+neuen Oberfläche, Abschlussprüfung beim Status „Erledigt“, Aktenexport.
 
 Die Trennung zwischen „Vorgänge“ (echte Daten) und „Beispiele“ (Demo) entfällt. Die Ansichten aus dem
 Prototyp arbeiten mit echten Daten: Übersicht, Posteingang, Vorgangsakte mit Chronik und Vorschau,

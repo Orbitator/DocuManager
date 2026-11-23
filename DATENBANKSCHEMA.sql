@@ -1,6 +1,6 @@
--- SQLite-Schema der Korrespondenzverwaltung, Schemaversion 3 (PRAGMA user_version).
+-- SQLite-Schema der Korrespondenzverwaltung, Schemaversion 4 (PRAGMA user_version).
 -- Erzeugt aus einer frischen Installation. Ausschließlich Struktur, keine Daten.
--- Maßgeblich sind die Migrationen in Korrespondenz_Lokal/app.py (MIGRATIONS), akte.py (migrate_3)
+-- Maßgeblich sind die Migrationen in Korrespondenz_Lokal/app.py (MIGRATIONS), akte.py (migrate_3, migrate_4)
 -- und ChatSync.__init__. Fremdschlüssel müssen pro Verbindung aktiviert werden.
 PRAGMA foreign_keys = ON;
 
@@ -9,14 +9,14 @@ CREATE TABLE vorgang(
             beschreibung TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'Schreiben verfassen',
             naechste_frist TEXT,
             angelegt_am TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-        , zustaendig TEXT, naechster_schritt TEXT, geloescht_am TEXT);
+        , zustaendig TEXT, naechster_schritt TEXT, geloescht_am TEXT, system TEXT);
 
 CREATE TABLE dokument(
             id INTEGER PRIMARY KEY, vorgang_id INTEGER NOT NULL REFERENCES vorgang(id),
             dateiname TEXT NOT NULL, titel TEXT NOT NULL, titel_seite INTEGER,
             titel_quelle TEXT NOT NULL, mime TEXT NOT NULL, dateipfad TEXT NOT NULL,
             sha256 TEXT NOT NULL, ocr_status TEXT NOT NULL,
-            angelegt_am TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, ocr_fehler TEXT, ocr_aktualisiert_am TEXT, geloescht_am TEXT,
+            angelegt_am TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, ocr_fehler TEXT, ocr_aktualisiert_am TEXT, geloescht_am TEXT, dokument_datum TEXT,
             UNIQUE(vorgang_id, sha256)
         );
 
@@ -125,6 +125,8 @@ CREATE TABLE frist_verlauf(
 CREATE VIRTUAL TABLE suche USING fts5(
             art UNINDEXED, ref_id UNINDEXED, seite UNINDEXED, text, tokenize='unicode61 remove_diacritics 2');
 
+CREATE TABLE einstellung(schluessel TEXT PRIMARY KEY, wert TEXT NOT NULL);
+
 CREATE TABLE chat_thread(
                     id TEXT PRIMARY KEY, titel TEXT NOT NULL, stand REAL, importiert_am TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
                 );
@@ -186,4 +188,4 @@ CREATE TRIGGER suche_dokument_au AFTER UPDATE OF titel ON dokument BEGIN
   DELETE FROM suche WHERE art='dokument' AND ref_id=OLD.id;
   INSERT INTO suche(art,ref_id,seite,text) VALUES('dokument',NEW.id,NULL,NEW.titel||' '||NEW.dateiname); END;
 
-PRAGMA user_version = 3;
+PRAGMA user_version = 4;

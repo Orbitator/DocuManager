@@ -16,6 +16,11 @@ Die bisherigen Schnittstellen (`/api/cases`, Dokumente, Scan, Chat) bleiben unve
 | GET `/api/suche?q=…` | Volltextsuche über Dokumentseiten, Chronik, Referenzen und Titel, mit Textausschnitt und Seite |
 | GET `/api/papierkorb` | Gelöschte Vorgänge, Dokumente, Einträge, Fristen und Kontakte |
 
+| GET `/api/posteingang` | Noch nicht zugeordnete Dokumente mit Seiten und Vorschlägen (Datum, Absender, Referenz, Vorgänge) |
+| GET `/api/archiv` | Alle abgelegten Dokumente mit Vorgang, Bereich, Absender, Datum und Größe |
+| GET `/api/fristen` | Alle Fristen, Wiedervorlagen und Aufgaben |
+| GET `/api/einstellungen` | Eigene Angaben für die Absendererkennung |
+
 ## Ändern
 
 | Pfad | Körper |
@@ -41,6 +46,10 @@ Die bisherigen Schnittstellen (`/api/cases`, Dokumente, Scan, Chat) bleiben unve
 | POST `/api/kontakte/{id}/abteilungen` | wie eine Abteilung oben |
 | POST `/api/abteilungen/{id}/anschrift` | `zeilen`, `gueltig_von`. Die bisherige Anschrift endet am Vortag und bleibt für frühere Schreiben erhalten. |
 | POST `/api/documents/{id}/verknuepfen` | `vorgang_id` |
+| POST `/api/posteingang/dokumente` | Rohe Datei, Header `X-Dateiname`; landet im Posteingang |
+| POST `/api/posteingang/scan` | Öffnet den Scan-Dialog; Scans landen im Posteingang |
+| POST `/api/posteingang/{id}/zuordnen` | `vorgang_id`, optional `teile`, `titel`, `datum`, `kontakt_id` oder `neuer_absender` (`name`, `anschrift`) |
+| POST `/api/einstellungen` | `eigene_angaben` (eine Angabe pro Zeile) |
 | POST `/api/{typ}/{id}/loeschen` | Papierkorb; `typ` = vorgang, dokument, eintrag, frist, kontakt |
 | POST `/api/{typ}/{id}/wiederherstellen` | aus dem Papierkorb zurück |
 | POST `/api/{eintrag,frist}/{id}/endgueltig` | endgültig entfernen (nur aus dem Papierkorb) |

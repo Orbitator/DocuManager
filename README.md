@@ -13,7 +13,8 @@ Die Anwendung läuft auf dem Mac, wird im Browser bedient und braucht keinen Clo
 | Texterkennung mit PDFKit und Apple Vision, Titel aus Betreff oder Überschrift | produktiv, läuft als Warteschlange im Hintergrund; Bilderkennung am 23.11.2026 auf dem Mac bestätigt |
 | Nativer macOS-Scandialog | produktiv, Test mit echtem Scanner offen |
 | ChatGPT-Export importieren (Auswahl einzelner Unterhaltungen, wiederholbar) | produktiv |
-| Teilvorgänge, Chronik, Fristen mit Fundstelle und Verlauf, Kontakte mit Anschriftenverlauf, Versand, Referenzen, Bereiche, Schlagwörter, Papierkorb, Volltextsuche | Datenmodell und Schnittstellen fertig (Etappe 2, [docs/API.md](docs/API.md)); Oberfläche folgt in Etappe 3 |
+| Teilvorgänge, Chronik, Fristen mit Fundstelle und Verlauf, Kontakte mit Anschriftenverlauf, Versand, Referenzen, Bereiche, Schlagwörter, Papierkorb, Volltextsuche | Datenmodell und Schnittstellen ([docs/API.md](docs/API.md)) |
+| Neue Oberfläche: Posteingang mit Absendererkennung, Vorgänge, Akte, Fristen, Archiv, Adressbuch, Papierkorb | Etappe 3, Teil 1; bisherige Oberfläche unter `/alt` |
 
 Der Fahrplan steht in [docs/ETAPPEN.md](docs/ETAPPEN.md). Die Übergabe aus der ChatGPT-Entwicklung liegt in
 [docs/Uebergabe_ChatGPT](docs/Uebergabe_ChatGPT).
@@ -69,7 +70,8 @@ Datenbank und Originale gehören zusammen.
 | `Korrespondenz_Lokal/app.py` | HTTP-Dienst, SQLite mit Schema-Migrationen, Dokumentimport, OCR-Warteschlange, Scanner, Selbsttest |
 | `Korrespondenz_Lokal/akte.py` | Datenmodell der Vorgangsakte, Suche, Papierkorb und zugehörige Schnittstellen |
 | `Korrespondenz_Lokal/chat_sync.py` | Import von ChatGPT-Exporten |
-| `Korrespondenz_Lokal/Korrespondenz_Rechtsberatung.html` | Browseroberfläche mit Demoansichten |
+| `Korrespondenz_Lokal/oberflaeche.html`, `oberflaeche.js`, `oberflaeche.css` | Neue Browseroberfläche |
+| `Korrespondenz_Lokal/Korrespondenz_Rechtsberatung.html` | Bisherige Oberfläche unter `/alt` (Chat-Import, Rechtsberatung) |
 | `Korrespondenz_Lokal/lokale_vorgaenge.js` | Vorgangsliste, Upload, Scan und Dokumentkarten für echte Daten |
 | `Korrespondenz_Lokal/chat_notizen.js` | Ansicht der Chat-Notizen |
 | `Korrespondenz_Lokal/ocr.swift` | PDFKit und Apple Vision, gibt seitenweisen Text als JSON aus |

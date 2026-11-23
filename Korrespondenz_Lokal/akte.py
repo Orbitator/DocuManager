@@ -412,7 +412,8 @@ class Akte:
             for e in eintraege:
                 e["teile"] = [r["teilvorgang_id"] for r in q(
                     "SELECT teilvorgang_id FROM eintrag_teil WHERE eintrag_id=? ORDER BY teilvorgang_id", e["id"])]
-                e["nacherfasst"] = e["ereignis_datum"] < e["erfasst_am"][:10]
+                # Nacherfasst: Telefonat, Notiz o. Ä. später eingetragen. Ein Brief ist naturgemäß älter als sein Eingang.
+                e["nacherfasst"] = not e["dokument_id"] and e["ereignis_datum"] < e["erfasst_am"][:10]
                 versand = q("SELECT * FROM versand WHERE eintrag_id=?", e["id"])
                 e["versand"] = versand[0] if versand else None
                 if e["versand"] and e["versand"]["anschrift_id"]:
@@ -1181,7 +1182,9 @@ def test_akte(store):
     assert anschriften[0]["gueltig_bis"] is None and anschriften[1]["gueltig_bis"] == "2026-10-31"
     assert anschriften[1]["verwendet"] == 1
     assert {t["id"]: t["status"] for t in a["teilvorgaenge"]}[front] == "Schreiben abgeschickt"
-    assert by_id[e_gut]["nacherfasst"]  # Ereignis 10.11., erfasst heute
+    assert not by_id[e_gut]["nacherfasst"]  # Schreiben mit Dokument gelten nicht als nacherfasst
+    tel = akte.eintrag_anlegen(kia, {"art": "telefonat", "titel": "Telefonat", "datum": "2026-10-14", "teile": [heck]})
+    assert [e for e in akte.akte(kia)["eintraege"] if e["id"] == tel][0]["nacherfasst"]
 
     # Fristen: verbindliche Frist nur mit Fundstelle, Verschieben mit Verlauf, getrennt je Teilvorgang
     try:

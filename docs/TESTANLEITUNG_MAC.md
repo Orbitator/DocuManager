@@ -83,6 +83,15 @@ Erst wenn Schritt 2 bis 4 funktionieren. Die bisherige Anwendung vorher beenden.
    und aktualisiert das Schema auf Version 2.
 4. Prüfen: Vorgänge, Chat-Notizen und Archivliste sind vollständig.
 
+## 6. Neue Oberfläche (Etappe 3)
+
+1. Unter **Einstellungen** bei „Eigene Angaben“ Ihren Namen und Ihre Anschrift eintragen und speichern.
+2. Unter **Dokument importieren** zwei echte Schreiben auswählen. Sie erscheinen als Kacheln im **Posteingang**.
+3. Eine Kachel anklicken. Rechts daneben stehen Titel, Datum und Absender. Prüfen, ob der Absender stimmt.
+4. Einen Vorgang wählen oder „+ Neuer Vorgang …“ und **Zuordnen**. Die Akte öffnet sich mit dem Eingang
+   in der Chronik und dem Original rechts.
+5. **Archiv** öffnen und zwischen den Gruppierungen wechseln.
+
 ## Rückmeldung
 
 Bitte mitteilen:

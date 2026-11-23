@@ -51,7 +51,9 @@ TYPES = {
 HEADING = re.compile(r"bescheid|widerspruch|einspruch|mahnung|rechnung|kündigung|schaden|"
                      r"zahlungsaufforderung|stellungnahme|anforderung|rückfrage|mitteilung|"
                      r"ordnungs(?:geld|widrigkeit)|entscheidung|aufforderung", re.IGNORECASE)
-REFERENCE = re.compile(r"^(?:aktenzeichen|schadennummer|referenz|zeichen|datum|seite|"
+REFERENCE = re.compile(r"^(?:aktenzeichen|schadennummer|schaden-?\s?nr|kunden-?\s?(?:nr|nummer)|"
+                       r"rechnungs-?\s?(?:nr|nummer)|vertrags-?\s?(?:nr|nummer)|versicherungs-?\s?(?:nr|nummer)|"
+                       r"referenz|zeichen|datum|seite|"
                        r"telefon|kontakt|e-mail|telefonisch|iban|steuer(?:nr|nummer)|"
                        r"sehr geehrte|guten tag|mit freundlichen|deutschland|"
                        r"(?:ihr|unser)\s+(?:zeichen|schreiben|kontakt)|"
@@ -59,8 +61,20 @@ REFERENCE = re.compile(r"^(?:aktenzeichen|schadennummer|referenz|zeichen|datum|s
 SUBJECT = re.compile(r"^(?:betreff|subject)\s*(?::\s*(.*))?$", re.IGNORECASE)
 
 
+DOCUMENT_TYPES = (  # Dokumentarten ohne Betreffzeile, die sich am Inhalt eindeutig erkennen lassen
+    (re.compile(r"handelsregister", re.I), re.compile(r"\b(HR[AB])\s*(\d{2,7})\b"), "Handelsregisterauszug {0} {1}"),
+)
+
+
 def select_title(pages):
     """Gibt einen erkannten Titel mit Fundstelle zurück."""
+    if pages:
+        first = "\n".join(row["text"] for row in pages[0]["lines"][:30])
+        if not any(SUBJECT.fullmatch(re.sub(r"\s+", " ", row["text"]).strip()) for row in pages[0]["lines"][:24]):
+            for marker, number, template in DOCUMENT_TYPES:
+                found = number.search(first)
+                if marker.search(first) and found:
+                    return template.format(*found.groups()), pages[0]["number"], "Dokumentart"
     for page in pages[:2]:
         lines = [(re.sub(r"\s+", " ", row["text"]).strip(), row)
                  for row in page["lines"][:24]]
@@ -597,7 +611,10 @@ class Handler(BaseHTTPRequestHandler):
         if not self.permitted():
             return
         path = urlsplit(self.path).path
-        static = {"/": ("Korrespondenz_Rechtsberatung.html", "text/html; charset=utf-8"),
+        static = {"/": ("oberflaeche.html", "text/html; charset=utf-8"),
+                  "/oberflaeche.js": ("oberflaeche.js", "text/javascript; charset=utf-8"),
+                  "/oberflaeche.css": ("oberflaeche.css", "text/css; charset=utf-8"),
+                  "/alt": ("Korrespondenz_Rechtsberatung.html", "text/html; charset=utf-8"),
                   "/lokale_vorgaenge.js": ("lokale_vorgaenge.js", "text/javascript; charset=utf-8"),
                   "/chat_notizen.js": ("chat_notizen.js", "text/javascript; charset=utf-8")}
         if path in static:
@@ -676,6 +693,12 @@ class Handler(BaseHTTPRequestHandler):
             elif match := re.fullmatch(r"/api/cases/(\d+)/status", path):
                 self.store.change_case_status(int(match[1]), json.loads(self.read_body(4000))["status"])
                 self.send_json({"ok": True})
+            elif path == "/api/posteingang/dokumente":
+                name = unquote(self.headers.get("X-Dateiname", ""), errors="strict")
+                doc_id, created = self.store.import_document(None, name, self.read_body(MAX_UPLOAD))
+                self.send_json({"id": doc_id, "created": created}, 201 if created else 200)
+            elif path == "/api/posteingang/scan":
+                self.send_json({"id": self.scanner.start(None)}, 201)
             elif match := re.fullmatch(r"/api/cases/(\d+)/scan", path):
                 self.send_json({"id": self.scanner.start(int(match[1]))}, 201)
             elif match := re.fullmatch(r"/api/scans/([0-9a-f]{32})/poll", path):
@@ -772,6 +795,12 @@ def self_test(ocr=None, image=None):
         "Stellungnahme zum Frontschaden", 1, "Betreff")
     assert select_title([{"number": 1, "lines": [{"text": "Betreff"}, {"text": "Unterlagen zur Prüfung"}]}])[0] == "Unterlagen zur Prüfung"
     assert select_title([{"number": 1, "lines": [{"text": "Datum: 24.11.2026"}]}])[0] == ""
+    assert select_title([{"number": 1, "lines": [{"text": "Schaden-Nr. KFZ-2026-1842"}, {"text": "Ihr Schadenfall"}]}])[0] \
+        == "Ihr Schadenfall"
+    assert select_title([{"number": 1, "lines": [{"text": "Handelsregister B des Amtsgerichts Rostock"},
+                                                 {"text": "Nummer der Firma: HRB 11893"},
+                                                 {"text": "6. a) Rechtsform, Beginn, Satzung"}]}]) == (
+        "Handelsregisterauszug HRB 11893", 1, "Dokumentart")
     with tempfile.TemporaryDirectory(prefix="korrespondenz-test-") as temporary:
         folder = Path(temporary)
         store = Store(folder, ocr)

@@ -1,0 +1,663 @@
+'use strict';
+/* Oberfläche der Korrespondenzverwaltung (Etappe 3).
+   Gestaltung und Abläufe aus dem Klickprototyp, Daten aus dem lokalen Dienst (akte.py, app.py). */
+(() => {
+// ---------- Hilfen ----------
+const $ = sel => document.querySelector(sel);
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const pad = n => String(n).padStart(2, '0');
+const isoHeute = () => { const t = new Date(); return `${t.getFullYear()}-${pad(t.getMonth()+1)}-${pad(t.getDate())}`; };
+const dt = iso => iso ? iso.slice(0, 10).split('-').reverse().join('.') : '–';
+const dShort = iso => { const [, m, d] = iso.split('-'); return `${d}.${m}.`; };
+const tage = iso => Math.round((new Date(iso.slice(0,10) + 'T12:00') - new Date(isoHeute() + 'T12:00')) / 864e5);
+const plusTage = (iso, n) => { const t = new Date(iso + 'T12:00'); t.setDate(t.getDate() + n); return `${t.getFullYear()}-${pad(t.getMonth()+1)}-${pad(t.getDate())}`; };
+const relTage = iso => { const n = tage(iso); return n === 0 ? 'heute' : n === 1 ? 'morgen' : n === -1 ? 'gestern' : n < 0 ? `seit ${-n} Tagen überfällig` : `in ${n} Tagen`; };
+const groesse = n => n == null ? '' : n < 1024 ? n + ' B' : n < 1048576 ? Math.round(n / 1024) + ' KB' : (n / 1048576).toFixed(1).replace('.', ',') + ' MB';
+const WD = ['So','Mo','Di','Mi','Do','Fr','Sa'];
+const MON = ['Januar','Februar','März','April','Mai','Juni','Juli','August','September','Oktober','November','Dezember'];
+let snap = {};  // Eingaben eines Dialogs, festgehalten beim Speichern (der Dialog schließt vor dem Senden)
+const val = id => document.getElementById(id)?.value ?? snap[id] ?? '';
+const P = {
+  home:'<path d="M3 11l9-7 9 7v9a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z"/>',
+  inbox:'<path d="M3 13l3-8h12l3 8v6a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1z"/><path d="M3 13h5l1 3h6l1-3h5"/>',
+  folder:'<path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>',
+  cal:'<rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4"/>',
+  book:'<rect x="4" y="3" width="16" height="18" rx="2"/><circle cx="12" cy="10" r="2.6"/><path d="M8 17c.8-1.7 2.2-2.6 4-2.6s3.2.9 4 2.6"/>',
+  archive:'<rect x="3" y="4" width="18" height="5" rx="1"/><path d="M5 9v10a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V9M10 13h4"/>',
+  doc:'<path d="M7 3h7l5 5v13H7z"/><path d="M14 3v5h5"/>',
+  in:'<path d="M12 3v11M8 10l4 4 4-4"/><path d="M4 15v4a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-4"/>',
+  out:'<path d="M12 14V3M8 7l4-4 4 4"/><path d="M4 15v4a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-4"/>',
+  phone:'<path d="M5 4h4l2 5-2.5 1.5a11 11 0 0 0 5 5L15 13l5 2v4a1 1 0 0 1-1 1A16 16 0 0 1 4 5a1 1 0 0 1 1-1z"/>',
+  note:'<path d="M5 4h14v11l-5 5H5z"/><path d="M14 20v-5h5M8 9h8M8 13h4"/>',
+  draft:'<path d="M4 20h4L19 9l-4-4L4 16z"/><path d="m13 7 4 4"/>',
+  check:'<circle cx="12" cy="12" r="9"/><path d="m8 12 3 3 5-6"/>',
+  receipt:'<path d="M6 3h12v18l-3-2-3 2-3-2-3 2z"/><path d="M9 8h6M9 12h6"/>',
+  chat:'<path d="M4 5h16v11H9l-5 4z"/><path d="M8 9h8M8 12h5"/>',
+  alert:'<path d="M12 3 22 20H2z"/><path d="M12 10v4M12 17v.5"/>',
+  plus:'<path d="M12 5v14M5 12h14"/>', minus:'<path d="M5 12h14"/>',
+  trash:'<path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13"/><path d="M10 11v6M14 11v6"/>',
+  expand:'<path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/>',
+  restore:'<path d="M4 12a8 8 0 1 0 3-6.2"/><path d="M4 4v4h4"/>',
+  para:'<path d="M14 4v16M18 4v16M18 4h-7a4 4 0 0 0 0 8h3"/>',
+  link:'<path d="M10 14a4 4 0 0 0 6 0l3-3a4 4 0 0 0-6-6l-1 1"/><path d="M14 10a4 4 0 0 0-6 0l-3 3a4 4 0 0 0 6 6l1-1"/>',
+  photo:'<rect x="3" y="5" width="18" height="14" rx="2"/><circle cx="9" cy="10" r="2"/><path d="m21 16-5-5-8 8"/>',
+  gear:'<circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9 7 7M17 17l2.1 2.1M4.9 19.1 7 17M17 7l2.1-2.1"/>'
+};
+const I = (n, cls = '') => `<svg class="i ${cls}" viewBox="0 0 24 24">${P[n]}</svg>`;
+
+// Status: gespeicherter Wert bleibt, angezeigt wird die kurze Bezeichnung aus dem Prototyp
+const ST_LABEL = {'Schreiben verfassen':'Verfassen'};
+const ST_KEY = {'Offen':'offen','Recherchieren':'recherche','Schreiben verfassen':'verfassen','Schreiben abgeschickt':'abgeschickt','Wartet auf Antwort':'wartet','Erledigt':'erledigt'};
+const ST_PILL = {'Offen':'grey','Schreiben abgeschickt':'ok','Wartet auf Antwort':'warn','Erledigt':'ok'};
+const ST_ORDER = ['Offen','Recherchieren','Schreiben verfassen','Schreiben abgeschickt','Wartet auf Antwort','Erledigt'];
+const stLabel = s => ST_LABEL[s] || s;
+const statusPill = s => `<span class="pill ${ST_PILL[s] || ''}">${esc(stLabel(s))}</span>`;
+const statusOptions = cur => ST_ORDER.map(s => `<option value="${esc(s)}" ${s === cur ? 'selected' : ''}>${esc(stLabel(s))}</option>`).join('');
+const KIND = {eingang:['Eingang','in'],ausgang:['Versendet','out'],entwurf:['Entwurf','draft'],nachweis:['Versandnachweis','receipt'],telefonat:['Telefonat','phone'],notiz:['Notiz','note'],entscheidung:['Entscheidung','check'],chat:['Chat-Notiz','chat'],fehlt:['Original fehlt','doc']};
+const FK = {frist:'Verbindliche Frist', wiedervorlage:'Wiedervorlage', aufgabe:'Aufgabe'};
+const FKC = {frist:'crit', wiedervorlage:'warn', aufgabe:''};
+const VERSAND = ['Post','Einschreiben','E-Mail','Fax','Persönlich','Online-Portal'];
+
+// ---------- Schnittstelle ----------
+async function api(path, body, method) {
+  const opt = body === undefined && !method ? {} : {method: method || 'POST',
+    headers: {'Content-Type': 'application/json', 'X-Korrespondenz': 'lokal'}, body: JSON.stringify(body || {})};
+  const res = await fetch('/api/' + path, opt);
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || 'Anfrage fehlgeschlagen.');
+  return data;
+}
+async function upload(path, file) {
+  const res = await fetch('/api/' + path, {method: 'POST', body: file,
+    headers: {'X-Korrespondenz': 'lokal', 'X-Dateiname': encodeURIComponent(file.name)}});
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || 'Import fehlgeschlagen.');
+  return data;
+}
+
+// ---------- Zustand ----------
+const S = {view: 'uebersicht', v: null, teil: 'all', entry: null, tab: 'chronik', ktype: 'alle', ibSel: null,
+  vb: 'alle', vs: 'alle', vt: 'alle', sortV: {k: 'frist', d: 1}, sortD: {k: 'datum', d: -1}, sortA: {k: 'datum', d: -1},
+  fFilter: 'alle', aGroup: 'vorgang', aBereich: 'alle', aJahr: 'alle', aText: '', aErledigt: false, contact: null, abq: ''};
+const D = {cases: [], statuses: [], groups: [], akte: null, inbox: [], fristen: [], archiv: [], kontakte: [], trash: [], eigene: ''};
+
+async function loadBase() {
+  const c = await api('cases');
+  Object.assign(D, {cases: c.cases, statuses: c.statuses, groups: c.groups, ocr: c.ocr});
+  D.inbox = (await api('posteingang')).dokumente;
+  D.trash = (await api('papierkorb')).eintraege;
+}
+
+// ---------- Navigation ----------
+function nav() {
+  const items = [['uebersicht','Übersicht','home'],['posteingang','Posteingang','inbox',D.inbox.length],['vorgaenge','Vorgänge','folder'],
+    ['fristen','Fristen','cal'],['archiv','Archiv','archive'],['adressbuch','Adressbuch','book']];
+  const cur = S.view === 'akte' ? 'vorgaenge' : S.view;
+  $('#nav').innerHTML = items.map(([id, l, ic, n]) => `<a href="#${id}" class="${cur === id ? 'on' : ''}" ${cur === id ? 'aria-current="page"' : ''}>${I(ic)}${l}${n ? `<span class="cnt num">${n}</span>` : ''}</a>`).join('');
+  $('#trashlink').innerHTML = `${I('trash')}Papierkorb${D.trash.length ? `<span class="cnt num" style="margin-left:auto">${D.trash.length}</span>` : ''}`;
+  document.querySelector('.side-foot a[href="#einstellungen"]').innerHTML = `${I('gear')}Einstellungen`;
+}
+const VIEWS = ['uebersicht','posteingang','vorgaenge','fristen','archiv','adressbuch','papierkorb','einstellungen'];
+async function route() {
+  const h = location.hash.slice(1);
+  if (h.startsWith('akte-')) { const id = +h.slice(5); if (S.v !== id) { S.v = id; S.teil = 'all'; S.entry = null; S.tab = 'chronik'; } S.view = 'akte'; }
+  else S.view = VIEWS.includes(h) ? h : 'uebersicht';
+  await render();
+}
+let renderToken = 0;
+async function render() {
+  const token = ++renderToken;
+  try {
+    await loadBase();
+    if (S.view === 'akte') D.akte = await api('akte/' + S.v);
+    if (S.view === 'fristen' || S.view === 'uebersicht') D.fristen = (await api('fristen')).fristen;
+    if (S.view === 'archiv') D.archiv = (await api('archiv')).dokumente;
+    if (S.view === 'adressbuch' || S.view === 'akte' || S.view === 'posteingang') D.kontakte = (await api('kontakte')).kontakte;
+    if (S.view === 'einstellungen') D.eigene = (await api('einstellungen')).eigene_angaben;
+  } catch (e) {
+    if (token !== renderToken) return;
+    $('#view').innerHTML = `<div class="notice crit">${I('alert')}<p>${esc(e.message)}</p></div>`;
+    if (S.view === 'akte') { location.hash = 'vorgaenge'; }
+    return;
+  }
+  if (token !== renderToken) return;
+  nav();
+  $('#view').innerHTML = ({uebersicht: vHome, posteingang: vInbox, vorgaenge: vList, akte: vAkte, fristen: vFristen,
+    archiv: vArchiv, adressbuch: vAb, papierkorb: vTrash, einstellungen: vSettings})[S.view]();
+  followInbox();
+}
+
+// ---------- Übersicht ----------
+function vHome() {
+  const offen = D.fristen.filter(f => !f.erledigt_am);
+  const ueber = offen.filter(f => tage(f.faellig_am) < 0), bald = offen.filter(f => tage(f.faellig_am) >= 0 && tage(f.faellig_am) <= 14);
+  const wartet = D.cases.filter(c => c.status === 'Wartet auf Antwort' || c.status === 'Schreiben abgeschickt');
+  return `<h1>Übersicht</h1>
+  <div class="kpis"><a class="kpi ${ueber.length ? 'crit' : ''}" href="#fristen"><b class="num">${ueber.length}</b><span>Überfällig</span></a>
+   <a class="kpi ${bald.length ? 'warn' : ''}" href="#fristen"><b class="num">${bald.length}</b><span>Fällig in 14 Tagen</span></a>
+   <a class="kpi" href="#posteingang"><b class="num">${D.inbox.length}</b><span>Im Posteingang</span></a>
+   <a class="kpi" href="#vorgaenge"><b class="num">${D.cases.length}</b><span>Vorgänge</span></a></div>
+  <div class="grid2"><div class="panel"><h2>Fristen</h2>${fristList([...ueber, ...bald], false)}</div>
+   <div class="stack"><div class="panel"><h2>Posteingang</h2><ul class="mini" style="margin-top:8px">${D.inbox.slice(0, 6).map(p => `<li><span>${esc(p.titel)}</span><span class="muted num">${dt(p.angelegt_am)}</span></li>`).join('') || '<li class="muted">Alles einsortiert.</li>'}</ul>${D.inbox.length ? '<div style="margin-top:10px"><a class="btn sm" href="#posteingang">Einsortieren</a></div>' : ''}</div>
+   <div class="panel"><h2>Warten auf Antwort</h2><ul class="mini" style="margin-top:8px">${wartet.map(c => `<li><a href="#akte-${c.id}">${esc(c.titel)}</a><span class="muted">${esc(stLabel(c.status))}</span></li>`).join('') || '<li class="muted">Keine.</li>'}</ul></div></div></div>`;
+}
+
+// ---------- Posteingang ----------
+function tileState(p) {
+  if (/Wartet|läuft/.test(p.ocr_status)) return ['', 'Wird gelesen …'];
+  if (/fehlgeschlagen|nicht verfügbar|Kein Text/.test(p.ocr_status)) return ['crit', 'Kein Text'];
+  if (p.vorschlag.vorgaenge.length) return ['ok', 'Vorschlag bereit'];
+  return ['warn', 'Zuordnen'];
+}
+function tileHtml(p) {
+  const [cls, lbl] = tileState(p);
+  const lines = (p.seiten[0]?.text || '').split('\n').filter(Boolean).slice(0, 9);
+  const prev = /^image\/(jpeg|png)/.test(p.mime) ? `<img src="/api/documents/${p.id}/original" alt="" loading="lazy">`
+    : lines.length ? `<div class="tdoc">${lines.map(l => `<span>${esc(l)}</span>`).join('')}</div>` : `<div class="tdoc tempty">${I('doc')}</div>`;
+  return `<button class="tile ${S.ibSel === p.id ? 'on' : ''}" id="it-${p.id}" role="listitem" data-act="ib-open" data-id="${p.id}" aria-pressed="${S.ibSel === p.id}">
+   <span class="tprev">${prev}</span><span class="tname" title="${esc(p.dateiname)}">${esc(p.titel)}</span>
+   <span class="tmeta num">${groesse(p.groesse)} · ${dt(p.angelegt_am)}</span><span class="pill ${cls} tstate">${lbl}</span></button>`;
+}
+const draft = {};  // Eingaben im Posteingang bis zum Zuordnen
+function detailHtml(p) {
+  const v = p.vorschlag, d = draft[p.id] || (draft[p.id] = {titel: p.titel, datum: v.datum || '', kontakt: v.kontakt ? String(v.kontakt.id) : (v.absender ? 'neu' : ''), vorgang: v.vorgaenge[0] ? String(v.vorgaenge[0].vorgang_id) : '', teil: ''});
+  const titleSrc = p.titel_quelle === 'Manuell' ? 'manuell geändert' : p.titel_quelle === 'Dateiname' ? 'aus dem Dateinamen' : `erkannt aus: ${p.titel_quelle}${p.titel_seite ? ', Seite ' + p.titel_seite : ''}`;
+  const pending = /Wartet|läuft/.test(p.ocr_status);
+  const neu = v.absender && !v.absender.kontakt;
+  return `<div class="icard" id="ic-${p.id}"><div class="ibhead"><div style="min-width:0"><h3>${esc(p.dateiname)}</h3><span class="muted num" style="font-size:13px">${esc(p.mime.split('/')[1].toUpperCase())} · ${groesse(p.groesse)} · eingegangen ${dt(p.angelegt_am)} · ${esc(p.ocr_status)}</span></div>
+   <span style="display:flex;gap:6px"><button class="btn sm" data-act="view" data-doc="${p.id}">${I('expand')}Original</button><button class="iconbtn" data-act="ib-del" data-id="${p.id}" title="Löschen" aria-label="${esc(p.dateiname)} löschen">${I('trash')}</button><button class="iconbtn" data-act="ib-close" title="Details schließen" aria-label="Details schließen">${I('minus')}</button></span></div>
+   ${pending ? `<div class="notice info">${I('doc')}<p>Der Text wird gerade erkannt. Die Vorschläge erscheinen gleich.</p></div>` : ''}
+   ${p.ocr_fehler ? `<div class="notice crit">${I('alert')}<p>${esc(p.ocr_status)}: ${esc(p.ocr_fehler)}</p></div>` : ''}
+   <div class="ibsec ibsec-found"><h4>Erkannte Angaben</h4><div class="found2">
+    <label class="wide">Titel <small>${esc(titleSrc)}</small><input data-ib="titel" data-id="${p.id}" value="${esc(d.titel)}" maxlength="160"></label>
+    <label>Dokumentdatum <small>${v.datum_quelle ? 'aus: ' + esc(v.datum_quelle) : 'nicht erkannt'}</small><input type="date" data-ib="datum" data-id="${p.id}" value="${esc(d.datum)}"></label>
+    <label>Absender <small>${v.absender ? 'aus: ' + esc(v.absender.quelle) : v.kontakt ? 'aus Erwähnung im Text' : 'nicht erkannt'}</small><select data-ib="kontakt" data-id="${p.id}"><option value="">– unbekannt –</option>
+     ${neu ? `<option value="neu" ${d.kontakt === 'neu' ? 'selected' : ''}>Neu: ${esc(v.absender.name)}</option>` : ''}
+     ${D.kontakte.map(k => `<option value="${k.id}" ${d.kontakt === String(k.id) ? 'selected' : ''}>${esc(k.kurzname || k.name)}</option>`).join('')}</select></label>
+    ${v.referenz ? `<div class="refbox"><small>${esc(v.referenz.bezeichnung)}</small><b class="num">${esc(v.referenz.wert)}</b></div>` : ''}</div>
+    ${neu ? `<p class="hint">„${esc(v.absender.name)}“ ist noch nicht im Adressbuch. Beim Zuordnen wird der Kontakt${v.absender.anschrift ? ' mit Anschrift' : ''} angelegt.</p>` : '<p class="hint">Vorschläge aus dem erkannten Text. Bitte prüfen und bei Bedarf ändern.</p>'}</div>
+   ${p.seiten.length ? `<details class="ocrd ibsec ibsec-text"><summary>Erkannter Text · ${p.seiten.length} Seite(n)</summary><pre>${esc(p.seiten.map(s => `— Seite ${s.nummer} · ${s.methode === 'ocr' ? 'OCR' : 'Textschicht'} —\n${s.text}`).join('\n\n').slice(0, 8000))}</pre></details>` : ''}
+   <div class="ibsec ibsec-assign"><h4>Zuordnen</h4>
+    ${v.vorgaenge.length ? `<div class="sugg"><span class="muted" style="font-size:13px">Gehört vermutlich zu</span>${v.vorgaenge.map(s => `<button class="btn sm out" data-act="ib-assign" data-id="${p.id}" data-v="${s.vorgang_id}">${esc(s.titel)}</button><span class="why">${esc(s.grund)}</span>`).join('')}</div>` : '<p class="hint" style="margin:0 0 6px">Kein passender Vorgang erkannt.</p>'}
+    <div class="manual" style="margin-top:8px"><span class="muted" style="font-size:13px">${v.vorgaenge.length ? 'oder' : 'Vorgang'}</span><select id="mv-${p.id}" aria-label="Vorgang wählen">${D.cases.map(c => `<option value="${c.id}" ${d.vorgang === String(c.id) ? 'selected' : ''}>${esc(c.titel)}</option>`).join('')}<option value="__new">+ Neuer Vorgang …</option></select>
+     <button class="btn pri sm" data-act="ib-manual" data-id="${p.id}">Zuordnen</button></div></div></div>`;
+}
+function vInbox() {
+  if (S.ibSel && !D.inbox.some(p => p.id === S.ibSel)) S.ibSel = null;
+  const sel = D.inbox.find(p => p.id === S.ibSel);
+  return `<h1>Posteingang</h1><p class="muted" style="margin:6px 0 16px">${D.inbox.length ? `${D.inbox.length} ${D.inbox.length === 1 ? 'Dokument wartet' : 'Dokumente warten'} auf Zuordnung. Ein Klick auf ein Dokument öffnet die Details.` : 'Alles einsortiert.'} Dateien können Sie auch auf das Fenster ziehen.</p>
+  <div class="ibgrid ${sel ? 'has-sel' : ''}" role="list">${D.inbox.map(p => tileHtml(p) + (p === sel ? `<section class="ibdetail" id="ibdetail" aria-label="Details">${detailHtml(p)}</section>` : '')).join('')}</div>`;
+}
+let followTimer = null;
+function followInbox() {  // Solange Texterkennung läuft, Stand nachladen, ohne laufende Eingaben zu stören
+  clearTimeout(followTimer);
+  const pending = D.inbox.some(p => /Wartet|läuft/.test(p.ocr_status)) || (D.akte?.dokumente || []).some(d => /Wartet|läuft/.test(d.ocr_status));
+  if (!pending || !['posteingang', 'akte', 'uebersicht'].includes(S.view)) return;
+  followTimer = setTimeout(() => {
+    const busy = document.activeElement && document.activeElement.closest('.modal, .ibdetail');
+    if (busy || $('#modalroot').innerHTML || !$('#viewer').hidden) { followInbox(); return; }
+    render();
+  }, 2500);
+}
+async function assign(id, vorgangId) {
+  const p = D.inbox.find(x => x.id === id), d = draft[id] || {};
+  const body = {vorgang_id: +vorgangId, titel: d.titel, datum: d.datum || null, teile: d.teil ? [+d.teil] : []};
+  if (d.kontakt === 'neu' && p.vorschlag.absender) body.neuer_absender = {name: p.vorschlag.absender.name, anschrift: p.vorschlag.absender.anschrift};
+  else if (d.kontakt) body.kontakt_id = +d.kontakt;
+  const r = await api(`posteingang/${id}/zuordnen`, body);
+  delete draft[id]; S.ibSel = null; S.v = +vorgangId; S.entry = r.id; S.teil = 'all'; S.tab = 'chronik';
+  toast('Zugeordnet.'); location.hash = 'akte-' + vorgangId; await route();
+}
+
+// ---------- Vorgänge ----------
+function sortTh(t, k, label) {
+  const so = S['sort' + t], on = so.k === k;
+  return `<th aria-sort="${on ? (so.d > 0 ? 'ascending' : 'descending') : 'none'}"><button class="thsort ${on ? 'on' : ''}" data-act="tsort" data-t="${t}" data-k="${k}">${label}<span class="arr" aria-hidden="true">${on ? (so.d > 0 ? '▲' : '▼') : '↕'}</span></button></th>`;
+}
+const cmp = (a, b) => String(a ?? '').localeCompare(String(b ?? ''), 'de', {numeric: true, sensitivity: 'base'});
+function vList() {
+  const bs = ['alle', ...new Set([...D.groups, ...D.cases.map(c => c.bereich)])];
+  let list = D.cases.filter(c => (S.vb === 'alle' || c.bereich === S.vb) && (S.vs === 'alle' || c.status === S.vs));
+  const key = {titel: c => c.titel, bereich: c => c.bereich, status: c => ST_ORDER.indexOf(c.status), frist: c => c.naechste_frist || '9999', akt: c => c.angelegt_am}[S.sortV.k];
+  list.sort((a, b) => (typeof key(a) === 'number' ? key(a) - key(b) : cmp(key(a), key(b))) * S.sortV.d || cmp(a.titel, b.titel));
+  return `<div class="head" style="justify-content:space-between"><h1>Vorgänge</h1><button class="btn pri" data-act="new-vorgang">${I('plus')}Neuer Vorgang</button></div>
+  <div class="filters"><span class="lbl">Bereich</span>${bs.map(b => `<button class="fchip ${S.vb === b ? 'on' : ''}" data-act="vb" data-id="${esc(b)}">${b === 'alle' ? 'Alle' : esc(b)}</button>`).join('')}<button class="fchip" data-act="b-add" style="border-style:dashed">+ Bereich</button></div>
+  <div class="filters" style="margin-top:-6px"><span class="lbl">Status</span>${['alle', ...ST_ORDER].map(s => `<button class="fchip ${S.vs === s ? 'on' : ''}" data-act="vs" data-id="${esc(s)}">${s === 'alle' ? 'Alle' : esc(stLabel(s))}</button>`).join('')}</div>
+  <div class="tbl-wrap"><table><thead><tr>${sortTh('V','titel','Vorgang')}${sortTh('V','bereich','Bereich')}${sortTh('V','status','Status')}${sortTh('V','frist','Nächste Frist')}${sortTh('V','akt','Angelegt')}<th><span class="sr">Aktionen</span></th></tr></thead><tbody>
+  ${list.map(c => `<tr data-act="open-v" data-id="${c.id}"><td><b>${esc(c.titel)}</b><div class="muted" style="font-size:12.5px">${c.dokumente} Dokument${c.dokumente === 1 ? '' : 'e'}</div></td><td>${esc(c.bereich)}</td>
+   <td><span class="st-${ST_KEY[c.status] || 'offen'}" style="display:flex;align-items:center;gap:6px;font-size:13px"><span class="dot"></span><span style="color:var(--fg)">${esc(stLabel(c.status))}</span></span></td>
+   <td class="num">${c.naechste_frist ? `<span style="color:${tage(c.naechste_frist) < 0 ? 'var(--crit)' : tage(c.naechste_frist) <= 7 ? 'var(--warn)' : 'inherit'}">${dt(c.naechste_frist)}</span>` : '–'}</td><td class="num">${dt(c.angelegt_am)}</td>
+   <td><button class="iconbtn" data-act="v-del" data-id="${c.id}" title="Vorgang löschen" aria-label="${esc(c.titel)} löschen">${I('trash')}</button></td></tr>`).join('') || '<tr><td colspan="6" class="muted">Keine Vorgänge für diese Filter.</td></tr>'}
+  </tbody></table></div>`;
+}
+
+// ---------- Vorgangsakte ----------
+const teilName = id => D.akte.teilvorgaenge.find(t => t.id === id)?.name || '';
+const kontaktName = id => { const k = D.kontakte.find(x => x.id === id); return k ? (k.kurzname || k.name) : ''; };
+function visibleEntries() {
+  const a = D.akte;
+  return a.eintraege.filter(e => (S.teil === 'all' || e.teile.includes(S.teil) || !e.teile.length) && (S.ktype === 'alle' ||
+    (S.ktype === 'gespraech' ? ['telefonat','notiz','entscheidung'].includes(e.kind || e.art) : S.ktype === 'ausgang' ? ['ausgang','nachweis'].includes(e.art) : e.art === S.ktype)));
+}
+function vAkte() {
+  const a = D.akte, multi = a.teilvorgaenge.length > 1;
+  if (S.entry && !a.eintraege.some(e => e.id === S.entry)) S.entry = null;
+  if (!S.entry) S.entry = (visibleEntries().find(e => e.dokument_id) || visibleEntries()[0])?.id || null;
+  const head = `<div class="crumb"><a href="#vorgaenge">Vorgänge</a><span>/</span><span>${esc(a.bereich)}</span></div>
+   <div class="head"><h1>${esc(a.titel)}</h1>${a.teilvorgaenge.length ? '' : statusPill(a.status)}<span style="flex:1"></span>
+    <button class="btn sm" data-act="v-edit">Bearbeiten</button><button class="btn sm" data-act="teil-add">${I('plus')}Teilvorgang</button>
+    <button class="btn sm" data-act="doc-add">${I('plus')}Dokument</button><button class="iconbtn" data-act="v-del" data-id="${a.id}" title="Vorgang löschen" aria-label="Vorgang löschen">${I('trash')}</button></div>
+   ${a.schlagwoerter.length ? `<div class="refs" style="margin-top:8px">${a.schlagwoerter.map(t => `<span class="pill grey"># ${esc(t)}</span>`).join('')}</div>` : ''}
+   <div class="refs">${a.referenzen.map(r => `<span class="chip"><em>${esc(r.bezeichnung)}</em> <span class="num">${esc(r.wert)}</span>${r.kontakt_id ? ` <em>· ${esc(kontaktName(r.kontakt_id))}</em>` : ''}</span>`).join('')}
+    ${a.beteiligte.filter(b => !a.referenzen.some(r => r.kontakt_id === b.kontakt_id)).map(b => `<button class="chip" data-act="contact" data-id="${b.kontakt_id}">${esc(b.kurzname || b.name)}${b.rolle ? ` <em>· ${esc(b.rolle)}</em>` : ''}</button>`).join('')}
+    <button class="chip" data-act="ref-add" style="border-style:dashed;color:var(--accent)">+ Referenz</button></div>
+   <div class="tabs" role="tablist">${[['chronik','Chronik'],['dokumente','Dokumente',a.dokumente.length],['beteiligte','Beteiligte',a.beteiligte.length],['fristen','Fristen',a.fristen.filter(f => !f.erledigt_am).length]].map(([id, l, n]) => `<button role="tab" data-act="tab" data-id="${id}" class="${S.tab === id ? 'on' : ''}" aria-selected="${S.tab === id}">${l}${n != null ? `<span class="n num">${n}</span>` : ''}</button>`).join('')}</div>`;
+  let body = '';
+  if (S.tab === 'chronik') body = `<div class="akte"><div class="l">${teilSwitch()}${fristCards()}${chronik()}</div><div class="r"><div class="sticky">${preview()}</div></div></div>`;
+  if (S.tab === 'dokumente') body = docTable();
+  if (S.tab === 'beteiligte') body = beteiligteTab();
+  if (S.tab === 'fristen') body = `<div class="filters" style="margin:18px 0 12px"><button class="btn" data-act="f-add">${I('plus')}Frist oder Wiedervorlage</button></div><div class="panel">${fristList(a.fristen.map(f => ({...f, vorgang: a.titel, teilvorgang: teilName(f.teilvorgang_id)})), true)}</div>`;
+  return head + body;
+}
+function teilSwitch() {
+  const a = D.akte;
+  if (!a.teilvorgaenge.length) return `<div class="teilbar"><span>Status <select data-change="v-status" aria-label="Status">${statusOptions(a.status)}</select></span>${a.zustaendig ? `<span>Zuständig: <strong>${esc(a.zustaendig)}</strong></span>` : ''}${a.naechster_schritt ? `<span>Nächster Schritt: <strong>${esc(a.naechster_schritt)}</strong></span>` : ''}</div>`;
+  const btns = [`<button data-act="teil" data-id="all" class="${S.teil === 'all' ? 'on' : ''}"><b>Alle</b><small>${a.teilvorgaenge.length} Teilvorgänge</small></button>`,
+    ...a.teilvorgaenge.map(t => `<button data-act="teil" data-id="${t.id}" class="${S.teil === t.id ? 'on' : ''}"><b>${esc(t.name)}</b><small class="st-${ST_KEY[t.status] || 'offen'}"><span class="dot"></span>${esc(stLabel(t.status))}</small></button>`)].join('');
+  const t = a.teilvorgaenge.find(x => x.id === S.teil);
+  const bar = t ? `<div class="teilbar"><span>Status <select data-change="t-status" data-id="${t.id}" aria-label="Status ${esc(t.name)}">${statusOptions(t.status)}</select></span><span>Zuständig: <strong>${esc(t.zustaendig || '–')}</strong></span><span>Nächster Schritt: <strong>${esc(t.naechster_schritt || '–')}</strong></span><button class="linkbtn" data-act="teil-edit" data-id="${t.id}">Bearbeiten</button></div>` : '';
+  return `<div class="stack" style="gap:10px"><div class="seg" role="group" aria-label="Teilvorgang">${btns}</div>${bar}</div>`;
+}
+function fristCards() {
+  const a = D.akte;
+  const open = a.fristen.filter(f => !f.erledigt_am && (S.teil === 'all' || f.teilvorgang_id === S.teil || !f.teilvorgang_id)).sort((x, y) => x.faellig_am.localeCompare(y.faellig_am));
+  if (!open.length) return '';
+  const show = [open.find(f => f.art === 'frist'), open.find(f => f.art !== 'frist')].filter(Boolean).sort((x, y) => x.faellig_am.localeCompare(y.faellig_am));
+  return `<div class="fcards">${show.map(f => `<div class="fcard ${f.art}"><span class="ic">${I(f.art === 'frist' ? 'para' : f.art === 'aufgabe' ? 'check' : 'cal')}</span>
+   <div><b>${FK[f.art]} · <span class="num">${dt(f.faellig_am)}</span> <span class="muted" style="font-weight:400">(${relTage(f.faellig_am)})</span></b>${esc(f.titel)}
+   <span class="q">${f.verlauf.length ? `Ursprünglich ${dt(f.verlauf[0].faellig_alt)} · ` : ''}${f.quelle_zitat || f.quelle_dokument_id ? `Quelle: ${f.quelle_dokument_id ? `<button class="linkbtn" data-act="quelle" data-doc="${f.quelle_dokument_id}">Dokument${f.quelle_seite ? ', S. ' + f.quelle_seite : ''}</button> ` : ''}${f.quelle_zitat ? '„' + esc(f.quelle_zitat) + '“' : ''}` : 'Selbst gesetzt'}${f.zustaendig ? ' · Zuständig: ' + esc(f.zustaendig) : ''}</span></div>
+   <div class="acts"><button class="btn sm" data-act="f-done" data-id="${f.id}">Erledigt</button><button class="btn sm" data-act="f-move" data-id="${f.id}">Verschieben</button><button class="btn sm" data-act="f-zust" data-id="${f.id}">Zuständig</button></div></div>`).join('')}
+   ${open.length > show.length ? `<button class="linkbtn" data-act="tab" data-id="fristen">+${open.length - show.length} weitere anzeigen</button>` : ''}</div>`;
+}
+function chronik() {
+  const list = visibleEntries();
+  let lastM = '';
+  const rows = list.map(e => {
+    const m = e.ereignis_datum.slice(0, 7); let mh = '';
+    if (m !== lastM) { lastM = m; mh = `<li class="month">${MON[+m.slice(5) - 1]} ${m.slice(0, 4)}</li>`; }
+    const k = KIND[e.art], badges = [];
+    if (e.art === 'entwurf') badges.push(e.versendet_als ? '<span class="pill grey">Entwurf · versendet</span>' : '<span class="pill warn">Entwurf · nicht versendet</span>');
+    if (e.versand) badges.push(`<span class="pill ok">${esc(e.versand.art)}</span>`);
+    if (e.art === 'fehlt') badges.push('<span class="pill crit">Original fehlt</span>');
+    if (e.nacherfasst) badges.push(`<span class="pill grey">nacherfasst ${dShort(e.erfasst_am.slice(0, 10))}</span>`);
+    if (e.art === 'chat') badges.push(e.geprueft ? '<span class="pill ok">geprüft</span>' : '<span class="pill warn">ungeprüft</span>');
+    const chips = D.akte.teilvorgaenge.length > 1 ? (S.teil === 'all' ? e.teile.map(t => `<span class="pill grey">${esc(teilName(t))}</span>`).join('')
+      : e.teile.filter(t => t !== S.teil).map(t => `<button class="chip" data-act="teil" data-id="${t}">auch in ${esc(teilName(t))}</button>`).join('')) : '';
+    const acts = e.art === 'entwurf' && !e.versendet_als ? `<button class="btn sm out" data-act="versand" data-id="${e.id}">${I('out')}Versand erfassen</button>` : '';
+    const wer = e.kontakt_id ? ` · ${e.richtung || ''} ${esc(kontaktName(e.kontakt_id))}` : '';
+    return mh + `<li class="ent k-${e.art} ${S.entry === e.id ? 'sel' : ''}"><span class="ico" title="${k[0]}">${I(k[1])}</span>
+     <div class="card" data-act="entry" data-id="${e.id}" tabindex="0" role="button" aria-pressed="${S.entry === e.id}">
+      <div class="row1"><span class="date num">${dt(e.ereignis_datum)}</span><span class="ttl">${esc(e.titel)}</span></div>
+      <div class="row2"><span>${k[0]}${wer}</span>${badges.join('')}</div>${chips || acts ? `<div class="row3">${chips}${acts}</div>` : ''}</div></li>`;
+  }).join('');
+  const types = [['alle','Alle Typen'],['eingang','Eingang'],['ausgang','Versendet'],['entwurf','Entwürfe'],['gespraech','Telefonate & Notizen'],['chat','Chat-Notizen'],['fehlt','Fehlende Originale']];
+  return `<div class="stack" style="gap:6px"><div class="chron-h"><h2>Chronik</h2><button class="btn out sm" data-act="entry-add">${I('plus')}Eintrag</button></div>
+   <div style="display:flex;gap:6px;flex-wrap:wrap">${types.map(([k, l]) => `<button class="fchip ${S.ktype === k ? 'on' : ''}" data-act="ktype" data-id="${k}" style="padding:3px 9px;font-size:12px">${l}</button>`).join('')}</div>
+   <ul class="chron">${rows || '<li class="muted" style="padding:10px 0">Noch keine Einträge. Dokumente aus dem Posteingang zuordnen oder einen Eintrag anlegen.</li>'}</ul></div>`;
+}
+function preview() {
+  const a = D.akte, e = a.eintraege.find(x => x.id === S.entry);
+  if (!e) return '<p class="muted">Eintrag auswählen, um ihn hier zu sehen.</p>';
+  const kopf = `<div class="pv-h"><div><h2>${esc(e.titel)}</h2><span class="muted">${KIND[e.art][0]}${e.kontakt_id ? ` · ${e.richtung || ''} ${esc(kontaktName(e.kontakt_id))}` : ''} · ${dt(e.ereignis_datum)}</span></div>
+   <span style="display:flex;gap:6px;flex-wrap:wrap">${e.art === 'eingang' ? `<button class="btn sm" data-act="entry-add" data-bezug="${e.id}">${I('draft')}Antwort-Entwurf</button>` : ''}<button class="btn sm ghost" data-act="entry-edit" data-id="${e.id}">Bearbeiten</button></span></div>`;
+  const vers = e.versand ? `<dl class="meta"><div class="wide"><dt>Versand · ${esc(e.versand.art)} am ${dt(e.versand.datum)}${e.versand.sendungsnummer ? ' · ' + esc(e.versand.sendungsnummer) : ''}</dt><dd class="addr">${esc(e.versand.empfaenger)}</dd>${e.versand.anschrift_geaendert ? `<div class="notice warn" style="margin:8px 0 0">${I('alert')}<p>Die Anschrift hat sich inzwischen geändert. Neue Schreiben gehen an die aktuelle Anschrift aus dem Adressbuch.</p></div>` : ''}</div></dl>` : '';
+  const text = e.text ? `<div class="notecard" style="margin-top:12px"><blockquote style="white-space:pre-line;margin:0">${esc(e.text)}</blockquote></div>` : '';
+  if (!e.dokument_id) return kopf + vers + (text || `<p class="muted">${e.art === 'fehlt' ? 'Das Original fehlt noch in der Akte.' : 'Kein Dokument zu diesem Eintrag.'}</p>`);
+  const d = a.dokumente.find(x => x.id === e.dokument_id) || {};
+  return kopf + vers + `<details class="dd"><summary>Dokumentdetails <span class="muted">· ${esc(d.dateiname || '')}</span></summary><dl class="meta">
+    <div><dt>Titel</dt><dd>${esc(d.titel)} <button class="linkbtn" data-act="doc-rename" data-doc="${d.id}">ändern</button></dd></div>
+    <div><dt>Titelquelle</dt><dd>${esc(d.titel_quelle || '')}${d.titel_seite ? ', Seite ' + d.titel_seite : ''}</dd></div>
+    <div><dt>Text</dt><dd>${esc(d.ocr_status || '')}</dd></div><div><dt>Vorgänge</dt><dd>${d.vorgaenge || 1}</dd></div></dl></details>
+   <div class="frame" style="margin-top:12px"><div class="tool"><span class="muted" style="font-size:13px">${esc(d.dateiname || '')}</span><span class="sp"></span>
+    <button class="btn sm" data-act="doc-text" data-doc="${d.id}">Text</button><button class="btn sm" data-act="ocr-retry" data-doc="${d.id}">Text erneut erkennen</button><button class="btn sm" data-act="view" data-doc="${d.id}">${I('expand')}Original öffnen</button></div>
+    <iframe class="pvframe" src="/api/documents/${d.id}/original" title="Original ${esc(d.titel)}"></iframe></div>` + text;
+}
+function docTable() {
+  const a = D.akte, so = S.sortD;
+  const key = {titel: d => d.titel, datei: d => d.dateiname, datum: d => d.angelegt_am, text: d => d.ocr_status}[so.k];
+  const rows = [...a.dokumente].sort((x, y) => cmp(key(x), key(y)) * so.d).map(d => `<tr data-act="doc-open" data-doc="${d.id}"><td><b>${esc(d.titel)}</b></td><td>${esc(d.dateiname)}</td><td class="num">${dt(d.angelegt_am)}</td><td>${esc(d.ocr_status)}</td>
+    <td style="white-space:nowrap"><button class="iconbtn" data-act="view" data-doc="${d.id}" title="Original ansehen" aria-label="Original ansehen">${I('expand')}</button> <button class="iconbtn" data-act="d-del" data-doc="${d.id}" title="Löschen" aria-label="${esc(d.titel)} löschen">${I('trash')}</button></td></tr>`).join('');
+  return `<div style="margin-top:18px" class="tbl-wrap"><table><thead><tr>${sortTh('D','titel','Dokument')}${sortTh('D','datei','Datei')}${sortTh('D','datum','Abgelegt')}${sortTh('D','text','Text')}<th><span class="sr">Aktionen</span></th></tr></thead><tbody>${rows || '<tr><td colspan="5" class="muted">Noch keine Dokumente.</td></tr>'}</tbody></table></div>`;
+}
+function beteiligteTab() {
+  const a = D.akte;
+  return `<div class="filters" style="margin:18px 0 12px"><button class="btn" data-act="bet-add">${I('plus')}Beteiligten hinzufügen</button><button class="btn" data-act="ref-add">${I('plus')}Referenz hinzufügen</button><button class="btn" data-act="tags">Schlagwörter</button></div>
+  ${a.referenzen.length ? `<div class="panel" style="margin-bottom:16px"><h3>Referenzen</h3><ul class="mini" style="margin-top:6px">${a.referenzen.map(r => `<li><span><span class="muted">${esc(r.bezeichnung)}</span> <b class="num">${esc(r.wert)}</b></span><button class="btn sm ghost" data-act="ref-del" data-id="${r.id}">Entfernen</button></li>`).join('')}</ul></div>` : ''}
+  <div class="grid2">${a.beteiligte.map(b => `<div class="panel stack"><div><h3>${esc(b.name)}</h3><span class="muted">${esc(b.rolle || b.typ || '')}</span></div>
+   <div style="display:flex;gap:6px;flex-wrap:wrap"><button class="btn sm" data-act="contact" data-id="${b.kontakt_id}">Im Adressbuch öffnen</button><button class="btn sm ghost" data-act="bet-del" data-id="${b.kontakt_id}">Entfernen</button></div></div>`).join('') || '<p class="muted">Noch keine Beteiligten.</p>'}</div>`;
+}
+
+// ---------- Fristen ----------
+function fristRow(f, inV) {
+  const n = tage(f.faellig_am), u = f.erledigt_am ? '' : n < 0 ? 'crit' : n <= 7 ? 'warn' : '';
+  return `<div class="frow ${f.erledigt_am ? 'done' : ''}"><div class="fdate ${u}"><b class="num">${dShort(f.faellig_am)}</b><small>${WD[new Date(f.faellig_am + 'T12:00').getDay()]} · ${f.faellig_am.slice(0, 4)}</small></div>
+   <div style="min-width:0"><div class="t">${esc(f.titel)}</div><div class="m"><span class="pill ${FKC[f.art]}" style="font-size:12px;padding:1px 7px">${FK[f.art]}</span>
+    ${inV ? '' : `<a href="#akte-${f.vorgang_id}">${esc(f.vorgang)}</a>`}${f.teilvorgang ? `<span>· ${esc(f.teilvorgang)}</span>` : ''}${f.zustaendig ? `<span>· Zuständig: ${esc(f.zustaendig)}</span>` : ''}<span>· ${f.erledigt_am ? 'erledigt' : relTage(f.faellig_am)}</span></div>
+    ${f.verlauf && f.verlauf.length ? `<div class="m" style="margin-top:2px">Ursprünglich fällig ${dt(f.verlauf[0].faellig_alt)} · ${f.verlauf.length}× verschoben</div>` : ''}
+    <div class="m" style="margin-top:2px">Quelle: ${f.quelle_zitat ? '„' + esc(f.quelle_zitat) + '“' : f.quelle_dokument_id ? 'Dokument' : 'selbst gesetzt'}</div></div>
+   <div class="acts">${f.erledigt_am ? `<button class="btn sm" data-act="f-undo" data-id="${f.id}">Wieder öffnen</button>` : `<button class="btn sm" data-act="f-done" data-id="${f.id}">Erledigt</button><button class="btn sm" data-act="f-move" data-id="${f.id}">Verschieben</button>`}</div></div>`;
+}
+function fristList(list, inV) {
+  const open = list.filter(f => !f.erledigt_am), done = list.filter(f => f.erledigt_am);
+  const g = [['Überfällig', open.filter(f => tage(f.faellig_am) < 0)], ['Nächste 14 Tage', open.filter(f => tage(f.faellig_am) >= 0 && tage(f.faellig_am) <= 14)], ['Später', open.filter(f => tage(f.faellig_am) > 14)], ['Erledigt', done]].filter(x => x[1].length);
+  return g.length ? g.map(([t, l]) => `<div class="grp">${t}</div><div>${l.map(f => fristRow(f, inV)).join('')}</div>`).join('') : '<p class="muted">Keine Fristen.</p>';
+}
+function vFristen() {
+  const all = D.fristen.filter(f => S.fFilter === 'alle' || f.art === S.fFilter);
+  const cnt = k => D.fristen.filter(f => !f.erledigt_am && (k === 'alle' || f.art === k)).length;
+  return `<h1>Fristen</h1><p class="muted" style="margin:6px 0 0">Verbindliche Fristen tragen immer eine Fundstelle. Wiedervorlagen und Aufgaben setzen Sie selbst.</p>
+  <div class="filters"><span class="lbl">Art</span>${[['alle','Alle'],['frist','Verbindliche Fristen'],['wiedervorlage','Wiedervorlagen'],['aufgabe','Aufgaben']].map(([k, l]) => `<button class="fchip ${S.fFilter === k ? 'on' : ''}" data-act="ffilter" data-id="${k}">${l} <span class="num">${cnt(k)}</span></button>`).join('')}</div>
+  <div class="panel">${fristList(all, false)}</div>`;
+}
+
+// ---------- Archiv ----------
+function vArchiv() {
+  const q = S.aText.toLowerCase();
+  const jahre = [...new Set(D.archiv.map(d => d.datum.slice(0, 4)))].sort().reverse();
+  const bereiche = [...new Set(D.archiv.map(d => d.bereich))].sort(cmp);
+  let list = D.archiv.filter(d => (S.aBereich === 'alle' || d.bereich === S.aBereich) && (S.aJahr === 'alle' || d.datum.startsWith(S.aJahr))
+    && (!S.aErledigt || d.vorgang_status === 'Erledigt') && (!q || [d.titel, d.dateiname, d.vorgang, d.absender].join(' ').toLowerCase().includes(q)));
+  const so = S.sortA, key = {titel: d => d.titel, datum: d => d.datum, absender: d => d.absender || '~', vorgang: d => d.vorgang, groesse: d => d.groesse || 0}[so.k];
+  list.sort((x, y) => (so.k === 'groesse' ? key(x) - key(y) : cmp(key(x), key(y))) * so.d);
+  const gkey = {vorgang: d => d.vorgang, bereich: d => d.bereich, absender: d => d.absender || 'Absender unbekannt', jahr: d => d.datum.slice(0, 4), keine: () => ''}[S.aGroup];
+  const groups = [];
+  for (const d of list) { const k = gkey(d); let g = groups.find(x => x.k === k); if (!g) groups.push(g = {k, items: []}); g.items.push(d); }
+  if (S.aGroup === 'jahr') groups.sort((x, y) => cmp(y.k, x.k)); else if (S.aGroup !== 'keine') groups.sort((x, y) => cmp(x.k, y.k));
+  const row = d => `<tr data-act="arch-open" data-v="${d.vorgang_id}" data-doc="${d.id}"><td><b>${esc(d.titel)}</b><div class="muted" style="font-size:12.5px">${esc(d.dateiname)}</div></td><td class="num">${dt(d.datum)}</td><td>${esc(d.absender || '–')}</td><td>${esc(d.vorgang)}<div class="muted" style="font-size:12.5px">${esc(d.bereich)}</div></td><td class="num">${groesse(d.groesse)}</td>
+    <td><button class="iconbtn" data-act="view" data-doc="${d.id}" title="Original ansehen" aria-label="Original ansehen">${I('expand')}</button></td></tr>`;
+  const thead = `<thead><tr>${sortTh('A','titel','Dokument')}${sortTh('A','datum','Datum')}${sortTh('A','absender','Absender')}${sortTh('A','vorgang','Vorgang')}${sortTh('A','groesse','Größe')}<th><span class="sr">Aktionen</span></th></tr></thead>`;
+  return `<h1>Archiv</h1><p class="muted" style="margin:6px 0 0">${D.archiv.length} abgelegte Dokumente aus allen Vorgängen. ${list.length !== D.archiv.length ? `${list.length} passen zu den Filtern.` : ''}</p>
+  <div class="filters"><span class="lbl">Gruppieren</span>${[['vorgang','Vorgang'],['bereich','Bereich'],['absender','Absender'],['jahr','Jahr'],['keine','Keine']].map(([k, l]) => `<button class="fchip ${S.aGroup === k ? 'on' : ''}" data-act="agroup" data-id="${k}">${l}</button>`).join('')}
+   <span style="flex:1"></span><input class="inp" id="atext" type="search" placeholder="Im Archiv filtern" value="${esc(S.aText)}" style="max-width:240px" aria-label="Im Archiv filtern"></div>
+  <div class="filters" style="margin-top:-6px"><span class="lbl">Bereich</span>${['alle', ...bereiche].map(b => `<button class="fchip ${S.aBereich === b ? 'on' : ''}" data-act="abereich" data-id="${esc(b)}">${b === 'alle' ? 'Alle' : esc(b)}</button>`).join('')}</div>
+  <div class="filters" style="margin-top:-6px"><span class="lbl">Jahr</span>${['alle', ...jahre].map(j => `<button class="fchip ${S.aJahr === j ? 'on' : ''}" data-act="ajahr" data-id="${j}">${j === 'alle' ? 'Alle' : j}</button>`).join('')}
+   <label class="chk" style="margin-left:12px"><input type="checkbox" id="aerl" ${S.aErledigt ? 'checked' : ''}>nur abgeschlossene Vorgänge</label></div>
+  ${groups.length ? groups.map(g => `${S.aGroup !== 'keine' ? `<div class="agrp"><h3>${esc(g.k)}</h3><span class="muted num">${g.items.length}</span></div>` : ''}<div class="tbl-wrap" style="margin-bottom:16px"><table>${thead}<tbody>${g.items.map(row).join('')}</tbody></table></div>`).join('') : '<div class="panel muted">Keine Dokumente für diese Filter.</div>'}`;
+}
+
+// ---------- Adressbuch ----------
+function vAb() {
+  const q = S.abq.toLowerCase();
+  const list = D.kontakte.filter(k => !q || [k.name, k.kurzname, k.typ, ...k.abteilungen.map(a => [a.name, a.ansprechpartner, a.email].join(' '))].join(' ').toLowerCase().includes(q));
+  const k = D.kontakte.find(x => x.id === S.contact) || list[0];
+  return `<div class="head" style="justify-content:space-between"><h1>Adressbuch</h1><button class="btn" data-act="k-new">${I('plus')}Neuer Kontakt</button></div>
+  <div class="ab" style="margin-top:16px"><div class="stack" style="gap:8px"><input class="inp" id="abq" type="search" placeholder="Kontakt suchen" value="${esc(S.abq)}" aria-label="Kontakt suchen">
+   <div class="ablist">${list.map(x => `<button data-act="contact" data-id="${x.id}" class="${k && x.id === k.id ? 'on' : ''}">${esc(x.name)}<small>${esc(x.typ || '')}${x.vorgaenge.length ? ` · ${x.vorgaenge.length} Vorgänge` : ''}</small></button>`).join('') || '<span class="muted" style="padding:8px">Keine Kontakte.</span>'}</div></div>
+   ${k ? `<div class="stack"><div class="panel"><div class="chron-h"><h2>${esc(k.name)}</h2><button class="iconbtn" data-act="k-del" data-id="${k.id}" title="Kontakt löschen" aria-label="Kontakt löschen">${I('trash')}</button></div><span class="muted">${esc([k.typ, k.notiz].filter(Boolean).join(' · '))}</span></div>
+    ${k.abteilungen.map(a => `<div class="panel stack"><div class="chron-h"><h3>${esc(a.name || 'Kontakt')}</h3><button class="btn sm" data-act="adr-new" data-id="${a.id}">Neue Anschrift</button></div>
+     <dl class="dl">${a.ansprechpartner ? `<dt>Ansprechpartner</dt><dd>${esc(a.ansprechpartner)}</dd>` : ''}${a.email ? `<dt>E-Mail</dt><dd>${esc(a.email)}</dd>` : ''}${a.telefon ? `<dt>Telefon</dt><dd>${esc(a.telefon)}</dd>` : ''}</dl>
+     ${a.anschriften.length ? `<div class="adrbox">${a.anschriften.map(r => `<div class="adr ${r.gueltig_bis ? 'old' : ''}"><b style="font-size:12px;text-transform:uppercase;letter-spacing:.05em">${r.gueltig_bis ? `Frühere Anschrift · bis ${dt(r.gueltig_bis)}` : `Aktuelle Anschrift · seit ${dt(r.gueltig_von)}`}</b><div class="lines">${esc(r.zeilen)}</div>${r.verwendet ? `<small>Bei ${r.verwendet} Versand${r.verwendet === 1 ? '' : 'en'} verwendet</small>` : ''}</div>`).join('')}</div>` : '<p class="muted" style="margin:0">Noch keine Anschrift.</p>'}</div>`).join('')}
+    <div class="panel"><h3>Vorgänge</h3><ul class="mini" style="margin-top:6px">${k.vorgaenge.map(v => `<li><a href="#akte-${v.id}">${esc(v.titel)}</a><span class="muted">${esc(v.rolle)}</span></li>`).join('') || '<li class="muted">Keine.</li>'}</ul></div></div>` : '<div class="panel muted">Noch keine Kontakte. Sie entstehen auch beim Zuordnen aus dem Posteingang.</div>'}</div>`;
+}
+
+// ---------- Papierkorb & Einstellungen ----------
+function vTrash() {
+  return `<h1>Papierkorb</h1><p class="muted" style="margin:6px 0 16px">Gelöschte Vorgänge, Dokumente, Einträge, Fristen und Kontakte lassen sich hier wiederherstellen.</p>
+  <div class="panel">${D.trash.length ? D.trash.map(t => `<div class="frow" style="grid-template-columns:minmax(0,1fr) auto"><div style="min-width:0"><div class="t">${esc(t.bezeichnung)}</div><div class="m"><span class="pill grey" style="font-size:12px;padding:1px 7px">${esc({vorgang:'Vorgang',dokument:'Dokument',eintrag:'Eintrag',frist:'Frist',kontakt:'Kontakt'}[t.typ])}</span>${t.vorgang ? `<span>aus ${esc(t.vorgang)}</span>` : ''}<span>· gelöscht am ${dt(t.geloescht_am)}</span></div></div>
+   <div class="acts"><button class="btn sm" data-act="t-restore" data-typ="${t.typ}" data-id="${t.id}">${I('restore')}Wiederherstellen</button>${['eintrag','frist'].includes(t.typ) ? `<button class="btn sm ghost" data-act="t-purge" data-typ="${t.typ}" data-id="${t.id}">Endgültig löschen</button>` : ''}</div></div>`).join('') : '<p class="muted" style="margin:0">Der Papierkorb ist leer.</p>'}</div>`;
+}
+function vSettings() {
+  return `<h1>Einstellungen</h1><div class="grid2" style="margin-top:16px">
+   <div class="panel stack"><div class="chron-h"><h2>Bereiche</h2><button class="btn sm" data-act="b-add">${I('plus')}Bereich</button></div>
+    <ul class="mini">${D.groups.map(b => { const n = D.cases.filter(c => c.bereich === b).length; return `<li><span>${esc(b)} <span class="muted">· ${n} ${n === 1 ? 'Vorgang' : 'Vorgänge'}</span></span><span style="display:flex;gap:6px"><button class="btn sm ghost" data-act="b-ren" data-b="${esc(b)}">Umbenennen</button>${n ? '' : `<button class="btn sm ghost" data-act="b-del" data-b="${esc(b)}">Entfernen</button>`}</span></li>`; }).join('')}</ul></div>
+   <div class="panel stack"><h2>Eigene Angaben</h2><p style="margin:0">Ihr Name und Ihre Anschrift, eine Angabe pro Zeile. Die Absendererkennung schlägt diese Angaben nie als Absender vor.</p>
+    <textarea id="eigene" class="inp" rows="4">${esc(D.eigene)}</textarea><div><button class="btn" data-act="eigene-save">Speichern</button></div></div>
+   <div class="panel stack"><h2>Bisherige Ansicht</h2><p style="margin:0">Chat-Import und die Archivliste „Rechtsberatung“ liegen vorerst noch in der bisherigen Oberfläche.</p><div><a class="btn" href="/alt">Bisherige Ansicht öffnen</a></div></div></div>`;
+}
+
+// ---------- Dialoge, Meldungen, Originalansicht ----------
+let modalSave = null;
+function modal(title, html, onSave, saveLabel = 'Speichern', cls = '') {
+  $('#modalroot').innerHTML = `<div class="ovl" data-act="m-bg"><div class="modal ${cls}" role="dialog" aria-modal="true" aria-label="${esc(title)}"><h2>${esc(title)}</h2>${html}<div class="foot"><button class="btn" data-act="m-close">Abbrechen</button>${onSave ? `<button class="btn pri" data-act="m-save">${saveLabel}</button>` : ''}</div></div></div>`;
+  modalSave = onSave; setTimeout(() => document.querySelector('.modal input,.modal select,.modal textarea')?.focus(), 20);
+}
+const closeModal = () => { $('#modalroot').innerHTML = ''; modalSave = null; };
+let toastTimer;
+function toast(m) { const t = $('#toast'); t.textContent = m; t.hidden = false; clearTimeout(toastTimer); toastTimer = setTimeout(() => t.hidden = true, 3800); }
+function openViewer(docId, title) {
+  const w = $('#viewer');
+  w.innerHTML = `<div class="vbar"><b>${esc(title || 'Original')}</b><a class="btn sm" href="/api/documents/${docId}/original" target="_blank" rel="noopener">In neuem Fenster</a><button class="btn sm" data-act="vw-close">Schließen</button></div>
+   <div class="vbody" style="padding:0"><iframe src="/api/documents/${docId}/original" title="Original" style="width:100%;height:100%;border:0;background:#fff"></iframe></div>`;
+  w.hidden = false; w.querySelector('[data-act=vw-close]').focus();
+}
+const closeViewer = () => { const w = $('#viewer'); w.hidden = true; w.innerHTML = ''; };
+const bereichSelect = (id, cur) => `<label>Bereich<select id="${id}">${D.groups.map(b => `<option ${b === cur ? 'selected' : ''}>${esc(b)}</option>`).join('')}</select></label>`;
+const teilSelect = (id, cur, mitAlle) => D.akte && D.akte.teilvorgaenge.length ? `<label>Teilvorgang<select id="${id}">${mitAlle ? '<option value="">Ganzer Vorgang</option>' : ''}${D.akte.teilvorgaenge.map(t => `<option value="${t.id}" ${t.id === cur ? 'selected' : ''}>${esc(t.name)}</option>`).join('')}</select></label>` : '';
+
+async function act(fn, msg) { try { await fn(); if (msg) toast(msg); await render(); return true; } catch (e) { toast(e.message); return false; } }
+
+function newVorgang(after) {
+  modal('Neuer Vorgang', `<label>Titel<input id="m-vt" maxlength="160" placeholder="z. B. Einkommensteuer 2026"></label><div class="two">${bereichSelect('m-vb', 'Anderes')}<label>Status<select id="m-vs">${statusOptions('Offen')}</select></label></div>
+   <label>Beschreibung (optional)<textarea id="m-vd" rows="2"></textarea></label>`, async () => {
+    const titel = val('m-vt').trim(); if (!titel) { $('#m-vt').focus(); return false; }
+    try { const r = await api('cases', {title: titel, group: val('m-vb'), status: val('m-vs'), description: val('m-vd')}); closeModal(); if (after) await after(r.id); else { location.hash = 'akte-' + r.id; } toast('Vorgang angelegt.'); }
+    catch (e) { toast(e.message); }
+    return false;
+  }, 'Anlegen');
+}
+function entryModal(bezugId) {
+  const a = D.akte, bezug = bezugId ? a.eintraege.find(e => e.id === bezugId) : null;
+  modal(bezug ? 'Antwort-Entwurf anlegen' : 'Eintrag hinzufügen', `${bezug ? `<div class="src">Bezug: ${esc(bezug.titel)} vom ${dt(bezug.ereignis_datum)}</div>` : ''}
+   <div class="two"><label>Art<select id="m-ea">${(bezug ? [['entwurf','Entwurf']] : [['telefonat','Telefonat'],['notiz','Notiz'],['entscheidung','Entscheidung'],['entwurf','Entwurf'],['fehlt','Original fehlt'],['chat','Chat-Notiz']]).map(([k, l]) => `<option value="${k}">${l}</option>`).join('')}</select></label><label>Ereignisdatum<input id="m-ed" type="date" value="${isoHeute()}"></label></div>
+   <label>Titel<input id="m-et" maxlength="200" value="${bezug ? esc('Antwort: ' + bezug.titel) : ''}"></label><label>Inhalt<textarea id="m-ex" rows="5"></textarea></label>
+   <div class="two">${a.teilvorgaenge.length ? `<label>Teilvorgang<select id="m-etl"><option value="">Ganzer Vorgang</option>${a.teilvorgaenge.map(t => `<option value="${t.id}" ${(bezug ? bezug.teile[0] : S.teil) === t.id ? 'selected' : ''}>${esc(t.name)}</option>`).join('')}</select></label>` : ''}
+   <label>Beteiligter<select id="m-ek"><option value="">–</option>${a.beteiligte.map(b => `<option value="${b.kontakt_id}" ${bezug && bezug.kontakt_id === b.kontakt_id ? 'selected' : ''}>${esc(b.kurzname || b.name)}</option>`).join('')}</select></label></div>
+   <p class="muted" style="margin:0;font-size:13px">Liegt das Ereignisdatum in der Vergangenheit, wird der Eintrag als nacherfasst gekennzeichnet.</p>`, async () => {
+    const titel = val('m-et').trim(); if (!titel) { $('#m-et').focus(); return false; }
+    const art = val('m-ea'), k = val('m-ek');
+    const body = {art, titel, datum: val('m-ed'), text: val('m-ex'), teile: val('m-etl') ? [+val('m-etl')] : [], kontakt_id: k ? +k : null,
+      richtung: k ? (art === 'entwurf' ? 'an' : 'mit') : null, bezug_id: bezug ? bezug.id : null, quelle: art === 'chat' ? 'Chat' : null};
+    closeModal(); await act(async () => { const r = await api(`akte/${a.id}/eintraege`, body); S.entry = r.id; }, 'Eintrag angelegt.');
+    return false;
+  }, 'Anlegen');
+}
+function versandModal(e) {
+  const a = D.akte, k = D.kontakte.find(x => x.id === e.kontakt_id);
+  const ziele = k ? k.abteilungen.flatMap(ab => ab.anschriften.filter(r => !r.gueltig_bis).map(r => ({id: r.id, text: r.zeilen}))) : [];
+  modal('Versand erfassen', `<div class="two"><label>Versandart<select id="m-va">${VERSAND.map(v => `<option>${v}</option>`).join('')}</select></label><label>Versanddatum<input id="m-vd" type="date" value="${isoHeute()}"></label></div>
+   <label>Sendungsnummer (optional)<input id="m-vn"></label><label>Empfänger</label>
+   ${ziele.map((z, i) => `<label class="radio"><input type="radio" name="m-adr" value="${z.id}" ${i === 0 ? 'checked' : ''}><span class="lines">${esc(z.text)}</span></label>`).join('')}
+   <label class="radio"><input type="radio" name="m-adr" value="frei" ${ziele.length ? '' : 'checked'}><span style="flex:1">Andere Anschrift oder E-Mail<textarea id="m-vf" rows="3" class="inp" style="margin-top:6px"></textarea></span></label>
+   <p class="muted" style="margin:0;font-size:13px">Die verwendete Anschrift wird mit dem Versand gespeichert und bleibt erhalten, auch wenn sie sich im Adressbuch später ändert.</p>`, async () => {
+    const wahl = document.querySelector('input[name=m-adr]:checked').value;
+    const body = {art: val('m-va'), datum: val('m-vd'), sendungsnummer: val('m-vn')};
+    if (wahl === 'frei') { body.empfaenger = val('m-vf'); if (!body.empfaenger.trim()) { $('#m-vf').focus(); return false; } } else body.anschrift_id = +wahl;
+    closeModal(); await act(async () => { const r = await api(`eintraege/${e.id}/versand`, body); S.entry = r.id; }, 'Versand erfasst. Status: Schreiben abgeschickt.');
+    return false;
+  }, 'Versand speichern');
+}
+function fristModal() {
+  const a = D.akte;
+  modal('Frist oder Wiedervorlage', `<div class="two"><label>Art<select id="m-fa"><option value="wiedervorlage">Wiedervorlage</option><option value="aufgabe">Aufgabe</option><option value="frist">Verbindliche Frist</option></select></label><label>Fällig am<input id="m-ff" type="date" value="${plusTage(isoHeute(), 14)}"></label></div>
+   <label>Titel<input id="m-ft" maxlength="200"></label><div class="two">${teilSelect('m-fteil', S.teil, true)}<label>Zuständig<input id="m-fz" value="Ich"></label></div>
+   <label>Fundstelle oder Quellenvermerk (Pflicht bei verbindlicher Frist)<input id="m-fq" placeholder="z. B. „Stellungnahme bis zum 16.12.2026“, Schreiben vom 18.11., S. 1"></label>`, async () => {
+    const titel = val('m-ft').trim(); if (!titel) { $('#m-ft').focus(); return false; }
+    const body = {art: val('m-fa'), titel, faellig_am: val('m-ff'), zustaendig: val('m-fz'), quelle_zitat: val('m-fq') || null, teilvorgang_id: val('m-fteil') ? +val('m-fteil') : null};
+    if (S.entry) { const e = a.eintraege.find(x => x.id === S.entry); if (e && e.dokument_id && body.quelle_zitat) body.quelle_dokument_id = e.dokument_id; }
+    try { await api(`akte/${a.id}/fristen`, body); closeModal(); toast('Frist eingetragen.'); await render(); } catch (e) { toast(e.message); }
+    return false;
+  }, 'Eintragen');
+}
+
+// ---------- Aktionen ----------
+document.addEventListener('click', async ev => {
+  const el = ev.target.closest('[data-act]');
+  if (!ev.target.closest('.search')) $('#results').hidden = true;
+  if (!ev.target.closest('.imp')) { $('#impmenu').hidden = true; $('#impbtn').setAttribute('aria-expanded', 'false'); }
+  if (!el) return;
+  const a = el.dataset.act, id = el.dataset.id ? (isNaN(+el.dataset.id) ? el.dataset.id : +el.dataset.id) : null;
+  switch (a) {
+  case 'import': { const m = $('#impmenu'); m.hidden = !m.hidden; el.setAttribute('aria-expanded', String(!m.hidden)); break; }
+  case 'imp-file': $('#impmenu').hidden = true; $('#fileinp').dataset.ziel = ''; $('#fileinp').click(); break;
+  case 'doc-add': $('#fileinp').dataset.ziel = String(D.akte.id); $('#fileinp').click(); break;
+  case 'imp-scan': $('#impmenu').hidden = true; scan(); break;
+  case 'ib-open': S.ibSel = S.ibSel === id ? null : id; $('#view').innerHTML = vInbox(); if (S.ibSel) $('#it-' + S.ibSel)?.scrollIntoView({behavior: 'smooth', block: 'nearest'}); break;
+  case 'ib-close': S.ibSel = null; $('#view').innerHTML = vInbox(); break;
+  case 'ib-del': await act(() => api(`dokument/${id}/loeschen`, {}), 'In den Papierkorb verschoben.'); break;
+  case 'ib-assign': try { await assign(id, el.dataset.v); } catch (e) { toast(e.message); } break;
+  case 'ib-manual': { const v = val('mv-' + id); if (v === '__new') newVorgang(nv => assign(id, nv)); else try { await assign(id, v); } catch (e) { toast(e.message); } break; }
+  case 'view': openViewer(el.dataset.doc, el.closest('tr')?.querySelector('b')?.textContent || D.inbox.find(p => p.id === +el.dataset.doc)?.titel); break;
+  case 'vw-close': closeViewer(); break;
+  case 'tsort': { const k = 'sort' + el.dataset.t, cur = S[k]; S[k] = cur.k === el.dataset.k ? {k: cur.k, d: -cur.d} : {k: el.dataset.k, d: 1}; await render(); break; }
+  case 'vb': S.vb = id === null ? 'alle' : String(el.dataset.id); await render(); break;
+  case 'vs': S.vs = el.dataset.id; await render(); break;
+  case 'open-v': location.hash = 'akte-' + id; break;
+  case 'new-vorgang': newVorgang(); break;
+  case 'v-del': modal('Vorgang löschen?', '<p style="margin:0">Der Vorgang wird in den Papierkorb verschoben und lässt sich dort wiederherstellen.</p>', async () => {
+      closeModal(); await act(() => api(`vorgang/${id}/loeschen`, {}), 'Vorgang in den Papierkorb verschoben.'); if (S.view === 'akte') location.hash = 'vorgaenge'; return false; }, 'In den Papierkorb'); break;
+  case 'v-edit': { const v = D.akte; modal('Vorgang bearbeiten', `<label>Titel<input id="m-vt" value="${esc(v.titel)}" maxlength="160"></label>${bereichSelect('m-vb', v.bereich)}
+      <div class="two"><label>Zuständig<input id="m-vz" value="${esc(v.zustaendig || '')}"></label><label>Nächster Schritt<input id="m-vn" value="${esc(v.naechster_schritt || '')}"></label></div><label>Beschreibung<textarea id="m-vd" rows="3">${esc(v.beschreibung)}</textarea></label>`, async () => {
+      closeModal(); await act(() => api('akte/' + v.id, {titel: val('m-vt'), bereich: val('m-vb'), zustaendig: val('m-vz'), naechster_schritt: val('m-vn'), beschreibung: val('m-vd')}), 'Vorgang gespeichert.'); return false; }); break; }
+  case 'tab': S.tab = el.dataset.id; await render(); break;
+  case 'teil': S.teil = el.dataset.id === 'all' ? 'all' : +el.dataset.id; S.entry = null; $('#view').innerHTML = vAkte(); break;
+  case 'ktype': S.ktype = el.dataset.id; S.entry = null; $('#view').innerHTML = vAkte(); break;
+  case 'entry': if (S.entry !== id) { S.entry = id; $('#view').innerHTML = vAkte(); if (innerWidth <= 1100) document.querySelector('.akte .r')?.scrollIntoView({behavior: 'smooth'}); } break;
+  case 'teil-add': modal('Teilvorgang hinzufügen', `<label>Name<input id="m-tn" maxlength="120" placeholder="z. B. Heckschaden"></label><div class="two"><label>Status<select id="m-ts">${statusOptions('Offen')}</select></label><label>Zuständig<input id="m-tz" value="Ich"></label></div><label>Nächster Schritt<input id="m-tx"></label>`, async () => {
+      if (!val('m-tn').trim()) { $('#m-tn').focus(); return false; }
+      closeModal(); await act(async () => { const r = await api(`akte/${D.akte.id}/teilvorgaenge`, {name: val('m-tn'), status: val('m-ts'), zustaendig: val('m-tz'), naechster_schritt: val('m-tx')}); S.teil = r.id; }, 'Teilvorgang angelegt.'); return false; }, 'Anlegen'); break;
+  case 'teil-edit': { const t = D.akte.teilvorgaenge.find(x => x.id === id); modal('Teilvorgang bearbeiten', `<label>Name<input id="m-tn" value="${esc(t.name)}"></label><div class="two"><label>Status<select id="m-ts">${statusOptions(t.status)}</select></label><label>Zuständig<input id="m-tz" value="${esc(t.zustaendig || '')}"></label></div><label>Nächster Schritt<input id="m-tx" value="${esc(t.naechster_schritt || '')}"></label><div><button class="btn sm" data-act="teil-del" data-id="${t.id}" style="color:var(--crit)">Teilvorgang entfernen</button></div>`, async () => {
+      closeModal(); await act(() => api('teilvorgaenge/' + t.id, {name: val('m-tn'), status: val('m-ts'), zustaendig: val('m-tz'), naechster_schritt: val('m-tx')}), 'Gespeichert.'); return false; }); break; }
+  case 'teil-del': closeModal(); await act(async () => { await api(`teilvorgaenge/${id}/entfernen`, {}); S.teil = 'all'; }, 'Teilvorgang entfernt.'); break;
+  case 'ref-add': modal('Referenz hinzufügen', `<div class="two"><label>Bezeichnung<input id="m-rl" list="m-rll" value="Aktenzeichen"><datalist id="m-rll"><option value="Aktenzeichen"><option value="Schaden-Nr."><option value="Kundennr."><option value="Steuer-Nr."><option value="Vertrags-Nr."><option value="Rechnung"></datalist></label><label>Nummer<input id="m-rv"></label></div>
+      <label>Geführt von<select id="m-rk"><option value="">–</option>${D.akte.beteiligte.map(b => `<option value="${b.kontakt_id}">${esc(b.kurzname || b.name)}</option>`).join('')}</select></label>`, async () => {
+      if (!val('m-rv').trim()) { $('#m-rv').focus(); return false; }
+      closeModal(); await act(() => api(`akte/${D.akte.id}/referenzen`, {bezeichnung: val('m-rl'), wert: val('m-rv'), kontakt_id: val('m-rk') ? +val('m-rk') : null}), 'Referenz hinzugefügt.'); return false; }, 'Hinzufügen'); break;
+  case 'ref-del': await act(() => api(`referenzen/${id}/entfernen`, {}), 'Referenz entfernt.'); break;
+  case 'bet-add': modal('Beteiligten hinzufügen', `<label>Kontakt<select id="m-bk">${D.kontakte.filter(k => !D.akte.beteiligte.some(b => b.kontakt_id === k.id)).map(k => `<option value="${k.id}">${esc(k.name)}</option>`).join('')}</select></label><label>Rolle<input id="m-br" placeholder="z. B. Gegnerische Versicherung"></label><p class="muted" style="margin:0;font-size:13px">Fehlt der Kontakt, legen Sie ihn zuerst im Adressbuch an.</p>`, async () => {
+      if (!val('m-bk')) return false; closeModal(); await act(() => api(`akte/${D.akte.id}/beteiligte`, {kontakt_id: +val('m-bk'), rolle: val('m-br')}), 'Beteiligter hinzugefügt.'); return false; }, 'Hinzufügen'); break;
+  case 'bet-del': await act(() => api(`akte/${D.akte.id}/beteiligte/${id}/entfernen`, {}), 'Beteiligter entfernt.'); break;
+  case 'tags': modal('Schlagwörter', `<label>Durch Komma getrennt<input id="m-tg" value="${esc(D.akte.schlagwoerter.join(', '))}"></label>`, async () => {
+      closeModal(); await act(() => api(`akte/${D.akte.id}/schlagwoerter`, {namen: val('m-tg').split(',').map(s => s.trim()).filter(Boolean)}), 'Gespeichert.'); return false; }); break;
+  case 'entry-add': entryModal(el.dataset.bezug ? +el.dataset.bezug : null); break;
+  case 'entry-edit': { const e = D.akte.eintraege.find(x => x.id === id); modal('Eintrag bearbeiten', `<div class="two"><label>Titel<input id="m-et" value="${esc(e.titel)}"></label><label>Ereignisdatum<input id="m-ed" type="date" value="${e.ereignis_datum}"></label></div>
+      ${D.akte.teilvorgaenge.length ? `<label>Gehört zu</label><div style="display:flex;gap:14px;flex-wrap:wrap">${D.akte.teilvorgaenge.map(t => `<label class="chk"><input type="checkbox" class="m-etk" value="${t.id}" ${e.teile.includes(t.id) ? 'checked' : ''}>${esc(t.name)}</label>`).join('')}</div>` : ''}
+      <label>Inhalt<textarea id="m-ex" rows="4">${esc(e.text || '')}</textarea></label>${e.art === 'chat' ? `<label class="chk"><input type="checkbox" id="m-eg" ${e.geprueft ? 'checked' : ''}>Inhalt geprüft</label>` : ''}
+      <label>Zusätzlich in Vorgang zeigen<select id="m-ev"><option value="">–</option>${e.dokument_id ? D.cases.filter(c => c.id !== D.akte.id).map(c => `<option value="${c.id}">${esc(c.titel)}</option>`).join('') : ''}</select></label>
+      <div><button class="btn sm" data-act="entry-del" data-id="${e.id}">${I('trash')}In den Papierkorb</button></div>`, async () => {
+      const body = {titel: val('m-et'), datum: val('m-ed'), text: val('m-ex')};
+      if (D.akte.teilvorgaenge.length) body.teile = [...document.querySelectorAll('.m-etk:checked')].map(x => +x.value);
+      if ($('#m-eg')) body.geprueft = $('#m-eg').checked;
+      if (val('m-ev')) body.auch_in_vorgang = +val('m-ev');
+      closeModal(); await act(() => api('eintraege/' + e.id, body), 'Gespeichert.'); return false; }); break; }
+  case 'entry-del': closeModal(); await act(() => api(`eintrag/${id}/loeschen`, {}), 'In den Papierkorb verschoben.'); break;
+  case 'versand': versandModal(D.akte.eintraege.find(x => x.id === id)); break;
+  case 'doc-rename': { const d = D.akte.dokumente.find(x => x.id === +el.dataset.doc); modal('Titel ändern', `<label>Titel<input id="m-dt" value="${esc(d.titel)}" maxlength="160"></label>`, async () => {
+      closeModal(); await act(() => api(`documents/${d.id}/title`, {title: val('m-dt')}), 'Titel gespeichert.'); return false; }); break; }
+  case 'doc-text': { const r = await api(`documents/${el.dataset.doc}/pages`); modal('Erkannter Text', `<pre class="ocrd" style="white-space:pre-wrap;max-height:60vh;overflow:auto;font-family:inherit">${esc(r.pages.map(p => `— Seite ${p.nummer} · ${p.methode === 'ocr' ? 'OCR' : 'Textschicht'} —\n${p.text}`).join('\n\n')) || 'Kein Text gespeichert.'}</pre>`, null); break; }
+  case 'ocr-retry': await act(() => api(`documents/${el.dataset.doc}/ocr`, {}), 'Texterkennung gestartet.'); break;
+  case 'doc-open': { const e = D.akte.eintraege.find(x => x.dokument_id === +el.dataset.doc); if (e) { S.tab = 'chronik'; S.entry = e.id; S.teil = 'all'; S.ktype = 'alle'; await render(); } else openViewer(el.dataset.doc); break; }
+  case 'd-del': await act(() => api(`dokument/${el.dataset.doc}/loeschen`, {}), 'Dokument in den Papierkorb verschoben.'); break;
+  case 'quelle': openViewer(el.dataset.doc, 'Fundstelle'); break;
+  case 'f-add': fristModal(); break;
+  case 'f-done': await act(() => api('fristen/' + id, {erledigt: true}), 'Als erledigt markiert.'); break;
+  case 'f-undo': await act(() => api('fristen/' + id, {erledigt: false})); break;
+  case 'f-move': { const f = (D.akte?.fristen || D.fristen).find(x => x.id === id) || D.fristen.find(x => x.id === id); modal('Frist verschieben', `<p style="margin:0"><b>${esc(f.titel)}</b><br><span class="muted">bisher fällig am ${dt(f.faellig_am)}</span></p><label>Neues Datum<input id="m-fd" type="date" value="${plusTage(f.faellig_am, 7)}"></label><label>Grund<input id="m-fg" placeholder="z. B. Verlängerung telefonisch bestätigt"></label>
+      ${f.art === 'frist' ? '<div class="notice warn" style="margin:0"><p>Eine verbindliche Frist verschiebt sich nur, wenn die Gegenseite zugestimmt hat. Das bisherige Datum bleibt im Verlauf sichtbar.</p></div>' : ''}`, async () => {
+      closeModal(); await act(() => api('fristen/' + f.id, {faellig_am: val('m-fd'), grund: val('m-fg')}), 'Verschoben.'); return false; }, 'Verschieben'); break; }
+  case 'f-zust': { const f = D.akte.fristen.find(x => x.id === id); modal('Zuständig', `<label>Zuständige Person oder Stelle<input id="m-fz" value="${esc(f.zustaendig || '')}"></label>`, async () => {
+      closeModal(); await act(() => api('fristen/' + f.id, {zustaendig: val('m-fz')}), 'Gespeichert.'); return false; }); break; }
+  case 'ffilter': S.fFilter = el.dataset.id; $('#view').innerHTML = vFristen(); break;
+  case 'agroup': S.aGroup = el.dataset.id; $('#view').innerHTML = vArchiv(); break;
+  case 'abereich': S.aBereich = el.dataset.id; $('#view').innerHTML = vArchiv(); break;
+  case 'ajahr': S.aJahr = el.dataset.id; $('#view').innerHTML = vArchiv(); break;
+  case 'arch-open': if (ev.target.closest('[data-act=view]')) break; S.v = +el.dataset.v; S.tab = 'chronik'; S.teil = 'all'; S.ktype = 'alle';
+    S.entry = null; location.hash = 'akte-' + el.dataset.v; setTimeout(() => { const e = D.akte?.eintraege.find(x => x.dokument_id === +el.dataset.doc); if (e) { S.entry = e.id; $('#view').innerHTML = vAkte(); } }, 400); break;
+  case 'contact': S.contact = id; S.abq = ''; if (location.hash !== '#adressbuch') location.hash = 'adressbuch'; else await render(); break;
+  case 'k-new': modal('Neuer Kontakt', `<label>Name der Organisation oder Person<input id="m-kn" maxlength="160"></label><div id="m-kd"></div><div class="two"><label>Kurzname<input id="m-kk"></label><label>Art<input id="m-kt" placeholder="z. B. Versicherung, Behörde"></label></div>
+      <div class="two"><label>Abteilung<input id="m-ka"></label><label>Ansprechpartner<input id="m-kp"></label></div><div class="two"><label>E-Mail<input id="m-km" type="email"></label><label>Telefon<input id="m-kf"></label></div><label>Anschrift (eine Zeile pro Zeile)<textarea id="m-kr" rows="4"></textarea></label>`, async () => {
+      if (!val('m-kn').trim()) { $('#m-kn').focus(); return false; }
+      closeModal(); await act(async () => { const r = await api('kontakte', {name: val('m-kn'), kurzname: val('m-kk'), typ: val('m-kt'), abteilungen: [{name: val('m-ka'), ansprechpartner: val('m-kp'), email: val('m-km'), telefon: val('m-kf'), anschrift: val('m-kr') || null}]}); S.contact = r.id; }, 'Kontakt angelegt.'); return false; }, 'Anlegen'); break;
+  case 'k-del': await act(() => api(`kontakt/${id}/loeschen`, {}), 'Kontakt in den Papierkorb verschoben.'); S.contact = null; break;
+  case 'adr-new': modal('Neue Anschrift', `<label>Anschrift (eine Zeile pro Zeile)<textarea id="m-az" rows="4"></textarea></label><label>Gültig ab<input id="m-av" type="date" value="${isoHeute()}"></label><p class="muted" style="margin:0;font-size:13px">Die bisherige Anschrift endet am Vortag und bleibt bei früheren Schreiben sichtbar.</p>`, async () => {
+      if (!val('m-az').trim()) { $('#m-az').focus(); return false; } closeModal(); await act(() => api(`abteilungen/${id}/anschrift`, {zeilen: val('m-az'), gueltig_von: val('m-av')}), 'Anschrift gespeichert.'); return false; }); break;
+  case 't-restore': await act(() => api(`${el.dataset.typ}/${id}/wiederherstellen`, {}), 'Wiederhergestellt.'); break;
+  case 't-purge': if (el.dataset.sure !== '1') { el.dataset.sure = '1'; el.textContent = 'Endgültig? Erneut klicken'; el.style.color = 'var(--crit)'; break; } await act(() => api(`${el.dataset.typ}/${id}/endgueltig`, {}), 'Endgültig gelöscht.'); break;
+  case 'b-add': modal('Bereich hinzufügen', '<label>Name<input id="m-bn" maxlength="80" placeholder="z. B. Wohnen und Miete"></label>', async () => {
+      if (!val('m-bn').trim()) return false; closeModal(); await act(() => api('bereiche', {name: val('m-bn')}), 'Bereich angelegt.'); return false; }, 'Anlegen'); break;
+  case 'b-ren': modal('Bereich umbenennen', `<label>Name<input id="m-bn" value="${esc(el.dataset.b)}"></label>`, async () => {
+      closeModal(); await act(() => api('bereiche/umbenennen', {alt: el.dataset.b, neu: val('m-bn')}), 'Umbenannt.'); return false; }); break;
+  case 'b-del': await act(() => api('bereiche/entfernen', {name: el.dataset.b}), 'Bereich entfernt.'); break;
+  case 'eigene-save': await act(() => api('einstellungen', {eigene_angaben: val('eigene')}), 'Gespeichert.'); break;
+  case 'hit': $('#results').hidden = true; S.v = +el.dataset.v; S.tab = 'chronik'; S.teil = 'all'; S.ktype = 'alle'; S.entry = null; location.hash = 'akte-' + el.dataset.v;
+    if (el.dataset.e) setTimeout(() => { S.entry = +el.dataset.e; if (D.akte) $('#view').innerHTML = vAkte(); }, 400); break;
+  case 'm-close': closeModal(); break;
+  case 'm-bg': if (ev.target === el) closeModal(); break;
+  case 'm-save': if (modalSave) {
+    snap = Object.fromEntries([...document.querySelectorAll('#modalroot [id]')].map(e => [e.id, e.value]));
+    const r = await modalSave(); if (r !== false) closeModal(); } break;
+  }
+});
+document.addEventListener('change', async ev => {
+  const el = ev.target;
+  if (el.dataset.change === 'v-status') await act(() => api('akte/' + D.akte.id, {status: el.value}), 'Status geändert.');
+  if (el.dataset.change === 't-status') await act(() => api('teilvorgaenge/' + el.dataset.id, {status: el.value}), 'Status geändert.');
+  if (el.id === 'aerl') { S.aErledigt = el.checked; $('#view').innerHTML = vArchiv(); }
+  if (el.id === 'fileinp') { const files = [...el.files]; el.value = ''; await importFiles(files, el.dataset.ziel ? +el.dataset.ziel : null); }
+  if (el.dataset.ib) { const d = draft[+el.dataset.id]; if (d) d[el.dataset.ib] = el.value; }
+});
+document.addEventListener('input', ev => {
+  const el = ev.target;
+  if (el.dataset.ib) { const d = draft[+el.dataset.id]; if (d) d[el.dataset.ib] = el.value; }
+  if (el.id === 'q') search(el.value.trim());
+  if (el.id === 'abq') { S.abq = el.value; const p = el.selectionStart; $('#view').innerHTML = vAb(); const i = $('#abq'); i.focus(); i.setSelectionRange(p, p); }
+  if (el.id === 'atext') { S.aText = el.value; const p = el.selectionStart; $('#view').innerHTML = vArchiv(); const i = $('#atext'); i.focus(); i.setSelectionRange(p, p); }
+  if (el.id === 'm-kn') dubletten(el.value);
+});
+document.addEventListener('keydown', ev => {
+  if (ev.key === 'Escape') { if (!$('#viewer').hidden) closeViewer(); else closeModal(); $('#results').hidden = true; }
+  if ((ev.key === 'Enter' || ev.key === ' ') && ev.target.matches('.card[data-act]')) { ev.preventDefault(); ev.target.click(); }
+});
+let dubTimer;
+function dubletten(name) { clearTimeout(dubTimer); dubTimer = setTimeout(async () => { const box = $('#m-kd'); if (!box) return;
+  const r = name.trim().length >= 3 ? (await api('kontakte/dubletten?name=' + encodeURIComponent(name))).dubletten : [];
+  box.innerHTML = r.length ? `<div class="notice warn" style="margin:0">${I('alert')}<p>Mögliche Dublette: ${r.map(k => `<b>${esc(k.name)}</b>`).join(', ')}</p></div>` : ''; }, 250); }
+let searchTimer;
+function search(q) {
+  clearTimeout(searchTimer); const box = $('#results');
+  if (q.length < 2) { box.hidden = true; return; }
+  searchTimer = setTimeout(async () => {
+    const r = (await api('suche?q=' + encodeURIComponent(q))).treffer;
+    const mark = s => esc(s).replace(/\[/g, '<mark>').replace(/\]/g, '</mark>');
+    box.innerHTML = r.length ? r.slice(0, 10).map(t => `<button class="res" data-act="hit" data-v="${t.vorgang_id}" data-e="${t.eintrag_id || ''}"><b>${esc(t.titel)}</b><span>${esc(t.vorgang)}${t.seite ? ' · Seite ' + t.seite : ''}</span>${t.ausschnitt ? `<span class="snip">${mark(t.ausschnitt)}</span>` : ''}</button>`).join('')
+      : '<div class="res"><b>Keine Treffer</b><span>Gesucht wird in Titeln, Aktenzeichen, Notizen und Dokumenttexten.</span></div>';
+    box.hidden = false;
+  }, 200);
+}
+
+// ---------- Import und Scan ----------
+async function importFiles(files, vorgangId) {
+  if (!files.length) return;
+  let neu = 0, vorhanden = 0; const fehler = [];
+  for (const f of files) {
+    toast(`„${f.name}“ wird abgelegt …`);
+    try { const r = await upload(vorgangId ? `cases/${vorgangId}/documents` : 'posteingang/dokumente', f); r.created ? neu++ : vorhanden++; }
+    catch (e) { fehler.push(f.name + ': ' + e.message); }
+  }
+  toast(`${neu} abgelegt${vorhanden ? ` · ${vorhanden} bereits vorhanden` : ''}${fehler.length ? ' · ' + fehler.join(' · ') : ''}`);
+  if (!vorgangId && location.hash !== '#posteingang') location.hash = 'posteingang'; else await render();
+}
+async function scan() {
+  try {
+    const job = await api('posteingang/scan', {});
+    toast('Scannen Sie im macOS-Dialog und wählen Sie dort „Scans übernehmen“.');
+    let r; do { await new Promise(res => setTimeout(res, 1200)); r = await api(`scans/${job.id}/poll`, {}); } while (r.state === 'open');
+    toast(r.state === 'done' ? `${r.imported} Scan(s) im Posteingang${r.errors.length ? ' · ' + r.errors.join(' · ') : ''}` : 'Scan abgebrochen.');
+    location.hash = 'posteingang'; await render();
+  } catch (e) { toast(e.message); }
+}
+addEventListener('dragover', e => { if ([...(e.dataTransfer?.types || [])].includes('Files')) { e.preventDefault(); document.body.classList.add('dragging'); } });
+addEventListener('dragleave', e => { if (!e.relatedTarget) document.body.classList.remove('dragging'); });
+addEventListener('drop', e => { document.body.classList.remove('dragging'); if (e.dataTransfer?.files?.length) { e.preventDefault(); importFiles([...e.dataTransfer.files], S.view === 'akte' ? D.akte.id : null); } });
+addEventListener('hashchange', route);
+route();
+})();
