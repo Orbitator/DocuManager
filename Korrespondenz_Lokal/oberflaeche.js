@@ -393,6 +393,8 @@ function vList() {
 function paintAkte() { werkzeugeParken(); $('#view').innerHTML = vAkte(); mailTexte(); textPanes(); drehungAnwenden(); werkzeugeEinsetzen(); }
 // Suche (als Symbol) und Import sitzen in der Kopfzeile der jeweiligen Ansicht, neben deren Knöpfen.
 // Vor dem Neuaufbau der Ansicht werden sie geparkt, damit Eingaben und Zustand erhalten bleiben.
+// Ansicht neu zeichnen, ohne Suche und Import (in der Kopfzeile) zu verlieren
+function zeichne(ansicht) { werkzeugeParken(); $('#view').innerHTML = ansicht(); werkzeugeEinsetzen(); }
 function werkzeugeParken() { const w = $('#werkzeuge'); if (w && w.parentElement !== $('#parkplatz')) $('#parkplatz').append(w); }
 function werkzeugeEinsetzen() {
   const w = $('#werkzeuge'), kopf = document.querySelector('#view .head') || document.querySelector('#view h1');
@@ -1001,7 +1003,7 @@ function fristModal() {
 // ---------- Aktionen ----------
 document.addEventListener('click', async ev => {
   const el = ev.target.closest('[data-act]');
-  if (!ev.target.closest('.search')) { $('#results').hidden = true; if (!$('#q').value) document.querySelector('#werkzeuge .search')?.classList.remove('offen'); }
+  if (!ev.target.closest('.search')) { const r = $('#results'); if (r) r.hidden = true; if (!$('#q')?.value) document.querySelector('#werkzeuge .search')?.classList.remove('offen'); }
   if (!ev.target.closest('.imp')) { $('#impmenu').hidden = true; $('#impbtn').setAttribute('aria-expanded', 'false'); }
   if (!el) return;
   const a = el.dataset.act, id = el.dataset.id ? (isNaN(+el.dataset.id) ? el.dataset.id : +el.dataset.id) : null;
@@ -1012,8 +1014,8 @@ document.addEventListener('click', async ev => {
   case 'doc-add': $('#fileinp').dataset.ziel = String(D.akte.id); $('#fileinp').click(); break;
   case 'imp-scan': $('#impmenu').hidden = true; scan(S.view === 'archiv'); break;
   case 'scan-folder': $('#impmenu').hidden = true; try { const r = await api('scanordner/oeffnen', {}); toast(`Ordner „${r.pfad.split('/').pop()}“ (in Ihrem Benutzerordner) geöffnet. Was Sie dort hineinscannen oder ablegen, kommt automatisch in den Posteingang.`); } catch (e) { toast(e.message); } break;
-  case 'ib-open': S.ibSel = S.ibSel === id ? null : id; $('#view').innerHTML = vInbox(); if (S.ibSel) $('#it-' + S.ibSel)?.scrollIntoView({behavior: 'smooth', block: 'nearest'}); break;
-  case 'ib-close': S.ibSel = null; $('#view').innerHTML = vInbox(); break;
+  case 'ib-open': S.ibSel = S.ibSel === id ? null : id; zeichne(vInbox); if (S.ibSel) $('#it-' + S.ibSel)?.scrollIntoView({behavior: 'smooth', block: 'nearest'}); break;
+  case 'ib-close': S.ibSel = null; zeichne(vInbox); break;
   case 'ib-del': await act(() => api(`dokument/${id}/loeschen`, {}), 'In den Papierkorb verschoben.'); break;
   case 'ib-assign': try { await assign(id, el.dataset.v); } catch (e) { toast(e.message); } break;
   case 'ib-archiv': try { await assign(id, 'ablage'); } catch (e) { toast(e.message); } break;
@@ -1113,11 +1115,11 @@ document.addEventListener('click', async ev => {
       closeModal(); await act(() => api('fristen/' + f.id, {faellig_am: val('m-fd'), grund: val('m-fg')}), 'Verschoben.'); return false; }, 'Verschieben'); break; }
   case 'f-zust': { const f = D.akte.fristen.find(x => x.id === id); modal('Zuständig', `<label>Zuständige Person oder Stelle<input id="m-fz" value="${esc(f.zustaendig || '')}"></label>`, async () => {
       closeModal(); await act(() => api('fristen/' + f.id, {zustaendig: val('m-fz')}), 'Gespeichert.'); return false; }); break; }
-  case 'ffilter': S.fFilter = el.dataset.id; $('#view').innerHTML = vFristen(); break;
-  case 'agroup': S.aGroup = el.dataset.id; $('#view').innerHTML = vArchiv(); break;
-  case 'abereich': S.aBereich = el.dataset.id; $('#view').innerHTML = vArchiv(); break;
-  case 'ajahr': S.aJahr = el.dataset.id; $('#view').innerHTML = vArchiv(); break;
-  case 'atyp': S.aTyp = el.dataset.id; $('#view').innerHTML = vArchiv(); break;
+  case 'ffilter': S.fFilter = el.dataset.id; zeichne(vFristen); break;
+  case 'agroup': S.aGroup = el.dataset.id; zeichne(vArchiv); break;
+  case 'abereich': S.aBereich = el.dataset.id; zeichne(vArchiv); break;
+  case 'ajahr': S.aJahr = el.dataset.id; zeichne(vArchiv); break;
+  case 'atyp': S.aTyp = el.dataset.id; zeichne(vArchiv); break;
   case 'arch-edit': if (ev.target.closest('[data-act=view], [data-act=arch-move], [data-act=arch-del]')) break; archivBearbeiten(+el.dataset.doc); break;
   case 'arch-akte': closeModal(); S.v = +el.dataset.v; S.tab = 'chronik'; S.teil = 'all'; S.ktype = 'alle';
     S.entry = null; location.hash = 'akte-' + el.dataset.v; setTimeout(() => { const e = D.akte?.eintraege.find(x => x.dokument_id === +el.dataset.doc); if (e) { S.entry = e.id; paintAkte(); } }, 400); break;
@@ -1192,8 +1194,8 @@ document.addEventListener('input', ev => {
   if (el.dataset.ib) { const d = draft[+el.dataset.id]; if (d) d[el.dataset.ib] = el.value; }
   if (el.dataset.fr) { const f = draft[+el.dataset.id]?.fristen[+el.dataset.i]; if (f) f[el.dataset.fr] = el.type === 'checkbox' ? el.checked : el.value; }
   if (el.id === 'q') search(el.value.trim());
-  if (el.id === 'abq') { S.abq = el.value; const p = el.selectionStart; $('#view').innerHTML = vAb(); const i = $('#abq'); i.focus(); i.setSelectionRange(p, p); }
-  if (el.id === 'atext') { S.aText = el.value; const p = el.selectionStart; $('#view').innerHTML = vArchiv(); const i = $('#atext'); i.focus(); i.setSelectionRange(p, p); }
+  if (el.id === 'abq') { S.abq = el.value; const p = el.selectionStart; zeichne(vAb); const i = $('#abq'); i.focus(); i.setSelectionRange(p, p); }
+  if (el.id === 'atext') { S.aText = el.value; const p = el.selectionStart; zeichne(vArchiv); const i = $('#atext'); i.focus(); i.setSelectionRange(p, p); }
   if (el.id === 'm-kn') dubletten(el.value);
 });
 document.addEventListener('keydown', ev => {
