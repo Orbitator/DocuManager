@@ -15,7 +15,6 @@ Die bisherigen Schnittstellen (`/api/cases`, Dokumente, Scan, Chat) bleiben unve
 | GET `/api/kontakte/dubletten?name=…` | Mögliche Dubletten vor dem Anlegen |
 | GET `/api/suche?q=…` | Volltextsuche über Dokumentseiten, Chronik, Referenzen und Titel, mit Textausschnitt und Seite |
 | GET `/api/papierkorb` | Gelöschte Vorgänge, Dokumente, Einträge, Fristen und Kontakte |
-
 | GET `/api/posteingang` | Noch nicht zugeordnete Dokumente mit Seiten und Vorschlägen (Datum, Absender, Referenz, Vorgänge) |
 | GET `/api/archiv` | Alle abgelegten Dokumente mit Vorgang, Bereich, Absender, Datum und Größe |
 | GET `/api/fristen` | Alle Fristen, Wiedervorlagen und Aufgaben |

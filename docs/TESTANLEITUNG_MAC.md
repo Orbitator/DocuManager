@@ -80,7 +80,7 @@ Erst wenn Schritt 2 bis 4 funktionieren. Die bisherige Anwendung vorher beenden.
 2. Den Inhalt von `Daten` (Datenbank, `Uploads`, `Chat_Originale`) in `DocuManager/Korrespondenz_Lokal/Daten/`
    kopieren. Den Ordner `Laufzeit` nicht mitkopieren, die Helfer werden neu gebaut.
 3. Anwendung starten. Beim ersten Start legt sie zusätzlich automatisch eine Sicherung in `Daten/Sicherungen/` an
-   und aktualisiert das Schema auf Version 2.
+   und aktualisiert das Schema auf die aktuelle Version.
 4. Prüfen: Vorgänge, Chat-Notizen und Archivliste sind vollständig.
 
 ## 6. Neue Oberfläche (Etappe 3)
