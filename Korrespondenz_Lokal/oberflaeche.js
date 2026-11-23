@@ -122,7 +122,7 @@ async function render() {
     if (S.view === 'akte') D.akte = await api('akte/' + S.v);
     if (S.view === 'fristen' || S.view === 'uebersicht') D.fristen = (await api('fristen')).fristen;
     if (S.view === 'archiv') D.archiv = (await api('archiv')).dokumente;
-    if (S.view === 'adressbuch' || S.view === 'akte' || S.view === 'posteingang') D.kontakte = (await api('kontakte')).kontakte;
+    if (['adressbuch', 'akte', 'posteingang', 'archiv'].includes(S.view)) D.kontakte = (await api('kontakte')).kontakte;
     if (S.view === 'einstellungen') { D.eigene = (await api('einstellungen')).eigene_angaben; D.mail = await api('mail'); D.sicherungen = (await api('sicherungen')).sicherungen; D.scanordner = await api('scanordner'); }
     if (S.view === 'chat') { D.chats = (await api('chatnotizen')).notizen; D.threads = (await api('chat/threads')).threads || []; }
   } catch (e) {
@@ -306,7 +306,7 @@ function vAkte() {
    ${a.schlagwoerter.length ? `<div class="refs" style="margin-top:8px">${a.schlagwoerter.map(t => `<span class="pill grey"># ${esc(t)}</span>`).join('')}</div>` : ''}
    <div class="refs">${a.referenzen.map(r => `<span class="chip"><em>${esc(r.bezeichnung)}</em> <span class="num">${esc(r.wert)}</span>${r.kontakt_id ? ` <em>· ${esc(kontaktName(r.kontakt_id))}</em>` : ''}</span>`).join('')}
     ${a.beteiligte.filter(b => !a.referenzen.some(r => r.kontakt_id === b.kontakt_id)).map(b => `<button class="chip" data-act="contact" data-id="${b.kontakt_id}">${esc(b.kurzname || b.name)}${b.rolle ? ` <em>· ${esc(b.rolle)}</em>` : ''}</button>`).join('')}
-    <button class="chip" data-act="ref-add" style="border-style:dashed;color:var(--accent)">+ Referenz</button></div>
+</div>
    <div class="tabs" role="tablist">${[['chronik','Chronik'],['dokumente','Dokumente',a.dokumente.length],['beteiligte','Beteiligte',a.beteiligte.length],['fristen','Fristen',a.fristen.filter(f => !f.erledigt_am).length]].map(([id, l, n]) => `<button role="tab" data-act="tab" data-id="${id}" class="${S.tab === id ? 'on' : ''}" aria-selected="${S.tab === id}">${l}${n != null ? `<span class="n num">${n}</span>` : ''}</button>`).join('')}</div>`;
   let body = '';
   if (S.tab === 'chronik') body = `<div class="akte"><div class="l">${teilSwitch()}${fristCards()}${chronik()}</div><div class="r"><div class="sticky">${preview()}</div></div></div>`;
@@ -356,8 +356,8 @@ function chronik() {
       <div class="row1"><span class="date num">${dt(e.ereignis_datum)}</span><span class="ttl">${esc(e.titel)}</span>${e.dokument_id ? `<span class="rowacts"><button class="iconbtn sm" data-act="doc-move" data-doc="${e.dokument_id}" title="In anderen Vorgang verschieben" aria-label="Dokument verschieben">${I('move')}</button><button class="iconbtn sm" data-act="doc-remove" data-doc="${e.dokument_id}" title="Aus diesem Vorgang löschen" aria-label="Dokument löschen">${I('trash')}</button></span>` : ''}</div>
       <div class="row2"><span>${k[0]}${wer}</span>${badges.join('')}</div>${chips || acts ? `<div class="row3">${chips}${acts}</div>` : ''}</div></li>`;
   }).join('');
-  const types = [['alle','Alle Typen'],['eingang','Eingang'],['ausgang','Versendet'],['entwurf','Entwürfe'],['gespraech','Telefonate & Notizen'],['chat','Chat-Notizen'],['fehlt','Fehlende Originale']];
-  return `<div class="stack" style="gap:6px"><div class="chron-h"><h2>Chronik</h2><span style="display:flex;gap:6px"><button class="btn out sm" data-act="compose">${I('draft')}Brief</button><button class="btn out sm" data-act="entry-add">${I('plus')}Eintrag</button></span></div>
+  const types = [['alle','Alle Typen'],['eingang','Eingang'],['ausgang','Versendet'],['entwurf','Entwürfe'],['gespraech','Telefonate & Notizen'],['chat','Chat-Notizen']];
+  return `<div class="stack" style="gap:6px"><div class="chron-h"><h2>Chronik</h2><span style="display:flex;gap:6px"><button class="btn out sm" data-act="compose">${I('draft')}Brief</button><button class="btn out sm" data-act="entry-add">${I('plus')}Eintrag</button><button class="btn out sm" data-act="ref-add">${I('plus')}Referenz</button></span></div>
    <div style="display:flex;gap:6px;flex-wrap:wrap">${types.map(([k, l]) => `<button class="fchip ${S.ktype === k ? 'on' : ''}" data-act="ktype" data-id="${k}" style="padding:3px 9px;font-size:12px">${l}</button>`).join('')}</div>
    <ul class="chron">${rows || '<li class="muted" style="padding:10px 0">Noch keine Einträge. Dokumente aus dem Posteingang zuordnen oder einen Eintrag anlegen.</li>'}</ul></div>`;
 }
@@ -470,12 +470,29 @@ const VORLAGEN = {
   eingang: ['Bitte um Eingangsbestätigung', 'Bitte um Eingangsbestätigung', '{anrede}\n\nbitte bestätigen Sie mir den Eingang meines Schreibens vom {letzter}.\n\nMit freundlichen Grüßen\n{name}'],
   leer: ['Freies Schreiben', '', '{anrede}\n\n\n\nMit freundlichen Grüßen\n{name}']};
 const anredeFuer = person => { const m = (person || '').match(/^(Frau|Herr)\s+(?:Dr\.\s+)?(?:[A-ZÄÖÜ]\.\s+)?(.+)$/); return m ? `Sehr geehrte${m[1] === 'Herr' ? 'r' : ''} ${m[1]} ${m[2]},` : 'Sehr geehrte Damen und Herren,'; };
+const flachText = t => String(t || '').toLowerCase().replace(/[\s\-_.–/]+/g, '');
 async function compose(bezugId, editId) {
   const a = D.akte; if (D.eigene === undefined || D.eigene === '') D.eigene = (await api('einstellungen')).eigene_angaben;
   const edit = editId ? a.eintraege.find(e => e.id === editId) : null, bezug = bezugId ? a.eintraege.find(e => e.id === bezugId) : (edit && edit.bezug_id ? a.eintraege.find(e => e.id === edit.bezug_id) : null);
-  const kId = (edit || bezug || {}).kontakt_id || (a.beteiligte[0] || {}).kontakt_id, k = D.kontakte.find(x => x.id === kId);
-  const ziele = k ? k.abteilungen.flatMap(ab => [...ab.anschriften.filter(r => !r.gueltig_bis).map(r => ({k: 'a' + r.id, text: r.zeilen, person: ab.ansprechpartner})), ...(ab.email ? [{k: 'm' + ab.id, text: `${k.name}\n${ab.email}`, person: ab.ansprechpartner}] : [])]) : [];
-  const ref = a.referenzen.find(r => r.kontakt_id === kId) || a.referenzen[0];
+  if (!D.kontakte.length) D.kontakte = (await api('kontakte')).kontakte;
+  // Empfänger: Kontakt des Bezugsschreibens, sonst Beteiligte, sonst Absender des letzten Eingangs
+  const letzterEingang = [...a.eintraege].filter(e => e.art === 'eingang' && e.kontakt_id).sort((x, y) => y.ereignis_datum.localeCompare(x.ereignis_datum))[0];
+  let kId = (edit || bezug || {}).kontakt_id || (a.beteiligte[0] || {}).kontakt_id || (letzterEingang || {}).kontakt_id || null;
+  const zieleFuer = k => {
+    if (!k) return [];
+    const mitName = (zeilen, person) => { const z = zeilen.split('\n').filter(Boolean); if (!flachText(z[0]).includes(flachText(k.name).slice(0, 8))) z.unshift(k.name);
+      if (person && !zeilen.includes(person)) z.splice(1, 0, 'z. Hd. ' + person); return z.join('\n'); };
+    const liste = k.abteilungen.flatMap(ab => [...ab.anschriften.filter(r => !r.gueltig_bis).map(r => ({k: 'a' + r.id, text: mitName(r.zeilen, ab.ansprechpartner), person: ab.ansprechpartner})),
+      ...(ab.email ? [{k: 'm' + ab.id, text: `${k.name}${ab.ansprechpartner ? '\nz. Hd. ' + ab.ansprechpartner : ''}\n${ab.email}`, person: ab.ansprechpartner}] : [])]);
+    return liste.length ? liste : [{k: 'n', text: k.name + (k.abteilungen[0]?.ansprechpartner ? '\nz. Hd. ' + k.abteilungen[0].ansprechpartner : ''), person: k.abteilungen[0]?.ansprechpartner}];
+  };
+  let k = D.kontakte.find(x => x.id === kId), ziele = zieleFuer(k);
+  const refFuer = id => a.referenzen.find(r => r.kontakt_id === id) || a.referenzen[0];
+  const ref = refFuer(kId);
+  const beteiligt = new Set(a.beteiligte.map(x => x.kontakt_id));
+  const kontaktOptionen = [...D.kontakte].sort((x, y) => (beteiligt.has(y.id) - beteiligt.has(x.id)) || cmp(x.name, y.name))
+    .map(x => `<option value="${x.id}" ${x.id === kId ? 'selected' : ''}>${esc(x.kurzname || x.name)}${beteiligt.has(x.id) ? ' · beteiligt' : ''}</option>`).join('');
+  const zielOptionen = () => ziele.map(z => `<option value="${z.k}">${esc(z.text.replace(/\n/g, ', '))}</option>`).join('') + '<option value="frei">Andere Anschrift …</option>';
   const letzter = [...a.eintraege].filter(e => e.art === 'ausgang').sort((x, y) => y.ereignis_datum.localeCompare(x.ereignis_datum))[0];
   const eigName = (D.eigene || '').split('\n')[0] || '';
   const ctx = {bezug: bezug ? dt(bezug.ereignis_datum) : '[Datum]', letzter: letzter ? dt(letzter.ereignis_datum) : '[Datum]', frist2: dt(plusTage(isoHeute(), 14)), frist4: dt(plusTage(isoHeute(), 28)), name: eigName};
@@ -484,7 +501,9 @@ async function compose(bezugId, editId) {
   const b = edit && edit.brief || {};
   modal(edit ? 'Brief bearbeiten' : 'Brief verfassen', `<div class="compose"><div class="stack">
     ${edit ? '' : `<label>Vorlage<select id="m-tpl">${Object.entries(VORLAGEN).map(([key, t]) => `<option value="${key}">${t[0]}</option>`).join('')}</select></label>`}
-    <label>Empfänger${k ? ' aus dem Adressbuch' : ''}${ziele.length ? `<select id="m-to">${ziele.map(z => `<option value="${z.k}">${esc(z.text.replace(/\n/g, ', '))}</option>`).join('')}<option value="frei">Andere Anschrift …</option></select>` : ''}<textarea id="m-emp" rows="4">${esc(b.empfaenger || (ziele[0] ? ziele[0].text : ''))}</textarea></label>
+    <div class="two"><label>Kontakt<select id="m-kontakt"><option value="">– ohne Adressbuch –</option>${kontaktOptionen}</select></label>
+     <label>Anschrift<select id="m-to" ${ziele.length > 1 ? '' : 'hidden'}>${zielOptionen()}</select><span class="muted" id="m-tohint" style="font-size:12.5px" ${ziele.length > 1 ? 'hidden' : ''}>${k ? (ziele[0]?.k === 'n' ? 'Keine Anschrift hinterlegt – bitte ergänzen.' : 'Aktuelle Anschrift aus dem Adressbuch') : 'Kontakt wählen oder Anschrift eintragen'}</span></label></div>
+    <label>Empfänger<textarea id="m-emp" rows="4">${esc(b.empfaenger || (ziele[0] ? ziele[0].text : ''))}</textarea></label>
     <div class="two"><label>Ihr Zeichen<input id="m-zeichen" value="${esc(b.zeichen || (ref ? ref.wert : ''))}"></label><label>Datum<input id="m-bdat" value="${esc(b.datum || dt(isoHeute()))}"></label></div>
     <label>Betreff<input id="m-subj" value="${esc(b.betreff || '')}"></label>
     <label>Brieftext<textarea id="m-body">${esc(edit ? edit.text || '' : '')}</textarea></label>
@@ -518,6 +537,14 @@ async function compose(bezugId, editId) {
   const box = document.querySelector('.modal');
   box.addEventListener('input', ev => {
     if (ev.target.id === 'm-tpl') vorlage();
+    else if (ev.target.id === 'm-kontakt') {
+      kId = ev.target.value ? +ev.target.value : null; k = D.kontakte.find(x => x.id === kId); ziele = zieleFuer(k);
+      const sel = $('#m-to'); sel.innerHTML = zielOptionen(); sel.hidden = ziele.length <= 1;
+      const hint = $('#m-tohint'); hint.hidden = ziele.length > 1; hint.textContent = k ? (ziele[0]?.k === 'n' ? 'Keine Anschrift hinterlegt – bitte ergänzen.' : 'Aktuelle Anschrift aus dem Adressbuch') : 'Kontakt wählen oder Anschrift eintragen';
+      $('#m-emp').value = ziele[0] ? ziele[0].text : '';
+      const r = refFuer(kId); if (r && !$('#m-zeichen').value) $('#m-zeichen').value = r.wert;
+      if (!$('#m-body').dataset.touched && $('#m-tpl')) vorlage(); else upd();
+    }
     else if (ev.target.id === 'm-to') { const z = ziele.find(x => x.k === ev.target.value); $('#m-emp').value = z ? z.text : ''; if (!$('#m-body').dataset.touched && $('#m-tpl')) vorlage(); else upd(); }
     else { if (ev.target.id === 'm-body') ev.target.dataset.touched = '1'; upd(); }
   });
@@ -626,7 +653,7 @@ function vArchiv() {
   const groups = [];
   for (const d of list) { const k = gkey(d); let g = groups.find(x => x.k === k); if (!g) groups.push(g = {k, items: []}); g.items.push(d); }
   if (S.aGroup === 'jahr') groups.sort((x, y) => cmp(y.k, x.k)); else if (S.aGroup !== 'keine') groups.sort((x, y) => cmp(x.k, y.k));
-  const row = d => `<tr data-act="arch-open" data-v="${d.vorgang_id}" data-doc="${d.id}" ${d.system === 'ablage' ? 'data-ablage="1"' : ''}><td><b>${esc(d.titel)}</b><div class="muted" style="font-size:12.5px">${esc(d.dateiname)}</div></td><td class="num">${dt(d.datum)}</td><td>${esc(d.absender || '–')}</td><td>${esc(d.vorgang)}<div class="muted" style="font-size:12.5px">${esc(d.bereich)}</div></td><td class="num">${groesse(d.groesse)}</td>
+  const row = d => `<tr data-act="arch-edit" data-doc="${d.id}" title="Klicken zum Bearbeiten"><td><div class="docname"><button class="docico" data-act="view" data-doc="${d.id}" title="Dokument ansehen" aria-label="${esc(d.titel)} ansehen">${I('doc')}</button><div style="min-width:0"><b>${esc(d.titel)}</b><div class="muted" style="font-size:12.5px">${esc(d.dateiname)}</div></div></div></td><td class="num">${dt(d.datum)}</td><td>${esc(d.absender || '–')}</td><td>${esc(d.vorgang)}<div class="muted" style="font-size:12.5px">${esc(d.bereich)}</div></td><td class="num">${groesse(d.groesse)}</td>
     <td style="white-space:nowrap"><button class="iconbtn sm" data-act="arch-move" data-doc="${d.id}" data-v="${d.vorgang_id}" data-t="${esc(d.titel)}" title="In anderen Vorgang verschieben" aria-label="${esc(d.titel)} verschieben">${I('move')}</button><button class="iconbtn sm" data-act="arch-del" data-doc="${d.id}" data-v="${d.vorgang_id}" data-t="${esc(d.titel)}" title="Löschen" aria-label="${esc(d.titel)} löschen">${I('trash')}</button></td></tr>`;
   const thead = `<thead><tr>${sortTh('A','titel','Dokument')}${sortTh('A','datum','Datum')}${sortTh('A','absender','Absender')}${sortTh('A','vorgang','Vorgang')}${sortTh('A','groesse','Größe')}<th><span class="sr">Aktionen</span></th></tr></thead>`;
   return `<h1>Archiv</h1><p class="muted" style="margin:6px 0 0">${D.archiv.length} archivierte Dokumente. Wird ein Vorgang erledigt, verschwindet er aus „Vorgänge“; seine Dokumente stehen hier. ${list.length !== D.archiv.length ? `${list.length} passen zu den Filtern.` : ''}</p>
@@ -762,6 +789,21 @@ function dokVerschieben(docId, vonId, titel) {
     } catch (e) { toast(e.message); }
     return false;
   }, 'Verschieben');
+}
+function archivBearbeiten(docId) {
+  const d = D.archiv.find(x => x.id === docId); if (!d) return;
+  const kontakte = [...D.kontakte].sort((x, y) => cmp(x.name, y.name));
+  modal('Dokument bearbeiten', `<label>Titel<input id="m-at" maxlength="160" value="${esc(d.titel)}"></label>
+   <label>Dateiname<input id="m-an" maxlength="200" value="${esc(d.dateiname)}"></label>
+   <div class="two"><label>Dokumentdatum<input id="m-ad" type="date" value="${esc(d.dokument_datum || d.datum || '')}"></label>
+    <label>Absender<select id="m-ak"><option value="">– unbekannt –</option>${kontakte.map(k => `<option value="${k.id}" ${k.id === d.kontakt_id ? 'selected' : ''}>${esc(k.kurzname || k.name)}</option>`).join('')}</select></label></div>
+   <p class="muted" style="margin:0;font-size:13px">Vorgang: ${d.system === 'ablage' ? 'ohne Vorgang' : `${esc(d.vorgang)} · <button class="linkbtn" data-act="arch-akte" data-v="${d.vorgang_id}" data-doc="${d.id}">Akte öffnen</button>`} · <button class="linkbtn" data-act="view" data-doc="${d.id}">Dokument ansehen</button></p>
+   <p class="muted" style="margin:0;font-size:12.5px">Die Originaldatei bleibt unverändert; der Dateiname gilt für Anzeige und Export.</p>`, async () => {
+    const titel = val('m-at').trim(); if (!titel) { $('#m-at').focus(); return false; }
+    try { await api(`dokumente/${docId}/aendern`, {titel, dateiname: val('m-an').trim(), datum: val('m-ad') || null, kontakt_id: val('m-ak') ? +val('m-ak') : null}); closeModal(); toast('Gespeichert.'); await render(); }
+    catch (e) { toast(e.message); }
+    return false;
+  }, 'Speichern');
 }
 function dokEntfernen(docId, vonId, titel) {
   const v = D.cases.find(c => c.id === vonId);
@@ -907,9 +949,8 @@ document.addEventListener('click', async ev => {
   case 'agroup': S.aGroup = el.dataset.id; $('#view').innerHTML = vArchiv(); break;
   case 'abereich': S.aBereich = el.dataset.id; $('#view').innerHTML = vArchiv(); break;
   case 'ajahr': S.aJahr = el.dataset.id; $('#view').innerHTML = vArchiv(); break;
-  case 'arch-open': if (ev.target.closest('[data-act=view], [data-act=arch-move], [data-act=arch-del]')) break;
-    if (el.dataset.ablage) { openViewer(el.dataset.doc, el.querySelector('b')?.textContent); break; }
-    S.v = +el.dataset.v; S.tab = 'chronik'; S.teil = 'all'; S.ktype = 'alle';
+  case 'arch-edit': if (ev.target.closest('[data-act=view], [data-act=arch-move], [data-act=arch-del]')) break; archivBearbeiten(+el.dataset.doc); break;
+  case 'arch-akte': closeModal(); S.v = +el.dataset.v; S.tab = 'chronik'; S.teil = 'all'; S.ktype = 'alle';
     S.entry = null; location.hash = 'akte-' + el.dataset.v; setTimeout(() => { const e = D.akte?.eintraege.find(x => x.dokument_id === +el.dataset.doc); if (e) { S.entry = e.id; paintAkte(); } }, 400); break;
   case 'contact': S.contact = id; S.abq = ''; if (location.hash !== '#adressbuch') location.hash = 'adressbuch'; else await render(); break;
   case 'k-new': modal('Neuer Kontakt', `<label>Name der Organisation oder Person<input id="m-kn" maxlength="160"></label><div id="m-kd"></div><div class="two"><label>Kurzname<input id="m-kk"></label><label>Art<input id="m-kt" placeholder="z. B. Versicherung, Behörde"></label></div>

@@ -5,6 +5,7 @@ Versand mit gespeicherter Anschrift, Referenzen, Bereiche, Schlagwörter, Papier
 Alle Daten liegen in derselben SQLite-Datei wie Vorgänge und Dokumente.
 """
 import json
+import os
 import re
 import sqlite3
 from contextlib import closing
@@ -1089,6 +1090,39 @@ class Akte:
                 if kontakt:
                     db.execute("UPDATE eintrag SET kontakt_id=?, richtung='von' WHERE id=?", (kontakt, e["id"]))
 
+    def dokument_aendern(self, dokument_id, data):
+        """Titel, Dateiname, Dokumentdatum und Absender eines Dokuments ändern (z. B. im Archiv).
+        Chronik-Einträge des Dokuments werden mitgeführt; die Originaldatei bleibt unverändert."""
+        with closing(self.connect()) as db, db:
+            d = db.execute("SELECT * FROM dokument WHERE id=? AND geloescht_am IS NULL", (dokument_id,)).fetchone()
+            if not d:
+                raise ValueError("Dokument nicht gefunden.")
+            if "titel" in data:
+                titel = _text(data.get("titel"), "Titel", 160, True)
+                if titel != d["titel"]:
+                    db.execute("UPDATE dokument SET titel=?, titel_seite=NULL, titel_quelle='Manuell' WHERE id=?", (titel, dokument_id))
+                    db.execute("UPDATE eintrag SET titel=? WHERE dokument_id=? AND titel=?", (titel, dokument_id, d["titel"]))
+            if "dateiname" in data:
+                name = _text(data.get("dateiname"), "Dateiname", 200, True)
+                if any(c in name for c in "/\\:") or any(ord(c) < 32 for c in name):
+                    raise ValueError("Der Dateiname darf keine Schrägstriche oder Doppelpunkte enthalten.")
+                endung = os.path.splitext(d["dateiname"])[1]
+                if endung and not name.lower().endswith(endung.lower()):
+                    name += endung
+                db.execute("UPDATE dokument SET dateiname=? WHERE id=?", (name, dokument_id))
+            if "datum" in data:
+                datum = _date(data.get("datum"), "Dokumentdatum", False)
+                db.execute("UPDATE dokument SET dokument_datum=? WHERE id=?", (datum, dokument_id))
+                if datum:
+                    db.execute("UPDATE eintrag SET ereignis_datum=? WHERE dokument_id=? AND art='eingang'", (datum, dokument_id))
+            if "kontakt_id" in data:
+                kontakt = _id(data.get("kontakt_id"), "Absender")
+                if kontakt and not db.execute("SELECT 1 FROM kontakt WHERE id=?", (kontakt,)).fetchone():
+                    raise ValueError("Absender nicht gefunden.")
+                db.execute("UPDATE eintrag SET kontakt_id=?, richtung=? WHERE dokument_id=? AND art='eingang'",
+                           (kontakt, "von" if kontakt else None, dokument_id))
+        return {"ok": True}
+
     def dokument_fristen(self, dokument_id):
         """Im Text eines Dokuments erkannte Fristen, gerechnet ab Dokumentdatum."""
         with closing(self.connect()) as db:
@@ -1170,6 +1204,8 @@ class Akte:
                           AND e.geloescht_am IS NULL ORDER BY e.id LIMIT 1) AS art,
                        (SELECT k.name FROM eintrag e JOIN kontakt k ON k.id=e.kontakt_id WHERE e.dokument_id=d.id
                           AND e.geloescht_am IS NULL ORDER BY e.id LIMIT 1) AS absender,
+                       (SELECT e.kontakt_id FROM eintrag e WHERE e.dokument_id=d.id AND e.kontakt_id IS NOT NULL
+                          AND e.geloescht_am IS NULL ORDER BY e.id LIMIT 1) AS kontakt_id,
                        (SELECT min(e.ereignis_datum) FROM eintrag e WHERE e.dokument_id=d.id AND e.geloescht_am IS NULL)
                           AS ereignis_datum
                 FROM dokument d JOIN dokument_vorgang dv ON dv.dokument_id=d.id JOIN vorgang v ON v.id=dv.vorgang_id
@@ -1301,6 +1337,7 @@ def _route_table():
         ("POST", r"/api/einstellungen", lambda a, m, d: a.eigene_angaben_setzen(d.get("eigene_angaben"))),
         ("POST", r"/api/posteingang/(\d+)/zuordnen", lambda a, m, d: {"id": a.zuordnen(i(m[1]), d)}),
         ("POST", r"/api/dokumente/(\d+)/verschieben", lambda a, m, d: a.dokument_verschieben(i(m[1]), d)),
+        ("POST", r"/api/dokumente/(\d+)/aendern", lambda a, m, d: a.dokument_aendern(i(m[1]), d)),
         ("POST", r"/api/dokumente/(\d+)/entfernen", lambda a, m, d: a.dokument_entfernen(i(m[1]), _id(d.get("vorgang_id"), "Vorgang"))),
         ("GET", r"/api/dokumente/(\d+)/fristen", lambda a, m, d: {"fristen": a.dokument_fristen(i(m[1]))}),
         ("POST", r"/api/akte/(\d+)", lambda a, m, d: a.vorgang_aendern(i(m[1]), d)),
@@ -1707,6 +1744,17 @@ def test_fristen_ablage(store):  # noqa: C901
     assert neu5 and d5 != d4
     akte.zuordnen(d5, {"vorgang_id": a})
     assert [d["id"] for d in akte.akte(a)["dokumente"]] == [d5]
+    # Im Archiv bearbeiten: Titel, Dateiname (Endung bleibt), Datum, Absender
+    k = akte.kontakt_anlegen({"name": "Finanzamt Rostock"})
+    akte.dokument_aendern(d1, {"titel": "Info Stadtwerke", "dateiname": "Stadtwerke-Info", "datum": "2026-10-01", "kontakt_id": k})
+    z = [x for x in akte.archiv() if x["id"] == d1][0]
+    assert (z["titel"], z["dateiname"], z["datum"], z["absender"], z["kontakt_id"]) == (
+        "Info Stadtwerke", "Stadtwerke-Info.pdf", "2026-10-01", "Finanzamt Rostock", k), z
+    try:
+        akte.dokument_aendern(d1, {"dateiname": "../boese.pdf"})
+        raise AssertionError("Pfadangaben im Dateinamen müssen abgelehnt werden")
+    except ValueError:
+        pass
     # Direkt archiviert: Datum, Absender und Titel werden nach der Texterkennung nachgetragen
     d3, _ = store.import_document(None, "Scan_0007.pdf", b"%PDF-1.4\nNachtrag")
     akte.zuordnen(d3, {"ablage": True})

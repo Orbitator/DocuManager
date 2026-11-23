@@ -405,3 +405,7 @@ button.heute{margin-left:6px;padding:4px 8px;font-size:12px;border:1px solid var
 button.heute:hover{background:var(--surface-2,rgba(127,127,127,.18))}
 label:has(> input[type=date]){display:flex;flex-wrap:wrap;align-items:center}
 label:has(> input[type=date]) > input[type=date]{flex:1 1 140px;width:auto}
+.docname{display:flex;align-items:flex-start;gap:8px}
+.docico{flex:none;display:grid;place-items:center;width:30px;height:34px;border:1px solid var(--line-strong);border-radius:6px;background:var(--paper);color:#3341c9;cursor:pointer;padding:0}
+.docico svg{width:18px;height:18px}
+.docico:hover{outline:2px solid var(--accent)}

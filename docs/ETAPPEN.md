@@ -118,6 +118,11 @@ Teil 2 (umgesetzt, Schemaversion 7):
   `dokument`; `migrate_9` baut die Tabelle ohne sie neu (Zugehörigkeit regelt `dokument_vorgang`). Der Scan-Ordner
   liegt jetzt unter `~/DocuManager Scans` (nicht in „Dokumente“, das macOS für Programme gesondert schützt).
   Fehlermeldungen beim Speichern nennen die Ursache.
+- 0.8.3: Archiv – Klick auf eine Zeile öffnet „Dokument bearbeiten“ (Titel, Dateiname, Dokumentdatum, Absender;
+  `dokument_aendern`, Original bleibt unverändert), das Dateisymbol vor dem Namen öffnet das Dokument im Betrachter.
+  Akte – „Referenz“ steht neben „Eintrag“ im Kopf der Chronik, der Filter „Fehlende Originale“ entfällt.
+  Brief – Auswahl „Kontakt“ (Beteiligte zuerst, dann Adressbuch); die Anschrift wird aus dem Kontakt übernommen
+  (Name, z. Hd. Ansprechpartner, aktuelle Anschrift), Anrede und Zeichen passen sich an.
 - Fristen werden nur noch bei der Formulierung „bis zum <Datum>“ (auch „bis spätestens zum“) vorgeschlagen.
 - Datensicherung: immer nur eine Sicherungsdatei; Wiederherstellen in den Einstellungen (Datei laden oder aus der
   Liste) bei laufender Anwendung über die SQLite-Sicherungsschnittstelle (`wiederherstellen_laufend`), die bisherige

@@ -67,6 +67,7 @@ Die bisherigen Schnittstellen (`/api/cases`, Dokumente, Scan, Chat) bleiben unve
 | POST `/api/sicherungen/{name}/wiederherstellen` | Stellt eine vorhandene Sicherung wieder her |
 | POST `/api/archiv/dokumente` | Körper: Datei, Kopf `X-Dateiname`; legt direkt im Archiv ab, Texterkennung wie im Posteingang |
 | POST `/api/dokumente/{id}/entfernen` | `vorgang_id`; löst die Verknüpfung oder legt das Dokument in den Papierkorb |
+| POST `/api/dokumente/{id}/aendern` | `titel`, `dateiname`, `datum`, `kontakt_id` (jeweils optional) |
 | POST `/api/beenden` | Beendet die Anwendung |
 | POST `/api/sicherungen/{name}/pruefen` | Prüft Vollständigkeit, Prüfsummen und Datenbank, ohne etwas zu ändern |
 | POST `/api/mail/markierung` | `markierung` 0–6 (Rot, Orange, Gelb, Grün, Blau, Violett, Grau) |
