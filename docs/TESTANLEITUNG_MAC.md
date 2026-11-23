@@ -116,7 +116,8 @@ Erst wenn Schritt 2 bis 4 funktionieren. Die bisherige Anwendung vorher beenden.
 
 ## 9. Automatische Drehung
 
-1. Einen Brief verkehrt herum (auf dem Kopf) scannen oder ein solches PDF importieren.
+1. Einen Brief verkehrt herum (auf dem Kopf) scannen oder ein solches PDF importieren. Bereits vorhandene
+   Scans werden nach dem ersten Start dieses Stands einmal automatisch neu geprüft (einige Minuten).
 2. Warten, bis die Texterkennung fertig ist, dann das Dokument in der Akte oder im Posteingang öffnen.
 3. Erwartet: Das Dokument steht aufrecht, daneben „automatisch gedreht“. „Original ungedreht“ zeigt die
    unveränderte Datei. Der erkannte Text (Text & Fundstellen) ist lesbar.

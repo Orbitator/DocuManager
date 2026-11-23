@@ -33,10 +33,10 @@ from mail_import import MailImport, migrate_5, test_mail
 
 ROOT = Path(__file__).resolve().parent
 PORT = 8765
-APP_VERSION = "DocuManager 0.5 · Briefe, Fundstellen, Abschluss, Sicherung, Drehung"
+APP_VERSION = "DocuManager 0.5.1 · Briefe, Fundstellen, Abschluss, Sicherung, Drehung"
 MAX_UPLOAD = 25 * 1024 * 1024
 MIN_MACOS = "14.0"
-SCHEMA_VERSION = 7
+SCHEMA_VERSION = 8
 OCR_WAITING = "Wartet auf Texterkennung"
 OCR_RUNNING = "Texterkennung läuft"
 log = logging.getLogger("korrespondenz")
@@ -195,8 +195,15 @@ def migrate_7(db):
         db.execute("ALTER TABLE dokumentseite ADD COLUMN drehung INTEGER NOT NULL DEFAULT 0")
 
 
+def migrate_8(db):
+    """Einmalig: Dokumente mit Texterkennung erneut prüfen lassen, damit auf dem Kopf liegende Scans aus der Zeit
+    vor der verbesserten Lageerkennung aufrecht angezeigt werden. Vorhandener Text bleibt bei einem Fehler erhalten."""
+    db.execute("""UPDATE dokument SET ocr_status=? WHERE geloescht_am IS NULL AND mime<>'message/rfc822'
+        AND id IN (SELECT dokument_id FROM dokumentseite WHERE methode='ocr')""", (OCR_WAITING,))
+
+
 MIGRATIONS = ((1, migrate_1), (2, migrate_2), (3, migrate_3), (4, migrate_4), (5, migrate_5), (6, migrate_6),
-              (7, migrate_7))
+              (7, migrate_7), (8, migrate_8))
 
 
 class Store:
@@ -394,13 +401,16 @@ class Store:
             db.execute("UPDATE dokument SET ocr_status=? WHERE id=?", (OCR_RUNNING, doc_id))
         started = time.monotonic()
         self.ansicht.mkdir(exist_ok=True)
-        stage = self.ansicht / f"{doc_id}.tmp.pdf"
+        stage = self.ansicht / f"{doc_id}.tmp"
         stage.unlink(missing_ok=True)
         pages, status, error = self.read_ocr(self.uploads / row["dateipfad"], Path(row["dateipfad"]).suffix, stage)
         ansicht = None
         if stage.is_file() and stage.stat().st_size and any(p.get("rotation") for p in pages):
-            ansicht = f"{row['sha256']}.pdf"
-            os.replace(stage, self.ansicht / ansicht)
+            kopf = stage.read_bytes()[:4]
+            endung = ".pdf" if kopf.startswith(b"%PDF") else ".jpg" if kopf.startswith(b"\xff\xd8") else None
+            if endung:
+                ansicht = row["sha256"] + endung
+                os.replace(stage, self.ansicht / ansicht)
         stage.unlink(missing_ok=True)
         self._set_ocr_result(doc_id, pages, status, error, ansicht)
         log.info("Dokument %s: %s nach %.1f s%s", doc_id, status, time.monotonic() - started,
@@ -409,6 +419,11 @@ class Store:
     def _set_ocr_result(self, doc_id, pages, status, error, ansicht=None):
         title, page, source = select_title(pages)
         with closing(self.connect()) as db, db:
+            if not pages and db.execute("SELECT 1 FROM dokumentseite WHERE dokument_id=?", (doc_id,)).fetchone():
+                # Eine fehlgeschlagene erneute Erkennung darf vorhandenen Text nicht löschen.
+                db.execute("UPDATE dokument SET ocr_status=?, ocr_fehler=?, ocr_aktualisiert_am=CURRENT_TIMESTAMP WHERE id=?",
+                           ("Erneute Erkennung fehlgeschlagen, bisheriger Text bleibt", error or status, doc_id))
+                return
             db.execute("DELETE FROM dokumentseite WHERE dokument_id=?", (doc_id,))
             db.executemany("INSERT INTO dokumentseite(dokument_id,nummer,methode,text,drehung) VALUES(?,?,?,?,?)",
                            ((doc_id, p["number"], p["method"], p["text"], int(p.get("rotation") or 0) % 360) for p in pages))
@@ -720,8 +735,9 @@ class Handler(BaseHTTPRequestHandler):
                 ansicht = self.store.ansicht / row["ansicht"] if row["ansicht"] else None
                 unveraendert = dict(parse_qsl(urlsplit(self.path).query)).get("fassung") == "original"
                 if ansicht and ansicht.is_file() and not unveraendert:  # aufrecht gedrehte Ansichtsfassung
-                    name = Path(row["dateiname"]).stem + " (gedreht).pdf"
-                    self.send_bytes(200, "application/pdf", ansicht.read_bytes(), "inline; filename*=" + encode_rfc2231(name, "utf-8"))
+                    name = Path(row["dateiname"]).stem + " (gedreht)" + ansicht.suffix
+                    mime = "application/pdf" if ansicht.suffix == ".pdf" else "image/jpeg"
+                    self.send_bytes(200, mime, ansicht.read_bytes(), "inline; filename*=" + encode_rfc2231(name, "utf-8"))
                 elif not file.is_file():
                     self.send_json({"error": "Das Original fehlt."}, 404)
                 else:
@@ -1051,7 +1067,23 @@ def test_foundation(folder):
     assert gedreht.pages(ddoc)[0]["drehung"] == 180 and drow["ansicht"] == drow["sha256"] + ".pdf", drow["ansicht"]
     assert (gedreht.ansicht / drow["ansicht"]).read_bytes() == b"%PDF-1.4 aufrecht"
     assert (gedreht.uploads / drow["dateipfad"]).read_bytes() == b"%PDF-1.4\nkopf"  # Original unverändert
-    assert not list(gedreht.ansicht.glob("*.tmp.pdf"))
+    assert not list(gedreht.ansicht.glob("*.tmp"))
+    # Bild auf dem Kopf: Ansichtsfassung als JPEG, damit Kachel und Vorschau es als Bild zeigen
+    bild = folder / "fake-ocr-bild"
+    bild.write_text("#!" + sys.executable + "\nimport json,sys\nif len(sys.argv)==4: open(sys.argv[3],'wb').write(b'\\xff\\xd8\\xff jpeg')\n"
+                    "print(json.dumps({'issues':[],'pages':[{'number':1,'method':'ocr','rotation':180,"
+                    "'text':'Betreff: Kopfstand Bild','lines':[]}]}))\n")
+    bild.chmod(0o755)
+    gedreht.ocr = bild
+    bdoc, _ = gedreht.import_document(dcase, "Scan_kopf.jpg", b"\xff\xd8\xff\xe0 original")
+    gedreht.process_pending()
+    assert gedreht.document(bdoc)["ansicht"].endswith(".jpg")
+    # Fehlgeschlagene erneute Erkennung löscht vorhandenen Text nicht
+    gedreht.ocr = folder / "fehlt"
+    gedreht.retry_ocr(bdoc)
+    gedreht.process_pending()
+    assert gedreht.pages(bdoc)[0]["text"] == "Betreff: Kopfstand Bild", gedreht.pages(bdoc)
+    assert gedreht.document(bdoc)["ocr_status"].startswith("Erneute Erkennung fehlgeschlagen")
     restarted.retry_ocr(first)
     restarted.queue.join()
     assert restarted.document(first)["ocr_status"] == "OCR abgeschlossen"

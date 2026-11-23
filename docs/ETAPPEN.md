@@ -96,9 +96,12 @@ Teil 2 (umgesetzt, Schemaversion 7):
 - Apple Mail: Zeitpunkt und Ergebnis des letzten Abrufs werden gespeichert und angezeigt. Neben der
   Message-ID verhindert ein Fingerabdruck der E-Mail, dass dieselbe E-Mail aus einem zweiten Postfach erneut
   übernommen wird. Ein reiner Zeitfilter wäre unsicher: Eine ältere E-Mail, die erst später markiert wird, ginge verloren.
-- Automatische Drehung (Schemaversion 7): Die Texterkennung prüft bei unsicher gelesenen Seiten die Lagen
-  „auf dem Kopf“ und „quer“ und wählt die lesbarste. Lag eine Seite gedreht, entsteht unter `Daten/Ansicht/`
-  eine aufrecht gedrehte Ansichtsfassung. Das Original bleibt unverändert und ist über „Original ungedreht“ erreichbar.
+- Automatische Drehung (Schemaversion 7, 8): Apple Vision liest auch Text, der auf dem Kopf steht. Die Lage
+  ergibt sich deshalb aus der Leserichtung der Zeilen im Bild (vom ersten zum letzten Zeichen); bei unklarer
+  Richtung werden die Lagen verglichen. Eine gedrehte Seite wird aufrecht erneut gelesen, damit Zeilenfolge und
+  Titel stimmen. Unter `Daten/Ansicht/` entsteht eine aufrechte Ansichtsfassung (einseitige Bilder als JPEG, sonst
+  PDF). Das Original bleibt unverändert und ist über „Original ungedreht“ erreichbar. Schemaversion 8 lässt
+  vorhandene Scans einmalig im Hintergrund neu prüfen; scheitert das, bleibt der bisherige Text erhalten.
 
 Die Trennung zwischen „Vorgänge“ (echte Daten) und „Beispiele“ (Demo) entfällt. Die Ansichten aus dem
 Prototyp arbeiten mit echten Daten: Übersicht, Posteingang, Vorgangsakte mit Chronik und Vorschau,

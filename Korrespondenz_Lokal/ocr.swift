@@ -52,7 +52,7 @@ func recognize(_ image: CGImage, orientation: CGImagePropertyOrientation = .up) 
 
 /// Erkennt den Text und bewertet die Lage: Summe aus Zuversicht × Zeichenzahl und mittlere Zuversicht.
 func recognizeScored(_ image: CGImage, orientation: CGImagePropertyOrientation) throws
-    -> (lines: [Line], score: Double, confidence: Double) {
+    -> (lines: [Line], score: Double, confidence: Double, rotation: Int?) {
     let request = VNRecognizeTextRequest()
     request.recognitionLevel = .accurate
     request.recognitionLanguages = ["de-DE", "en-US"]
@@ -71,11 +71,27 @@ func recognizeScored(_ image: CGImage, orientation: CGImagePropertyOrientation) 
         try VNImageRequestHandler(cvPixelBuffer: cpuBuffer(image), orientation: orientation).perform([request])
     }
     var score = 0.0, weights = 0.0
+    // Leserichtung je Zeile: vom ersten zum letzten Zeichen. Apple Vision liest auch Text, der auf dem Kopf
+    // steht; die Zuversicht verrät die Lage daher nicht, die Richtung der Zeilen im Bild aber schon.
+    var directionX = 0.0, directionY = 0.0, directed = 0
     let lines: [Line] = (request.results ?? []).compactMap { observation in
         guard let candidate = observation.topCandidates(1).first else { return nil }
         let letters = Double(candidate.string.filter { $0.isLetter || $0.isNumber }.count)
         score += Double(candidate.confidence) * letters
         weights += letters
+        let text = candidate.string
+        if text.count >= 4,
+           let first = try? candidate.boundingBox(for: text.startIndex..<text.index(after: text.startIndex))?.boundingBox,
+           let last = try? candidate.boundingBox(for: text.index(before: text.endIndex)..<text.endIndex)?.boundingBox {
+            let dx = Double(last.midX - first.midX) * Double(image.width)
+            let dy = Double(last.midY - first.midY) * Double(image.height)
+            let length = (dx * dx + dy * dy).squareRoot()
+            if length > 0 {
+                directionX += dx / length
+                directionY += dy / length
+                directed += 1
+            }
+        }
         let box = observation.boundingBox
         return Line(text: candidate.string, x: box.minX, y: box.midY, height: box.height)
     }.sorted { left, right in
@@ -83,13 +99,37 @@ func recognizeScored(_ image: CGImage, orientation: CGImagePropertyOrientation) 
         let rightRow = (right.y * 125).rounded()
         return leftRow == rightRow ? left.x < right.x : leftRow > rightRow
     }
-    return (lines, score, weights > 0 ? score / weights : 0)
+    // Drehung im Uhrzeigersinn, mit der die Seite aufrecht steht (Bildkoordinaten: y wächst nach oben).
+    var rotation: Int? = nil
+    if directed >= 3 && max(abs(directionX), abs(directionY)) >= 0.6 * Double(directed) {
+        if abs(directionX) >= abs(directionY) {
+            rotation = directionX >= 0 ? 0 : 180
+        } else {
+            rotation = directionY > 0 ? 90 : 270
+        }
+    }
+    return (lines, score, weights > 0 ? score / weights : 0, rotation)
+}
+
+func orientationFor(_ rotation: Int) -> CGImagePropertyOrientation {
+    switch rotation {
+    case 90: return .right
+    case 180: return .down
+    case 270: return .left
+    default: return .up
+    }
 }
 
 /// Sucht die Lage, in der der Text am besten lesbar ist. Eine aufrechte Seite mit sicher erkanntem Text
 /// wird nur einmal gelesen; sonst werden die Lagen „auf dem Kopf“ und „quer“ verglichen.
 func recognizeUpright(_ image: CGImage) throws -> (lines: [Line], rotation: Int) {
     let up = try recognizeScored(image, orientation: .up)
+    if let rotation = up.rotation {
+        if rotation == 0 { return (up.lines, 0) }
+        // Erneut lesen, diesmal aufrecht: richtige Zeilenfolge und Koordinaten für Titel und Fundstellen.
+        let upright = try? recognizeScored(image, orientation: orientationFor(rotation))
+        return ((upright?.lines.isEmpty ?? true) ? up.lines : upright!.lines, rotation)
+    }
     if up.confidence >= 0.8 && up.lines.count >= 3 { return (up.lines, 0) }
     var best = (lines: up.lines, rotation: 0, score: up.score)
     // CGImagePropertyOrientation beschreibt, wie das Bild gedreht werden muss, um aufrecht zu stehen.
@@ -102,7 +142,25 @@ func recognizeUpright(_ image: CGImage) throws -> (lines: [Line], rotation: Int)
     return (best.lines, best.rotation)
 }
 
-/// Schreibt eine aufrecht gedrehte Ansichtsfassung als PDF. Das Original bleibt unverändert.
+/// Dreht ein Bild im Uhrzeigersinn um 0, 90, 180 oder 270 Grad.
+func rotated(_ image: CGImage, clockwise degrees: Int) -> CGImage? {
+    if degrees % 360 == 0 { return image }
+    let swap = degrees % 180 != 0
+    let width = swap ? image.height : image.width, height = swap ? image.width : image.height
+    guard let context = CGContext(data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: 0,
+                                  space: CGColorSpaceCreateDeviceRGB(),
+                                  bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue) else { return nil }
+    context.setFillColor(CGColor(red: 1, green: 1, blue: 1, alpha: 1))
+    context.fill(CGRect(x: 0, y: 0, width: width, height: height))
+    context.translateBy(x: CGFloat(width) / 2, y: CGFloat(height) / 2)
+    context.rotate(by: -CGFloat(degrees) * .pi / 180)  // negativ = im Uhrzeigersinn
+    context.draw(image, in: CGRect(x: -CGFloat(image.width) / 2, y: -CGFloat(image.height) / 2,
+                                   width: CGFloat(image.width), height: CGFloat(image.height)))
+    return context.makeImage()
+}
+
+/// Schreibt eine aufrecht gedrehte Ansichtsfassung: einseitige Bilder als JPEG, sonst als PDF.
+/// Das Original bleibt unverändert.
 func writeUprightCopy(_ url: URL, pdf: Bool, rotations: [Int: Int], to output: URL) {
     guard rotations.values.contains(where: { $0 != 0 }) else { return }
     if pdf {
@@ -118,6 +176,14 @@ func writeUprightCopy(_ url: URL, pdf: Bool, rotations: [Int: Int], to output: U
     let options: [CFString: Any] = [kCGImageSourceCreateThumbnailFromImageAlways: true,
                                     kCGImageSourceCreateThumbnailWithTransform: true,
                                     kCGImageSourceThumbnailMaxPixelSize: 3200]
+    if CGImageSourceGetCount(source) == 1 {
+        guard let image = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary),
+              let upright = rotated(image, clockwise: rotations[0] ?? 0),
+              let target = CGImageDestinationCreateWithURL(output as CFURL, "public.jpeg" as CFString, 1, nil) else { return }
+        CGImageDestinationAddImage(target, upright, [kCGImageDestinationLossyCompressionQuality: 0.9] as CFDictionary)
+        CGImageDestinationFinalize(target)
+        return
+    }
     for index in 0..<CGImageSourceGetCount(source) {
         guard let image = CGImageSourceCreateThumbnailAtIndex(source, index, options as CFDictionary),
               let page = PDFPage(image: NSImage(cgImage: image, size: NSSize(width: image.width, height: image.height)))
