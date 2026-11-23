@@ -372,3 +372,12 @@ body.dragging::after{content:"Dateien hier ablegen – sie landen im Posteingang
 .agrp{display:flex;align-items:baseline;gap:10px;margin:18px 0 8px}
 .agrp h3{font-size:15px}
 .side-foot .btn{justify-content:flex-start}
+.textpane{max-height:68vh;overflow:auto;background:var(--paper);color:var(--ink);padding:14px 18px}
+.tseite{margin-bottom:14px}.tseite small{display:block;margin-bottom:4px}
+.ttext{white-space:pre-wrap;font-family:var(--f-doc);font-size:13.5px;line-height:1.55}
+.ttext::selection{background:#b9c8ff}
+.fund{border-top:1px solid #ddd;padding-top:10px;font-family:var(--f-ui)}
+.fund h4{margin:0 0 6px;font-size:12px;text-transform:uppercase;letter-spacing:.06em;color:var(--ink-muted)}
+.fund .mini li{border-color:#e3e3e3}
+.tool .seg button{padding:4px 10px}
+.side-foot small#version{padding:0 12px;color:var(--muted);font-size:11.5px}

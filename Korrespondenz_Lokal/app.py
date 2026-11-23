@@ -33,10 +33,10 @@ from mail_import import MailImport, migrate_5, test_mail
 
 ROOT = Path(__file__).resolve().parent
 PORT = 8765
-APP_VERSION = "DocuManager 0.4 · neue Oberfläche, Archiv, Apple Mail"
+APP_VERSION = "DocuManager 0.5 · Briefe, Fundstellen, Abschluss, Sicherung, Drehung"
 MAX_UPLOAD = 25 * 1024 * 1024
 MIN_MACOS = "14.0"
-SCHEMA_VERSION = 6
+SCHEMA_VERSION = 7
 OCR_WAITING = "Wartet auf Texterkennung"
 OCR_RUNNING = "Texterkennung läuft"
 log = logging.getLogger("korrespondenz")
@@ -187,7 +187,16 @@ def migrate_2(db):
         db.execute("ALTER TABLE dokument ADD COLUMN ocr_aktualisiert_am TEXT")
 
 
-MIGRATIONS = ((1, migrate_1), (2, migrate_2), (3, migrate_3), (4, migrate_4), (5, migrate_5), (6, migrate_6))
+def migrate_7(db):
+    """Automatische Drehung: Lage je Seite und eine aufrecht gedrehte Ansichtsfassung (das Original bleibt unverändert)."""
+    if "ansicht" not in columns_of(db, "dokument"):
+        db.execute("ALTER TABLE dokument ADD COLUMN ansicht TEXT")
+    if "drehung" not in columns_of(db, "dokumentseite"):
+        db.execute("ALTER TABLE dokumentseite ADD COLUMN drehung INTEGER NOT NULL DEFAULT 0")
+
+
+MIGRATIONS = ((1, migrate_1), (2, migrate_2), (3, migrate_3), (4, migrate_4), (5, migrate_5), (6, migrate_6),
+              (7, migrate_7))
 
 
 class Store:
@@ -200,6 +209,7 @@ class Store:
         self.worker = None
         self.uploads = data / "Uploads"
         self.uploads.mkdir(parents=True, exist_ok=True)
+        self.ansicht = data / "Ansicht"  # aufrecht gedrehte Fassungen zur Anzeige, jederzeit neu erzeugbar
         self.migrate()
 
     @property
@@ -303,7 +313,7 @@ class Store:
 
     def pages(self, document_id):
         with closing(self.connect()) as db:
-            return [dict(row) for row in db.execute("""SELECT nummer,methode,text FROM dokumentseite
+            return [dict(row) for row in db.execute("""SELECT nummer,methode,text,drehung FROM dokumentseite
                     WHERE dokument_id=? ORDER BY nummer""", (document_id,))]
 
     def rename_document(self, document_id, title):
@@ -316,14 +326,15 @@ class Store:
         if not changed:
             raise ValueError("Dokument nicht gefunden.")
 
-    def read_ocr(self, path, suffix):
-        """Gibt Seiten, Status und gegebenenfalls einen Fehlertext für das Protokoll zurück."""
+    def read_ocr(self, path, suffix, ansicht=None):
+        """Gibt Seiten, Status und gegebenenfalls einen Fehlertext für das Protokoll zurück.
+        Mit `ansicht` schreibt der Helfer eine aufrecht gedrehte Fassung dorthin, falls Seiten gedreht lagen."""
         self.ocr_ready.wait(timeout=165)
         if not self.ocr or not self.ocr.is_file():
             return [], "OCR nicht verfügbar", "OCR-Helfer fehlt oder konnte nicht gebaut werden."
         try:
-            run = subprocess.run([str(self.ocr), "pdf" if suffix == ".pdf" else "image", str(path)],
-                                 check=True, capture_output=True, timeout=150)
+            run = subprocess.run([str(self.ocr), "pdf" if suffix == ".pdf" else "image", str(path)]
+                                 + ([str(ansicht)] if ansicht else []), check=True, capture_output=True, timeout=150)
             result = json.loads(run.stdout)
             pages = result["pages"]
             issues = "; ".join(map(str, result.get("issues") or []))[:2000] or None
@@ -382,19 +393,27 @@ class Store:
         with closing(self.connect()) as db, db:
             db.execute("UPDATE dokument SET ocr_status=? WHERE id=?", (OCR_RUNNING, doc_id))
         started = time.monotonic()
-        pages, status, error = self.read_ocr(self.uploads / row["dateipfad"], Path(row["dateipfad"]).suffix)
-        self._set_ocr_result(doc_id, pages, status, error)
+        self.ansicht.mkdir(exist_ok=True)
+        stage = self.ansicht / f"{doc_id}.tmp.pdf"
+        stage.unlink(missing_ok=True)
+        pages, status, error = self.read_ocr(self.uploads / row["dateipfad"], Path(row["dateipfad"]).suffix, stage)
+        ansicht = None
+        if stage.is_file() and stage.stat().st_size and any(p.get("rotation") for p in pages):
+            ansicht = f"{row['sha256']}.pdf"
+            os.replace(stage, self.ansicht / ansicht)
+        stage.unlink(missing_ok=True)
+        self._set_ocr_result(doc_id, pages, status, error, ansicht)
         log.info("Dokument %s: %s nach %.1f s%s", doc_id, status, time.monotonic() - started,
                  f" ({error})" if error else "")
 
-    def _set_ocr_result(self, doc_id, pages, status, error):
+    def _set_ocr_result(self, doc_id, pages, status, error, ansicht=None):
         title, page, source = select_title(pages)
         with closing(self.connect()) as db, db:
             db.execute("DELETE FROM dokumentseite WHERE dokument_id=?", (doc_id,))
-            db.executemany("INSERT INTO dokumentseite(dokument_id,nummer,methode,text) VALUES(?,?,?,?)",
-                           ((doc_id, p["number"], p["method"], p["text"]) for p in pages))
-            db.execute("""UPDATE dokument SET ocr_status=?, ocr_fehler=?, ocr_aktualisiert_am=CURRENT_TIMESTAMP
-                          WHERE id=?""", (status, error, doc_id))
+            db.executemany("INSERT INTO dokumentseite(dokument_id,nummer,methode,text,drehung) VALUES(?,?,?,?,?)",
+                           ((doc_id, p["number"], p["method"], p["text"], int(p.get("rotation") or 0) % 360) for p in pages))
+            db.execute("""UPDATE dokument SET ocr_status=?, ocr_fehler=?, ocr_aktualisiert_am=CURRENT_TIMESTAMP, ansicht=?
+                          WHERE id=?""", (status, error, ansicht, doc_id))
             if title:  # Ein manuell gesetzter Titel bleibt unangetastet.
                 db.execute("""UPDATE dokument SET titel=?, titel_seite=?, titel_quelle=?
                               WHERE id=? AND titel_quelle='Dateiname'""", (title, page, source, doc_id))
@@ -599,6 +618,10 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Referrer-Policy", "no-referrer")
         self.send_header("X-Frame-Options", "SAMEORIGIN")
         if disposition:
+            if "filename*=" in disposition and "filename=" not in disposition:  # Ersatzname für ältere Browser
+                art, _, kodiert = disposition.partition("; filename*=")
+                einfach = re.sub(r"[^A-Za-z0-9._ -]+", "_", unquote(kodiert.split("''", 1)[-1]))
+                disposition = f'{art}; filename="{einfach}"; filename*={kodiert}'
             self.send_header("Content-Disposition", disposition)
         self.end_headers()
         self.wfile.write(body)
@@ -694,7 +717,12 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_json({"pages": self.store.pages(doc_id)})
             else:
                 file = self.store.uploads / row["dateipfad"]
-                if not file.is_file():
+                ansicht = self.store.ansicht / row["ansicht"] if row["ansicht"] else None
+                unveraendert = dict(parse_qsl(urlsplit(self.path).query)).get("fassung") == "original"
+                if ansicht and ansicht.is_file() and not unveraendert:  # aufrecht gedrehte Ansichtsfassung
+                    name = Path(row["dateiname"]).stem + " (gedreht).pdf"
+                    self.send_bytes(200, "application/pdf", ansicht.read_bytes(), "inline; filename*=" + encode_rfc2231(name, "utf-8"))
+                elif not file.is_file():
                     self.send_json({"error": "Das Original fehlt."}, 404)
                 else:
                     encoded = encode_rfc2231(row["dateiname"], "utf-8")
@@ -1007,6 +1035,23 @@ def test_foundation(folder):
     assert restarted.document(first)["ocr_status"] == "OCR abgeschlossen"
     assert restarted.document(second)["titel"] == "Eigener Titel"
     assert restarted.pages(first)[0]["methode"] == "ocr"
+    assert restarted.document(first)["ansicht"] is None and restarted.pages(first)[0]["drehung"] == 0
+
+    # 2a. Automatische Drehung: Liegt eine Seite auf dem Kopf, entsteht eine aufrechte Ansichtsfassung.
+    dreh = folder / "fake-ocr-dreh"
+    dreh.write_text("#!" + sys.executable + "\nimport json,sys\nif len(sys.argv)==4: open(sys.argv[3],'wb').write(b'%PDF-1.4 aufrecht')\n"
+                    "print(json.dumps({'issues':[],'pages':[{'number':1,'method':'ocr','rotation':180,"
+                    "'text':'Betreff: Kopfstand','lines':[]}]}))\n")
+    dreh.chmod(0o755)
+    gedreht = Store(folder / "Drehung", dreh)
+    dcase = gedreht.create_case("Drehung", "Versicherungen", "")
+    ddoc, _ = gedreht.import_document(dcase, "Scan_kopf.pdf", b"%PDF-1.4\nkopf")
+    gedreht.process_pending()
+    drow = gedreht.document(ddoc)
+    assert gedreht.pages(ddoc)[0]["drehung"] == 180 and drow["ansicht"] == drow["sha256"] + ".pdf", drow["ansicht"]
+    assert (gedreht.ansicht / drow["ansicht"]).read_bytes() == b"%PDF-1.4 aufrecht"
+    assert (gedreht.uploads / drow["dateipfad"]).read_bytes() == b"%PDF-1.4\nkopf"  # Original unverändert
+    assert not list(gedreht.ansicht.glob("*.tmp.pdf"))
     restarted.retry_ocr(first)
     restarted.queue.join()
     assert restarted.document(first)["ocr_status"] == "OCR abgeschlossen"

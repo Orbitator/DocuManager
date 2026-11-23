@@ -57,7 +57,7 @@ Bestandteile:
 - Volltextsuche mit SQLite FTS5 über Dokumentseiten, Notizen und Chat-Notizen
 - Status ergänzt um „Offen“, „Wartet auf Antwort“ und „Erledigt“
 
-## Etappe 3 · Eine Oberfläche (Teil 1 umgesetzt, Schemaversion 4)
+## Etappe 3 · Eine Oberfläche (umgesetzt, Schemaversion 7)
 
 Neue Oberfläche unter http://127.0.0.1:8765 (`oberflaeche.html`, `oberflaeche.js`, `oberflaeche.css`).
 Die bisherige Oberfläche bleibt unter `/alt` erreichbar (Chat-Import, Rechtsberatung).
@@ -79,8 +79,26 @@ die E-Mail als Dokument mit Kopf und Text, PDF- und Bildanlagen als eigene Dokum
 Betreff kommen aus dem Mailkopf. Beim Zuordnen wandern die Anlagen mit. Die Message-ID verhindert Doppelungen,
 die Markierung in Mail bleibt unverändert. Beim ersten Abruf fragt macOS nach der Erlaubnis, Mail zu steuern.
 
-Offen für Teil 2: Briefvorlagen mit Vorschau, Markieren von Text in der Vorschau, Chat-Notizen in der
-neuen Oberfläche, Abschlussprüfung beim Status „Erledigt“, Aktenexport.
+Teil 2 (umgesetzt, Schemaversion 7):
+
+- Briefe: Vorlagen (Stellungnahme, Fristverlängerung, Erinnerung, Eingangsbestätigung, frei) mit
+  persönlicher Anrede, Empfänger aus der aktuellen Anschrift, Live-Vorschau nach DIN 5008, Drucken oder PDF.
+  Ein neuer Entwurf setzt den Status auf „Schreiben verfassen“.
+- Text und Fundstellen: In der Vorschau zwischen Original und erkanntem Text wechseln. Markierten Text oder
+  vorgeschlagene Fundstellen als Frist (mit Dokument, Seite, Zitat), Aktenzeichen, Dokumentdatum oder Notiz übernehmen.
+- Chat-Notizen als eigener Menüpunkt; importierte ChatGPT-Unterhaltungen lassen sich in Vorgänge übernehmen.
+- Abschlussprüfung bei „Erledigt“: offene Fristen, nicht versendete Entwürfe, fehlende Originale, ungeprüfte Chats.
+- Archiv: Dokumente werden erst archiviert, wenn ihr Vorgang oder alle ihre Teilvorgänge auf „Erledigt“ stehen.
+  Wird ein Vorgang wieder geöffnet, verlässt das Dokument das Archiv.
+- Aktenexport als ZIP mit Chronik.pdf, akte.json und ausgewählten Originalen.
+- Datensicherung unter Einstellungen: erstellen, prüfen, herunterladen; Wiederherstellen im Terminal mit
+  `python3 app.py --wiederherstellen <Datei.zip>`.
+- Apple Mail: Zeitpunkt und Ergebnis des letzten Abrufs werden gespeichert und angezeigt. Neben der
+  Message-ID verhindert ein Fingerabdruck der E-Mail, dass dieselbe E-Mail aus einem zweiten Postfach erneut
+  übernommen wird. Ein reiner Zeitfilter wäre unsicher: Eine ältere E-Mail, die erst später markiert wird, ginge verloren.
+- Automatische Drehung (Schemaversion 7): Die Texterkennung prüft bei unsicher gelesenen Seiten die Lagen
+  „auf dem Kopf“ und „quer“ und wählt die lesbarste. Lag eine Seite gedreht, entsteht unter `Daten/Ansicht/`
+  eine aufrecht gedrehte Ansichtsfassung. Das Original bleibt unverändert und ist über „Original ungedreht“ erreichbar.
 
 Die Trennung zwischen „Vorgänge“ (echte Daten) und „Beispiele“ (Demo) entfällt. Die Ansichten aus dem
 Prototyp arbeiten mit echten Daten: Übersicht, Posteingang, Vorgangsakte mit Chronik und Vorschau,
@@ -88,9 +106,6 @@ Fristen, Adressbuch, Chat-Notizen, Papierkorb, Einstellungen.
 
 ## Etappe 4 · Restfunktionen aus dem Konzept
 
-- Vollständige Datensicherung (Datenbank und Originale) mit geprüfter Wiederherstellung
-- Aktenexport als ZIP mit Chronik als PDF
-- E-Mail-Import (.eml) mit Anlagen
-- Briefvorlagen nach DIN 5008 mit Versand-Workflow
-- Chat-Notizen mit Vorgängen verknüpfen, erwähnte Originale prüfen
+- Datensicherung zeitgesteuert und auf externes Ziel (NAS, Datenträger)
+- E-Mail-Import per .eml-Datei (zusätzlich zu Apple Mail)
 - Kalender-Abo (iCal) für Fristen bei geschlossener Anwendung

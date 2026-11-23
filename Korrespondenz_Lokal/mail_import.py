@@ -3,7 +3,8 @@
 E-Mails mit einer bestimmten Markierung (Vorgabe: Grau, in Mail „Erfasster Beleg“) werden über die
 macOS-Automatisierung (osascript, JavaScript for Automation) gelesen und in den Posteingang übernommen:
 die E-Mail selbst als Dokument mit Text, unterstützte Anlagen (PDF, JPEG, PNG, TIFF) als eigene Dokumente.
-Die eindeutige Message-ID verhindert Doppelungen; die Markierung in Mail bleibt unverändert.
+Doppelungen verhindern zwei Prüfungen: die Message-ID und ein Fingerabdruck (SHA-256) der ganzen E-Mail.
+Zeitpunkt und Ergebnis des letzten Abrufs werden gespeichert. Die Markierung in Mail bleibt unverändert.
 """
 import email
 import email.policy
@@ -15,6 +16,7 @@ import re
 import subprocess
 import tempfile
 from contextlib import closing
+from datetime import datetime
 from email.utils import parsedate_to_datetime
 from pathlib import Path
 
@@ -55,8 +57,9 @@ function run(argv) {
     try { msgs = box.messages.whose({_and: [{flaggedStatus: true}, {flagIndex: flag}]})(); } catch (e) { continue; }
     for (const m of msgs) {
       let id = '';
-      try { id = m.messageId(); } catch (e) { continue; }
-      if (!id || known.has(id) || seen.has(id)) continue;
+      try { id = String(m.messageId() || '').replace(/^<|>$/g, ''); } catch (e) { id = ''; }
+      if (!id) { try { id = 'mail-intern-' + m.id(); } catch (e) { continue; } }
+      if (known.has(id) || seen.has(id)) continue;
       if (out.length >= limit) { more = true; break; }
       seen.add(id);
       out.push({id: id, mailbox: box.name(), source: m.source()});
@@ -129,9 +132,15 @@ class MailImport:
 
     def status(self):
         with closing(self.store.connect()) as db:
-            row = db.execute("SELECT count(*), max(importiert_am) FROM mail_import").fetchone()
+            row = db.execute("SELECT count(DISTINCT dokument_id), max(importiert_am) FROM mail_import").fetchone()
+            abruf = db.execute("SELECT wert FROM einstellung WHERE schluessel='mail_letzter_abruf'").fetchone()
         return {"markierung": self.markierung(), "farben": FARBEN, "uebernommen": row[0], "zuletzt": row[1],
-                "verfuegbar": Path("/usr/bin/osascript").exists()}
+                "letzter_abruf": json.loads(abruf[0]) if abruf else None, "verfuegbar": Path("/usr/bin/osascript").exists()}
+
+    def _abruf_merken(self, neu, bekannt):
+        wert = json.dumps({"zeit": datetime.now().isoformat(timespec="seconds"), "neu": neu, "bereits_vorhanden": bekannt})
+        with closing(self.store.connect()) as db, db:
+            db.execute("INSERT OR REPLACE INTO einstellung(schluessel,wert) VALUES('mail_letzter_abruf',?)", (wert,))
 
     def _osascript(self, known, flag, limit):
         if not Path("/usr/bin/osascript").exists():
@@ -156,24 +165,34 @@ class MailImport:
         with closing(self.store.connect()) as db:
             known = {r[0] for r in db.execute("SELECT message_id FROM mail_import")}
         ergebnis = self.runner(known, self.markierung(), MAX_JE_ABRUF)
-        neu, fehler = 0, []
+        neu, bekannt, fehler = 0, 0, []
         for m in ergebnis.get("messages", []):
             try:
                 if self.uebernehmen(m["source"].encode("utf-8", "surrogateescape") if isinstance(m["source"], str)
                                     else m["source"], m["id"], m.get("mailbox")):
                     neu += 1
+                else:
+                    bekannt += 1
             except (ValueError, OSError) as error:
                 fehler.append(str(error))
-        return {"neu": neu, "weitere": bool(ergebnis.get("more")), "fehler": fehler}
+        self._abruf_merken(neu, bekannt)
+        return {"neu": neu, "weitere": bool(ergebnis.get("more")), "fehler": fehler, "bereits_vorhanden": bekannt}
 
     def uebernehmen(self, raw, message_id=None, postfach=None):
         """Legt eine E-Mail mit ihren Anlagen im Posteingang ab. False, wenn sie schon übernommen ist."""
         if len(raw) > MAX_MAIL:
             raise ValueError("Die E-Mail ist größer als 40 MB.")
         daten = mail_lesen(raw)
-        message_id = (message_id or daten["message_id"] or hashlib.sha256(raw).hexdigest()).strip("<>")
-        with closing(self.store.connect()) as db:
+        digest = hashlib.sha256(raw).hexdigest()
+        message_id = (message_id or daten["message_id"] or digest).strip("<>")
+        with closing(self.store.connect()) as db, db:
             if db.execute("SELECT 1 FROM mail_import WHERE message_id=?", (message_id,)).fetchone():
+                return False
+            # Dieselbe E-Mail unter anderer Kennung (z. B. in zwei Postfächern): Kennung merken, nicht erneut übernehmen
+            gleich = db.execute("SELECT id FROM dokument WHERE sha256=? AND mime='message/rfc822'", (digest,)).fetchone()
+            if gleich:
+                db.execute("INSERT INTO mail_import(message_id,dokument_id,betreff,absender,postfach) VALUES(?,?,?,?,?)",
+                           (message_id, gleich[0], daten["betreff"], daten["adresse"] or daten["name"], postfach))
                 return False
         anlagen, uebersprungen = [], []
         for dateiname, inhalt in daten["anlagen"]:
@@ -190,7 +209,6 @@ class MailImport:
         if uebersprungen:
             kopf.append("Nicht übernommene Anlagen (Format nicht unterstützt): " + ", ".join(uebersprungen))
         seite = "\n".join(kopf) + "\n\n" + daten["text"]
-        digest = hashlib.sha256(raw).hexdigest()
         pfad = self.store.uploads / (digest + ".eml")
         if not pfad.is_file():
             with tempfile.NamedTemporaryFile(mode="wb", dir=self.store.uploads, delete=False) as stage:
@@ -234,8 +252,17 @@ def test_mail(store):
                                                              {"messages": [] if "abc123@unitask.example" in known else
                                                               [{"id": "abc123@unitask.example", "mailbox": "INBOX",
                                                                 "source": raw.decode("utf-8")}], "more": False})[1])
-    assert mi.abholen() == {"neu": 1, "weitere": False, "fehler": []}
-    assert mi.abholen() == {"neu": 0, "weitere": False, "fehler": []}
+    assert mi.abholen() == {"neu": 1, "weitere": False, "fehler": [], "bereits_vorhanden": 0}
+    assert mi.status()["letzter_abruf"]["neu"] == 1
+    assert mi.abholen() == {"neu": 0, "weitere": False, "fehler": [], "bereits_vorhanden": 0}
+    abruf = mi.status()["letzter_abruf"]
+    assert abruf["neu"] == 0 and len(abruf["zeit"]) == 19, abruf
+    # Dieselbe E-Mail unter anderer Kennung (zweites Postfach) wird nicht doppelt übernommen
+    assert mi.uebernehmen(raw, "andere-kennung", "Archiv") is False
+    zweit = MailImport(store, runner=lambda known, flag, limit: {"messages": [
+        {"id": "abc123@unitask.example", "mailbox": "INBOX", "source": raw.decode("utf-8")},
+        {"id": "dritte-kennung", "mailbox": "Gesendet", "source": raw.decode("utf-8")}], "more": False})
+    assert zweit.abholen() == {"neu": 0, "weitere": False, "fehler": [], "bereits_vorhanden": 2}
     assert abgeholt[0][1] == 6 and "abc123@unitask.example" in abgeholt[1][0]
     eingang = akte.posteingang()
     mail = [d for d in eingang if d["mime"] == "message/rfc822"][0]

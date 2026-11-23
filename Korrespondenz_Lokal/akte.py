@@ -429,6 +429,7 @@ class Akte:
                 JOIN kontakt k ON k.id=b.kontakt_id WHERE b.vorgang_id=? ORDER BY k.name""", vorgang_id)
             v["referenzen"] = q("SELECT * FROM referenz WHERE vorgang_id=? ORDER BY id", vorgang_id)
             v["dokumente"] = q("""SELECT d.id,d.titel,d.dateiname,d.titel_seite,d.titel_quelle,d.ocr_status,d.mime,
+                (d.ansicht IS NOT NULL) AS gedreht,
                 d.angelegt_am,(SELECT count(*) FROM dokument_vorgang x WHERE x.dokument_id=d.id) AS vorgaenge
                 FROM dokument d JOIN dokument_vorgang dv ON dv.dokument_id=d.id
                 WHERE dv.vorgang_id=? AND d.geloescht_am IS NULL ORDER BY d.id DESC""", vorgang_id)
@@ -685,9 +686,9 @@ class Akte:
                 empfaenger = _text(data.get("empfaenger"), "Empfänger", 500, True)
             nachweis = _id(data.get("nachweis_dokument_id"), "Nachweis")
             aus = db.execute("""INSERT INTO eintrag(vorgang_id,art,titel,ereignis_datum,richtung,kontakt_id,dokument_id,
-                bezug_id,text) VALUES(?,?,?,?,?,?,?,?,?)""",
+                bezug_id,text,brief) VALUES(?,?,?,?,?,?,?,?,?,?)""",
                 (e["vorgang_id"], "ausgang", _text(data.get("titel"), "Titel", 200) or e["titel"], datum, "an",
-                 e["kontakt_id"], e["dokument_id"], e["bezug_id"], e["text"])).lastrowid
+                 e["kontakt_id"], e["dokument_id"], e["bezug_id"], e["text"], e["brief"])).lastrowid
             teile = [r[0] for r in db.execute("SELECT teilvorgang_id FROM eintrag_teil WHERE eintrag_id=?", (entwurf_id,))]
             db.executemany("INSERT INTO eintrag_teil VALUES(?,?)", ((aus, t) for t in teile))
             db.execute("""INSERT INTO versand(eintrag_id,art,datum,sendungsnummer,anschrift_id,empfaenger,
@@ -966,7 +967,11 @@ class Akte:
             return eid
 
     def archiv(self):
-        """Alle abgelegten Dokumente mit Vorgang, Bereich, Absender und Daten – Grundlage der Archivansicht."""
+        """Archivierte Dokumente mit Vorgang, Bereich, Absender und Daten – Grundlage der Archivansicht.
+
+        Archiviert ist ein Dokument erst, wenn es abgeschlossen ist: Der Vorgang steht auf „Erledigt“, oder alle
+        Teilvorgänge, denen das Dokument zugeordnet ist, stehen auf „Erledigt“. Wird ein Vorgang wieder
+        geöffnet, verlässt das Dokument das Archiv und ist wieder in der Akte in Arbeit."""
         with closing(self.connect()) as db:
             rows = [dict(r) for r in db.execute("""
                 SELECT d.id, d.titel, d.dateiname, d.mime, d.dateipfad, d.ocr_status, d.angelegt_am, d.dokument_datum,
@@ -980,6 +985,12 @@ class Akte:
                           AS ereignis_datum
                 FROM dokument d JOIN dokument_vorgang dv ON dv.dokument_id=d.id JOIN vorgang v ON v.id=dv.vorgang_id
                 WHERE d.geloescht_am IS NULL AND v.geloescht_am IS NULL AND v.system IS NULL
+                  AND (v.status='Erledigt' OR (
+                    EXISTS (SELECT 1 FROM eintrag e JOIN eintrag_teil et ON et.eintrag_id=e.id
+                            WHERE e.dokument_id=d.id AND e.vorgang_id=v.id AND e.geloescht_am IS NULL)
+                    AND NOT EXISTS (SELECT 1 FROM eintrag e JOIN eintrag_teil et ON et.eintrag_id=e.id
+                            JOIN teilvorgang t ON t.id=et.teilvorgang_id
+                            WHERE e.dokument_id=d.id AND e.vorgang_id=v.id AND e.geloescht_am IS NULL AND t.status<>'Erledigt')))
                 ORDER BY d.id DESC""")]
             for r in rows:
                 datei = self.store.uploads / r.pop("dateipfad")
@@ -1389,7 +1400,7 @@ def test_absender(store):
     from contextlib import closing as _closing
     doc, _ = store.import_document(None, "Schreiben.pdf", b"%PDF-1.4\nAbsendertest")
     with _closing(store.connect()) as db, db:
-        db.execute("INSERT INTO dokumentseite VALUES(?,?,?,?)", (doc, 1, "ocr", brief))
+        db.execute("INSERT INTO dokumentseite(dokument_id,nummer,methode,text) VALUES(?,?,?,?)", (doc, 1, "ocr", brief))
     v = [d for d in akte.posteingang() if d["id"] == doc][0]["vorschlag"]
     assert v["kontakt"]["id"] == allsicher and v["absender"]["quelle"] == "Absenderzeile", v
     assert v["vorgaenge"][0]["vorgang_id"] == vorgang
@@ -1397,7 +1408,7 @@ def test_absender(store):
     # Unbekannter Absender: wird beim Zuordnen als neuer Kontakt mit Anschrift angelegt
     doc2, _ = store.import_document(None, "Registerauszug.pdf", b"%PDF-1.4\nRegister")
     with _closing(store.connect()) as db, db:
-        db.execute("INSERT INTO dokumentseite VALUES(?,?,?,?)", (doc2, 1, "pdf", hr))
+        db.execute("INSERT INTO dokumentseite(dokument_id,nummer,methode,text) VALUES(?,?,?,?)", (doc2, 1, "pdf", hr))
     v = [d for d in akte.posteingang() if d["id"] == doc2][0]["vorschlag"]
     assert v["absender"]["name"] == "Amtsgericht Rostock" and v["kontakt"] is None, v
     assert v["kontakt"] is None or v["kontakt"]["id"] != unitask
@@ -1409,7 +1420,7 @@ def test_absender(store):
 
 
 def test_archiv(store):
-    """Archiv: alle zugeordneten Dokumente, je Vorgang eine Zeile, mit Absender und Datum."""
+    """Archiv: nur Dokumente abgeschlossener Vorgänge oder Teilvorgänge, je Vorgang eine Zeile, mit Absender und Datum."""
     store = type(store)(store.data / "Archivtest", store.ocr)
     akte = Akte(store, today=lambda: "2026-11-23")
     a = store.create_case("Kia-Schaden", "Versicherungen", "")
@@ -1420,13 +1431,30 @@ def test_archiv(store):
                              "kontakt_id": k, "richtung": "von"})
     store.import_document(b, "Gutachten.pdf", b"%PDF-1.4\nArchiv")  # verknüpft
     inbox, _ = store.import_document(None, "Neu.pdf", b"%PDF-1.4\nNoch im Posteingang")
+    assert akte.archiv() == []  # Vorgänge noch in Arbeit: nichts archiviert
+    akte.vorgang_aendern(a, {"status": "Erledigt"})
+    assert [r["vorgang"] for r in akte.archiv()] == ["Kia-Schaden"]
+    akte.vorgang_aendern(b, {"status": "Erledigt"})
     rows = akte.archiv()
     assert sorted(r["vorgang"] for r in rows) == ["Kia-Schaden", "Steuer 2025"]
     assert all(r["id"] == doc for r in rows) and inbox not in [r["id"] for r in rows]
     kia = [r for r in rows if r["vorgang_id"] == a][0]
     assert kia["absender"] == "Allsicher Versicherung AG" and kia["datum"] == "2026-11-10" and kia["art"] == "eingang"
+    akte.vorgang_aendern(a, {"status": "Offen"})  # wieder geöffnet: verlässt das Archiv
+    assert [r["vorgang"] for r in akte.archiv()] == ["Steuer 2025"]
+    # Teilvorgänge: archiviert, sobald alle Teilvorgänge des Dokuments erledigt sind
+    c = store.create_case("Haus", "Versicherungen", "")
+    t1 = akte.teilvorgang_anlegen(c, {"name": "Dach"})
+    t2 = akte.teilvorgang_anlegen(c, {"name": "Heizung"})
+    d2, _ = store.import_document(c, "Angebot.pdf", b"%PDF-1.4\nDach")
+    akte.eintrag_anlegen(c, {"art": "eingang", "titel": "Angebot Dach", "datum": "2026-11-11", "dokument_id": d2, "teile": [t1]})
+    d3, _ = store.import_document(c, "Wartung.pdf", b"%PDF-1.4\nHeizung")
+    akte.eintrag_anlegen(c, {"art": "eingang", "titel": "Wartung", "datum": "2026-11-12", "dokument_id": d3, "teile": [t2]})
+    akte.teilvorgang_aendern(t1, {"status": "Erledigt"})
+    haus = [r["id"] for r in akte.archiv() if r["vorgang"] == "Haus"]
+    assert haus == [d2], haus
     akte.loeschen("dokument", doc)
-    assert akte.archiv() == []
+    assert [r["vorgang"] for r in akte.archiv()] == ["Haus"]
 
 
 def test_chatnotiz(store):

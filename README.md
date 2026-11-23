@@ -13,9 +13,11 @@ Die Anwendung läuft auf dem Mac, wird im Browser bedient und braucht keinen Clo
 | Texterkennung mit PDFKit und Apple Vision, Titel aus Betreff oder Überschrift | produktiv, läuft als Warteschlange im Hintergrund; Bilderkennung am 23.11.2026 auf dem Mac bestätigt |
 | Nativer macOS-Scandialog | produktiv, Test mit echtem Scanner offen |
 | ChatGPT-Export importieren (Auswahl einzelner Unterhaltungen, wiederholbar) | produktiv |
-| E-Mails aus Apple Mail übernehmen (Markierung „Erfasster Beleg“, mit Anlagen) | neu, Test auf dem Mac offen |
+| E-Mails aus Apple Mail übernehmen (Markierung „Erfasster Beleg“, mit Anlagen, ohne Doppelungen, letzter Abruf gespeichert) | neu, Test auf dem Mac offen |
+| Automatische Drehung auf dem Kopf stehender Seiten (Ansichtsfassung, Original unverändert) | neu, Test auf dem Mac offen |
 | Teilvorgänge, Chronik, Fristen mit Fundstelle und Verlauf, Kontakte mit Anschriftenverlauf, Versand, Referenzen, Bereiche, Schlagwörter, Papierkorb, Volltextsuche | Datenmodell und Schnittstellen ([docs/API.md](docs/API.md)) |
-| Neue Oberfläche: Posteingang mit Absendererkennung, Vorgänge, Akte, Fristen, Archiv, Adressbuch, Papierkorb | Etappe 3, Teil 1; bisherige Oberfläche unter `/alt` |
+| Neue Oberfläche: Posteingang mit Absendererkennung, Vorgänge, Akte, Fristen, Archiv (nur Abgeschlossenes), Adressbuch, Chat-Notizen, Papierkorb | Etappe 3; bisherige Oberfläche unter `/alt` |
+| Briefe mit Vorlagen und Druck, Fundstellen aus dem Text übernehmen, Abschlussprüfung, Aktenexport (ZIP mit Chronik.pdf), Datensicherung mit Prüfung | Etappe 3, Teil 2 |
 
 Der Fahrplan steht in [docs/ETAPPEN.md](docs/ETAPPEN.md). Die Übergabe aus der ChatGPT-Entwicklung liegt in
 [docs/Uebergabe_ChatGPT](docs/Uebergabe_ChatGPT).
@@ -56,7 +58,8 @@ Alle Daten liegen in `Korrespondenz_Lokal/Daten/` und sind von Git ausgeschlosse
 | Datenbank | `Daten/Rechtsberatung.sqlite3` |
 | Originale der Vorgangsdokumente | `Daten/Uploads/<sha256>.<endung>` |
 | Anlagen aus ChatGPT-Exporten | `Daten/Chat_Originale/` |
-| Automatische Sicherungen vor Schemaänderungen | `Daten/Sicherungen/` |
+| Automatische Sicherungen vor Schemaänderungen und Datensicherungen aus den Einstellungen | `Daten/Sicherungen/` |
+| Aufrecht gedrehte Ansichtsfassungen (neu erzeugbar) | `Daten/Ansicht/` |
 | Protokoll | `Daten/Logs/korrespondenz.log` und `Daten/Logs/scanner.log` |
 | Scan-Zwischenablage | `Daten/Scan_Eingang/` |
 | Gebaute Helfer | `Daten/Laufzeit/` |

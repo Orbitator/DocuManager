@@ -100,6 +100,28 @@ Erst wenn Schritt 2 bis 4 funktionieren. Die bisherige Anwendung vorher beenden.
    Falls die Frage nicht kommt oder abgelehnt wurde: Systemeinstellungen → Datenschutz & Sicherheit → Automation.
 4. Erwartet: Die E-Mails erscheinen als Kacheln mit Betreff als Titel, Absender und Datum. Die PDF-Anlage
    erscheint als eigene Kachel. Ein zweiter Klick auf „Aus Mail holen“ holt nichts doppelt.
+5. Unter **Einstellungen → Apple Mail** steht „Letzter Abruf: Datum, Uhrzeit (n neu)“.
+
+## 8. Briefe, Fundstellen, Abschluss, Sicherung
+
+1. Eine Akte öffnen, in der Chronik **Brief** klicken. Vorlage „Stellungnahme“ wählen. Rechts erscheint die
+   Vorschau mit Ihrem Absender und der Anrede. **Entwurf anlegen**. Erwartet: Status „Schreiben verfassen“,
+   der Brief erscheint als Entwurf. **Drucken oder PDF** öffnet ihn druckfertig.
+2. Einen Eingang wählen, in der Vorschau auf **Text & Fundstellen** umschalten. Ein Datum mit der Maus markieren,
+   im kleinen Menü **Als Frist**. Erwartet: Frist mit Fundstelle (Zitat, Seite).
+3. Status des Vorgangs auf **Erledigt** setzen. Erwartet: Hinweis auf offene Frist und Entwurf.
+   **Abbrechen** lässt den Status unverändert. Erst nach **Trotzdem abschließen** erscheinen die Dokumente im **Archiv**.
+4. **Exportieren** in der Akte: Es wird eine ZIP mit Chronik.pdf heruntergeladen.
+5. **Einstellungen → Datensicherung → Sicherung erstellen**, danach **Prüfen**. Erwartet: „In Ordnung …“.
+
+## 9. Automatische Drehung
+
+1. Einen Brief verkehrt herum (auf dem Kopf) scannen oder ein solches PDF importieren.
+2. Warten, bis die Texterkennung fertig ist, dann das Dokument in der Akte oder im Posteingang öffnen.
+3. Erwartet: Das Dokument steht aufrecht, daneben „automatisch gedreht“. „Original ungedreht“ zeigt die
+   unveränderte Datei. Der erkannte Text (Text & Fundstellen) ist lesbar.
+4. Falls die Texterkennung gar nicht mehr läuft: die letzten Zeilen aus `Daten/Logs/korrespondenz.log` schicken
+   (der Helfer wird bei diesem Stand neu gebaut).
 
 ## Rückmeldung
 
