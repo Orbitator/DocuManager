@@ -1,4 +1,4 @@
--- SQLite-Schema der Korrespondenzverwaltung, Schemaversion 10 (PRAGMA user_version).
+-- SQLite-Schema der Korrespondenzverwaltung, Schemaversion 11 (PRAGMA user_version).
 -- Erzeugt aus einer frischen Installation. Ausschließlich Struktur, keine Daten.
 -- Maßgeblich sind die Migrationen in app.py (MIGRATIONS), akte.py (migrate_3, migrate_4, migrate_6), mail_import.py
 -- (migrate_5) und ChatSync.__init__. Fremdschlüssel müssen pro Verbindung aktiviert werden.
@@ -18,7 +18,7 @@ CREATE TABLE archivdatei(
 CREATE TABLE bereich(
     id INTEGER PRIMARY KEY, name TEXT NOT NULL UNIQUE COLLATE NOCASE,
     angelegt_am TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-);
+, reihenfolge INTEGER);
 
 CREATE TABLE beteiligter(
     vorgang_id INTEGER NOT NULL REFERENCES vorgang(id), kontakt_id INTEGER NOT NULL REFERENCES kontakt(id),
@@ -49,7 +49,7 @@ CREATE TABLE "dokument"(
             titel_quelle TEXT NOT NULL, mime TEXT NOT NULL, dateipfad TEXT NOT NULL,
             sha256 TEXT NOT NULL, ocr_status TEXT NOT NULL,
             angelegt_am TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, ocr_fehler TEXT, ocr_aktualisiert_am TEXT, geloescht_am TEXT, dokument_datum TEXT, ansicht TEXT
-        , drehung_manuell INTEGER NOT NULL DEFAULT 0);
+        , drehung_manuell INTEGER NOT NULL DEFAULT 0, datei_datum TEXT);
 
 CREATE TABLE dokument_bereich(dokument_id INTEGER NOT NULL REFERENCES dokument(id),
             bereich TEXT NOT NULL, PRIMARY KEY(dokument_id, bereich));
@@ -79,7 +79,7 @@ CREATE TABLE eintrag(
     bezug_id INTEGER REFERENCES eintrag(id), text TEXT, quelle TEXT,
     geprueft INTEGER NOT NULL DEFAULT 0, versendet_als INTEGER REFERENCES eintrag(id),
     geloescht_am TEXT
-, brief TEXT);
+, brief TEXT, typ TEXT);
 
 CREATE TABLE eintrag_teil(
     eintrag_id INTEGER NOT NULL REFERENCES eintrag(id), teilvorgang_id INTEGER NOT NULL REFERENCES teilvorgang(id),
@@ -208,4 +208,4 @@ CREATE TRIGGER suche_vorgang_au AFTER UPDATE OF titel,beschreibung ON vorgang BE
   DELETE FROM suche WHERE art='vorgang' AND ref_id=OLD.id;
   INSERT INTO suche(art,ref_id,seite,text) VALUES('vorgang',NEW.id,NULL,NEW.titel||' '||NEW.beschreibung); END;
 
-PRAGMA user_version = 10;
+PRAGMA user_version = 11;

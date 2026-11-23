@@ -27,12 +27,13 @@
       </div>
       <div class="imp"><button class="btn pri" data-act="import" aria-haspopup="menu" aria-expanded="false" id="impbtn">Dokument importieren <svg class="i" viewBox="0 0 24 24" style="width:16px;height:16px"><path d="m6 9 6 6 6-6"/></svg></button>
         <div class="impmenu" id="impmenu" role="menu" hidden>
-          <button role="menuitem" data-act="imp-file"><b>Datei auswählen …</b><small>PDF, JPEG, PNG oder TIFF bis 25 MB</small></button>
+          <button role="menuitem" data-act="imp-file"><b>Datei auswählen …</b><small>PDF, Bild, Word (.docx) oder E-Mail (.eml) bis 25 MB</small></button>
           <button role="menuitem" data-act="imp-scan"><b>Scannen …</b><small>Scan-Dialog von macOS</small></button>
           <button role="menuitem" data-act="scan-folder"><b>Scan-Ordner öffnen</b><small>Für „Digitale Bilder“ und Scanner-Software</small></button>
           <button role="menuitem" data-act="mail-get"><b>Aus Apple Mail holen</b><small>E-Mails mit der Markierung „Erfasster Beleg“</small></button>
         </div></div>
-      <input type="file" id="fileinp" multiple accept=".pdf,.jpg,.jpeg,.png,.tif,.tiff" hidden>
+      <input type="file" id="fileinp" multiple accept=".pdf,.jpg,.jpeg,.png,.tif,.tiff,.docx,.eml" hidden>
+      <input type="file" id="chatinp" accept=".zip,.json,application/zip,application/json" hidden>
       <input type="file" id="restoreinp" accept=".zip,application/zip" hidden>
     </header>
     <main class="view" id="view"><p class="muted">Wird geladen …</p></main>

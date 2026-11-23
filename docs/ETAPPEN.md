@@ -118,6 +118,20 @@ Teil 2 (umgesetzt, Schemaversion 7):
   `dokument`; `migrate_9` baut die Tabelle ohne sie neu (Zugehörigkeit regelt `dokument_vorgang`). Der Scan-Ordner
   liegt jetzt unter `~/DocuManager Scans` (nicht in „Dokumente“, das macOS für Programme gesondert schützt).
   Fehlermeldungen beim Speichern nennen die Ursache.
+- 0.10 (Schemaversion 11):
+  - Dateitypen Word (.docx, Text direkt aus der Datei, Ansicht als HTML über macOS-textutil oder eigenen Umsetzer)
+    und E-Mail (.eml, über den Mail-Import mit Anlagen); Dateityp-Symbole (PDF, BILD, MAIL, WORD) in Vorgangsliste,
+    Chronik, Dokumenten-Reiter und Archiv.
+  - Dokumentdatum: Steht im Text kein Datum, wird das Erstellungsdatum der Datei vorgeschlagen (PDF-Metadaten, EXIF,
+    Word-Eigenschaften, sonst Änderungsdatum laut Browser; `dokument.datei_datum`).
+  - Seitenansicht mit pdf.js (lokal unter `pdfjs/`, Apache-2.0): eine A4-Seite füllt die Fensterhöhe, ab zwei Seiten
+    zwei nebeneinander.
+  - Adressbuch: Kontakte umbenennen (`kontakt_aendern`). Posteingang: „+ Neuer Kontakt …“ beim Absender.
+  - Chat-Notizen: ChatGPT-Export (.zip/.json) direkt importieren, Unterhaltungen auswählen.
+  - Archiv: Filter in zwei Zeilen (Gruppieren + Bereich; Typ + Jahr + Suche). Einstellungen: Bereiche sortieren
+    (`bereich.reihenfolge`), eigene Eintragsarten verwalten (`eintrag.typ`, Grundart „notiz“).
+  - Chronik: Einträge bearbeiten mit Art, Beteiligtem und Dokument (zuweisen oder hochladen); ein fehlendes
+    Original wird beim Zuweisen zum Eingang.
 - 0.9 (Schemaversion 10): Mehrere Bereiche je Vorgang (`vorgang_bereich`, erster = Hauptbereich in `vorgang.bereich`)
   und je Dokument (`dokument_bereich`, leer = Bereiche des Vorgangs); weitere Kontakte je Dokument
   (`dokument_kontakt`); Beteiligte im Dialog „Vorgang bearbeiten“ setzen, auch direkt aus der Vorgangsliste.

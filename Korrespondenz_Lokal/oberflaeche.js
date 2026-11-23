@@ -80,7 +80,8 @@ async function api(path, body, method) {
 }
 async function upload(path, file) {
   const res = await holen('/api/' + path, {method: 'POST', body: file,
-    headers: {'X-Korrespondenz': 'lokal', 'X-Dateiname': encodeURIComponent(file.name)}});
+    headers: {'X-Korrespondenz': 'lokal', 'X-Dateiname': encodeURIComponent(file.name),
+      ...(file.lastModified ? {'X-Datei-Datum': new Date(file.lastModified - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 10)} : {})}});
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(data.error || 'Import fehlgeschlagen.');
   return data;
@@ -97,6 +98,7 @@ async function loadBase() {
   Object.assign(D, {cases: c.cases, statuses: c.statuses, groups: c.groups, ocr: c.ocr, version: c.version});
   D.inbox = (await api('posteingang')).dokumente;
   D.trash = (await api('papierkorb')).eintraege;
+  D.arten = (await api('eintragsarten')).arten;
 }
 
 // ---------- Navigation ----------
@@ -185,9 +187,42 @@ const vorgangOptionen = (cur, ohne) => {
   return `<optgroup label="Laufende Vorgänge">${aktiv().filter(c => c.id !== ohne).sort((x, y) => cmp(x.titel, y.titel)).map(opt).join('')}</optgroup>`
     + (fertig.length ? `<optgroup label="Erledigte Vorgänge (Archiv)">${fertig.map(opt).join('')}</optgroup>` : '');
 };
+// Dateityp als kleines Symbol
+const WORD = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+const TYP = m => m === 'application/pdf' ? ['pdf', 'PDF'] : m === 'message/rfc822' ? ['mail', 'MAIL'] : m === WORD ? ['word', 'WORD'] : /^image\//.test(m || '') ? ['bild', 'BILD'] : ['datei', 'DATEI'];
+const TYP_NAME = {pdf: 'PDF-Dokument', mail: 'E-Mail', word: 'Word-Dokument', bild: 'Bild/Scan', datei: 'Datei'};
+const typIcon = m => { const [k, l] = TYP(m); return `<span class="ftyp ftyp-${k}" title="${TYP_NAME[k]}">${l}</span>`; };
+const typBadges = typen => Object.entries(typen || {}).map(([m, n]) => `${typIcon(m)}<span class="muted num" style="font-size:12px;margin:0 6px 0 2px">${n}</span>`).join('');
+const dokMime = id => (D.akte?.dokumente || []).find(d => d.id === id)?.mime;
+// Seitenansicht mit pdf.js: eine A4-Seite füllt die Fensterhöhe, ab zwei Seiten zwei nebeneinander
+let pdfjsLaden = null;
+function pdfjs() {
+  if (!pdfjsLaden) pdfjsLaden = new Promise((ok, fehler) => { const s = document.createElement('script'); s.src = '/pdfjs/pdf.min.js';
+    s.onload = () => { window.pdfjsLib.GlobalWorkerOptions.workerSrc = '/pdfjs/pdf.worker.min.js'; ok(window.pdfjsLib); }; s.onerror = fehler; document.head.append(s); });
+  return pdfjsLaden;
+}
+async function seitenAnzeigen(box, url, drehung) {
+  try {
+    const pdf = await (await pdfjs()).getDocument(url).promise, n = pdf.numPages;
+    box.classList.toggle('zwei', n > 1); box.innerHTML = '';
+    const hoehe = box.clientHeight - 32, breite = (n > 1 ? (box.clientWidth - 56) / 2 : box.clientWidth - 32), dpr = window.devicePixelRatio || 1;
+    for (let i = 1; i <= n; i++) {
+      if (!box.isConnected) return;
+      const seite = await pdf.getPage(i), rot = (seite.rotate + (drehung || 0)) % 360, eins = seite.getViewport({scale: 1, rotation: rot});
+      const massstab = Math.min(hoehe / eins.height, breite / eins.width), vp = seite.getViewport({scale: massstab * dpr, rotation: rot});
+      const c = document.createElement('canvas'); c.width = vp.width; c.height = vp.height;
+      c.style.width = vp.width / dpr + 'px'; c.style.height = vp.height / dpr + 'px'; c.title = `Seite ${i} von ${n}`; box.append(c);
+      await seite.render({canvasContext: c.getContext('2d'), viewport: vp}).promise;
+    }
+  } catch (e) {
+    box.classList.remove('zwei'); box.innerHTML = `<iframe src="${url}#view=Fit" title="Original" style="width:100%;height:100%;border:0;background:#fff"></iframe>`;
+  }
+}
 // Originale passend verkleinert: Bilder als <img> (ganz sichtbar), PDFs mit „ganze Seite“
 const alsBild = d => /^image\/(jpeg|png)$/.test(d.mime || '') || (d.mime === 'image/tiff' && !d.gedreht);
-const originalHtml = (d, titel, voll) => alsBild(d)
+const originalHtml = (d, titel, voll) => d.mime === WORD
+  ? `<div class="pvrot ${voll ? 'full' : ''}"><iframe class="pvframe" src="/api/documents/${d.id}/html" title="${esc(titel || d.titel || 'Word-Dokument')}"></iframe></div>`
+  : alsBild(d)
   ? `<div class="pvimgwrap ${voll ? 'full' : ''}" data-rot="${d.drehung_manuell || 0}"><img class="pvimg" src="/api/documents/${d.id}/original" alt="${esc(titel || d.titel || 'Original')}"></div>`
   : `<div class="pvrot ${voll ? 'full' : ''}" data-rot="${d.drehung_manuell || 0}"><iframe class="pvframe" src="/api/documents/${d.id}/original#view=Fit&amp;navpanes=0" title="Original ${esc(titel || d.titel || '')}"></iframe></div>`;
 // Drehung von Hand anzeigen: Bild bzw. PDF-Rahmen drehen und dabei vollständig einpassen
@@ -253,7 +288,7 @@ function detailHtml(p) {
     <label>Dokumentdatum <small>${v.datum_quelle ? 'aus: ' + esc(v.datum_quelle) : 'nicht erkannt'}</small><input type="date" data-ib="datum" data-id="${p.id}" value="${esc(d.datum)}"></label>
     <label>Absender <small>${v.absender ? 'aus: ' + esc(v.absender.quelle) : v.kontakt ? 'aus Erwähnung im Text' : 'nicht erkannt'}</small><select data-ib="kontakt" data-id="${p.id}"><option value="">– unbekannt –</option>
      ${neu ? `<option value="neu" ${d.kontakt === 'neu' ? 'selected' : ''}>Neu: ${esc(v.absender.name)}</option>` : ''}
-     ${D.kontakte.map(k => `<option value="${k.id}" ${d.kontakt === String(k.id) ? 'selected' : ''}>${esc(k.kurzname || k.name)}</option>`).join('')}</select></label>
+     ${D.kontakte.map(k => `<option value="${k.id}" ${d.kontakt === String(k.id) ? 'selected' : ''}>${esc(k.kurzname || k.name)}</option>`).join('')}<option value="__neu">+ Neuer Kontakt …</option></select></label>
     ${v.referenz ? `<div class="refbox"><small>${esc(v.referenz.bezeichnung)}</small><b class="num">${esc(v.referenz.wert)}</b></div>` : ''}</div>
     ${neu ? `<p class="hint">„${esc(v.absender.name)}“ ist noch nicht im Adressbuch. Beim Zuordnen wird der Kontakt${v.absender.anschrift ? ' mit Anschrift' : ''} angelegt.</p>` : '<p class="hint">Vorschläge aus dem erkannten Text. Bitte prüfen und bei Bedarf ändern.</p>'}</div>
    ${p.seiten.length ? `<details class="ocrd ibsec ibsec-text"><summary>Erkannter Text · ${p.seiten.length} Seite(n)</summary><pre>${esc(p.seiten.map(s => `— Seite ${s.nummer} · ${s.methode === 'ocr' ? 'OCR' : 'Textschicht'} —\n${s.text}`).join('\n\n').slice(0, 8000))}</pre></details>` : ''}
@@ -326,7 +361,7 @@ function vList() {
   <div class="filters"><span class="lbl">Bereich</span>${bs.map(b => `<button class="fchip ${S.vb === b ? 'on' : ''}" data-act="vb" data-id="${esc(b)}">${b === 'alle' ? 'Alle' : esc(b)}</button>`).join('')}<button class="fchip" data-act="b-add" style="border-style:dashed">+ Bereich</button></div>
   <div class="filters" style="margin-top:-6px"><span class="lbl">Status</span>${['alle', ...ST_ORDER.filter(s => s !== 'Erledigt')].map(s => `<button class="fchip ${S.vs === s ? 'on' : ''}" data-act="vs" data-id="${esc(s)}">${s === 'alle' ? 'Alle' : esc(stLabel(s))}</button>`).join('')}</div>
   <div class="tbl-wrap"><table><thead><tr>${sortTh('V','titel','Vorgang')}${sortTh('V','bereich','Bereich')}${sortTh('V','status','Status')}${sortTh('V','frist','Nächste Frist')}${sortTh('V','akt','Angelegt')}<th><span class="sr">Aktionen</span></th></tr></thead><tbody>
-  ${list.map(c => `<tr data-act="open-v" data-id="${c.id}"><td><b>${esc(c.titel)}</b><div class="muted" style="font-size:12.5px">${c.dokumente} Dokument${c.dokumente === 1 ? '' : 'e'}</div></td><td>${esc((c.bereiche || [c.bereich]).join(', '))}</td>
+  ${list.map(c => `<tr data-act="open-v" data-id="${c.id}"><td><b>${esc(c.titel)}</b><div class="muted" style="font-size:12.5px">${c.dokumente} Dokument${c.dokumente === 1 ? '' : 'e'}${c.dokumente ? ' · ' : ''}${typBadges(c.typen)}</div></td><td>${esc((c.bereiche || [c.bereich]).join(', '))}</td>
    <td><span class="st-${ST_KEY[c.status] || 'offen'}" style="display:flex;align-items:center;gap:6px;font-size:13px"><span class="dot"></span><span style="color:var(--fg)">${esc(stLabel(c.status))}</span></span></td>
    <td class="num">${c.naechste_frist ? `<span style="color:${tage(c.naechste_frist) < 0 ? 'var(--crit)' : tage(c.naechste_frist) <= 7 ? 'var(--warn)' : 'inherit'}">${dt(c.naechste_frist)}</span>` : '–'}</td><td class="num">${dt(c.angelegt_am)}</td>
    <td style="white-space:nowrap"><button class="iconbtn sm" data-act="v-edit" data-id="${c.id}" title="Vorgang bearbeiten" aria-label="${esc(c.titel)} bearbeiten">${I('draft')}</button><button class="iconbtn" data-act="v-del" data-id="${c.id}" title="Vorgang löschen" aria-label="${esc(c.titel)} löschen">${I('trash')}</button></td></tr>`).join('') || '<tr><td colspan="6" class="muted">Keine laufenden Vorgänge für diese Filter.</td></tr>'}
@@ -340,7 +375,8 @@ const kontaktName = id => { const k = D.kontakte.find(x => x.id === id); return 
 function visibleEntries() {
   const a = D.akte;
   return a.eintraege.filter(e => (S.teil === 'all' || e.teile.includes(S.teil) || !e.teile.length) && (S.ktype === 'alle' ||
-    (S.ktype === 'gespraech' ? ['telefonat','notiz','entscheidung'].includes(e.kind || e.art) : S.ktype === 'ausgang' ? ['ausgang','nachweis'].includes(e.art) : e.art === S.ktype)));
+    (S.ktype.startsWith('typ:') ? e.typ === S.ktype.slice(4) :
+    (S.ktype === 'gespraech' ? ['telefonat','notiz','entscheidung'].includes(e.kind || e.art) : S.ktype === 'ausgang' ? ['ausgang','nachweis'].includes(e.art) : e.art === S.ktype))));
 }
 function vAkte() {
   const a = D.akte, multi = a.teilvorgaenge.length > 1;
@@ -388,7 +424,7 @@ function chronik() {
   const rows = list.map(e => {
     const m = e.ereignis_datum.slice(0, 7); let mh = '';
     if (m !== lastM) { lastM = m; mh = `<li class="month">${MON[+m.slice(5) - 1]} ${m.slice(0, 4)}</li>`; }
-    const k = KIND[e.art], badges = [];
+    const k = e.typ ? [e.typ, KIND[e.art][1]] : KIND[e.art], badges = [];
     if (e.art === 'entwurf') badges.push(e.versendet_als ? '<span class="pill grey">Entwurf · versendet</span>' : '<span class="pill warn">Entwurf · nicht versendet</span>');
     if (e.versand) badges.push(`<span class="pill ok">${esc(e.versand.art)}</span>`);
     if (e.art === 'fehlt') badges.push('<span class="pill crit">Original fehlt</span>');
@@ -400,10 +436,10 @@ function chronik() {
     const wer = e.kontakt_id ? ` · ${e.richtung || ''} ${esc(kontaktName(e.kontakt_id))}` : '';
     return mh + `<li class="ent k-${e.art} ${S.entry === e.id ? 'sel' : ''}"><span class="ico" title="${k[0]}">${I(k[1])}</span>
      <div class="card" data-act="entry" data-id="${e.id}" tabindex="0" role="button" aria-pressed="${S.entry === e.id}">
-      <div class="row1"><span class="date num">${dt(e.ereignis_datum)}</span><span class="ttl">${esc(e.titel)}</span>${e.dokument_id ? `<span class="rowacts"><button class="iconbtn sm" data-act="doc-move" data-doc="${e.dokument_id}" title="In anderen Vorgang verschieben" aria-label="Dokument verschieben">${I('move')}</button><button class="iconbtn sm" data-act="doc-remove" data-doc="${e.dokument_id}" title="Aus diesem Vorgang löschen" aria-label="Dokument löschen">${I('trash')}</button></span>` : ''}</div>
+      <div class="row1"><span class="date num">${dt(e.ereignis_datum)}</span>${e.dokument_id ? typIcon(dokMime(e.dokument_id)) : ''}<span class="ttl">${esc(e.titel)}</span>${e.dokument_id ? `<span class="rowacts"><button class="iconbtn sm" data-act="doc-move" data-doc="${e.dokument_id}" title="In anderen Vorgang verschieben" aria-label="Dokument verschieben">${I('move')}</button><button class="iconbtn sm" data-act="doc-remove" data-doc="${e.dokument_id}" title="Aus diesem Vorgang löschen" aria-label="Dokument löschen">${I('trash')}</button></span>` : ''}</div>
       <div class="row2"><span>${k[0]}${wer}</span>${badges.join('')}</div>${chips || acts ? `<div class="row3">${chips}${acts}</div>` : ''}</div></li>`;
   }).join('');
-  const types = [['alle','Alle Typen'],['eingang','Eingang'],['ausgang','Versendet'],['entwurf','Entwürfe'],['gespraech','Telefonate & Notizen'],['chat','Chat-Notizen']];
+  const types = [['alle','Alle Typen'],['eingang','Eingang'],['ausgang','Versendet'],['entwurf','Entwürfe'],['gespraech','Telefonate & Notizen'],['chat','Chat-Notizen'], ...[...new Set([...(D.arten || []), ...D.akte.eintraege.map(e => e.typ).filter(Boolean)])].map(t => ['typ:' + t, t])];
   return `<div class="stack" style="gap:6px"><div class="chron-h"><h2>Chronik</h2><span style="display:flex;gap:6px"><button class="btn out sm" data-act="compose">${I('draft')}Brief</button><button class="btn out sm" data-act="entry-add">${I('plus')}Eintrag</button><button class="btn out sm" data-act="ref-add">${I('plus')}Referenz</button></span></div>
    <div style="display:flex;gap:6px;flex-wrap:wrap">${types.map(([k, l]) => `<button class="fchip ${S.ktype === k ? 'on' : ''}" data-act="ktype" data-id="${k}" style="padding:3px 9px;font-size:12px">${l}</button>`).join('')}</div>
    <ul class="chron">${rows || '<li class="muted" style="padding:10px 0">Noch keine Einträge. Dokumente aus dem Posteingang zuordnen oder einen Eintrag anlegen.</li>'}</ul></div>`;
@@ -416,7 +452,7 @@ function preview() {
   if (e.art === 'entwurf' && !e.versendet_als) knoepfe.push(`<button class="btn sm" data-act="compose" data-edit="${e.id}">${I('draft')}Brief bearbeiten</button>`);
   if (e.brief) knoepfe.push(`<a class="btn sm" href="/api/eintraege/${e.id}/brief" target="_blank" rel="noopener">Drucken oder PDF</a>`);
   knoepfe.push(`<button class="btn sm ghost" data-act="entry-edit" data-id="${e.id}">Bearbeiten</button>`);
-  const kopf = `<div class="pv-h"><div><h2>${esc(e.titel)}</h2><span class="muted">${KIND[e.art][0]}${e.kontakt_id ? ` · ${e.richtung || ''} ${esc(kontaktName(e.kontakt_id))}` : ''} · ${dt(e.ereignis_datum)}</span></div>
+  const kopf = `<div class="pv-h"><div><h2>${esc(e.titel)}</h2><span class="muted">${esc(e.typ || KIND[e.art][0])}${e.kontakt_id ? ` · ${e.richtung || ''} ${esc(kontaktName(e.kontakt_id))}` : ''} · ${dt(e.ereignis_datum)}</span></div>
    <span style="display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end">${knoepfe.join('')}</span></div>`;
   const vers = e.versand ? `<dl class="meta"><div class="wide"><dt>Versand · ${esc(e.versand.art)} am ${dt(e.versand.datum)}${e.versand.sendungsnummer ? ' · ' + esc(e.versand.sendungsnummer) : ''}</dt><dd class="addr">${esc(e.versand.empfaenger)}</dd>${e.versand.anschrift_geaendert ? `<div class="notice warn" style="margin:8px 0 0">${I('alert')}<p>Die Anschrift hat sich inzwischen geändert. Neue Schreiben gehen an die aktuelle Anschrift aus dem Adressbuch.</p></div>` : ''}</div></dl>` : '';
   if (e.brief) return kopf + vers + `<div class="frame" style="margin-top:12px"><iframe class="pvframe" src="/api/eintraege/${e.id}/brief" title="Brief ${esc(e.titel)}"></iframe></div>`;
@@ -630,8 +666,8 @@ function exportDialog() {
   }, 'ZIP herunterladen');
 }
 function vChat() {
-  return `<div class="head" style="justify-content:space-between"><h1>Chat-Notizen</h1><button class="btn pri" data-act="chat-new">${I('plus')}Chat-Notiz übernehmen</button></div>
-  <p class="muted" style="margin:6px 0 16px;max-width:75ch"><a href="/alt" class="linkbtn">ChatGPT-Export importieren</a> · Zusammenfassungen und Auszüge aus Chats, etwa aus ChatGPT, mit Quellenhinweis. Sie bleiben als ungeprüft gekennzeichnet, bis Sie sie mit den Originalen abgeglichen haben. Im Text erwähnte Schreiben, die in der Akte fehlen, werden als „Original fehlt“ vermerkt.</p>
+  return `<div class="head" style="justify-content:space-between"><h1>Chat-Notizen</h1><span style="display:flex;gap:8px"><button class="btn" data-act="chat-export">ChatGPT-Export importieren …</button><button class="btn pri" data-act="chat-new">${I('plus')}Chat-Notiz übernehmen</button></span></div>
+  <p class="muted" style="margin:6px 0 16px;max-width:75ch">Zusammenfassungen und Auszüge aus Chats, etwa aus ChatGPT, mit Quellenhinweis. Sie bleiben als ungeprüft gekennzeichnet, bis Sie sie mit den Originalen abgeglichen haben. Im Text erwähnte Schreiben, die in der Akte fehlen, werden als „Original fehlt“ vermerkt.</p>
   <div class="panel">${D.chats.length ? D.chats.map(c => `<div class="frow" style="grid-template-columns:minmax(0,1fr) auto"><div style="min-width:0"><div class="t"><a href="#akte-${c.vorgang_id}">${esc(c.titel)}</a></div>
     <div class="m"><span>${esc(c.vorgang)}</span><span>· ${dt(c.ereignis_datum)}</span><span>· ${esc(c.quelle || '')}</span></div><div class="m" style="margin-top:4px;color:var(--fg)">${esc(c.auszug || '')}</div></div>
     <div class="acts">${c.geprueft ? '<span class="pill ok">geprüft</span>' : `<span class="pill warn">ungeprüft</span><button class="btn sm" data-act="chat-ok" data-id="${c.id}">Geprüft</button>`}</div></div>`).join('') : '<p class="muted" style="margin:0">Noch keine Chat-Notizen.</p>'}</div>
@@ -653,7 +689,7 @@ function chatModal(text, quelle) {
 function docTable() {
   const a = D.akte, so = S.sortD;
   const key = {titel: d => d.titel, datei: d => d.dateiname, datum: d => d.angelegt_am, text: d => d.ocr_status}[so.k];
-  const rows = [...a.dokumente].sort((x, y) => cmp(key(x), key(y)) * so.d).map(d => `<tr data-act="doc-open" data-doc="${d.id}"><td><b>${esc(d.titel)}</b></td><td>${esc(d.dateiname)}</td><td class="num">${dt(d.angelegt_am)}</td><td>${esc(d.ocr_status)}</td>
+  const rows = [...a.dokumente].sort((x, y) => cmp(key(x), key(y)) * so.d).map(d => `<tr data-act="doc-open" data-doc="${d.id}"><td><span class="docname" style="align-items:center">${typIcon(d.mime)}<b>${esc(d.titel)}</b></span></td><td>${esc(d.dateiname)}</td><td class="num">${dt(d.angelegt_am)}</td><td>${esc(d.ocr_status)}</td>
     <td style="white-space:nowrap"><button class="iconbtn sm" data-act="doc-move" data-doc="${d.id}" title="In anderen Vorgang verschieben" aria-label="${esc(d.titel)} verschieben">${I('move')}</button><button class="iconbtn sm" data-act="doc-remove" data-doc="${d.id}" title="Aus diesem Vorgang löschen" aria-label="${esc(d.titel)} löschen">${I('trash')}</button></td></tr>`).join('');
   return `<div style="margin-top:18px" class="tbl-wrap"><table><thead><tr>${sortTh('D','titel','Dokument')}${sortTh('D','datei','Datei')}${sortTh('D','datum','Abgelegt')}${sortTh('D','text','Text')}<th><span class="sr">Aktionen</span></th></tr></thead><tbody>${rows || '<tr><td colspan="5" class="muted">Noch keine Dokumente.</td></tr>'}</tbody></table></div>`;
 }
@@ -693,8 +729,8 @@ function vArchiv() {
   const q = S.aText.toLowerCase();
   const jahre = [...new Set(D.archiv.map(d => d.datum.slice(0, 4)))].sort().reverse();
   const bereiche = [...new Set(D.archiv.flatMap(d => d.bereiche || [d.bereich]))].sort(cmp);
-  const typName = d => (KIND[d.art] || ['Ohne Typ'])[0];
-  const typen = [...new Set([...['eingang', 'ausgang', 'entwurf', 'nachweis'].map(k => KIND[k][0]), ...D.archiv.map(typName)])];
+  const typName = d => d.typ || (KIND[d.art] || ['Ohne Typ'])[0];
+  const typen = [...new Set([...['eingang', 'ausgang', 'entwurf', 'nachweis'].map(k => KIND[k][0]), ...(D.arten || []), ...D.archiv.map(typName)])];
   if (S.aTyp && S.aTyp !== 'alle' && !typen.includes(S.aTyp)) S.aTyp = 'alle';
   let list = D.archiv.filter(d => (S.aBereich === 'alle' || (d.bereiche || [d.bereich]).includes(S.aBereich)) && (S.aJahr === 'alle' || d.datum.startsWith(S.aJahr))
     && (!S.aTyp || S.aTyp === 'alle' || typName(d) === S.aTyp)
@@ -706,17 +742,17 @@ function vArchiv() {
   const groups = [];
   for (const d of list) for (const k of gkey(d)) { let g = groups.find(x => x.k === k); if (!g) groups.push(g = {k, items: []}); g.items.push(d); }
   if (S.aGroup === 'jahr') groups.sort((x, y) => cmp(y.k, x.k)); else if (S.aGroup !== 'keine') groups.sort((x, y) => cmp(x.k, y.k));
-  const row = d => `<tr data-act="arch-edit" data-doc="${d.id}" title="Klicken zum Bearbeiten"><td><div class="docname"><button class="docico" data-act="view" data-doc="${d.id}" title="Dokument ansehen" aria-label="${esc(d.titel)} ansehen">${I('doc')}</button><div style="min-width:0"><b>${esc(d.titel)}</b><div class="muted" style="font-size:12.5px">${esc(d.dateiname)}</div></div></div></td><td class="num">${dt(d.datum)}<div class="muted" style="font-size:12px">${esc(typName(d))}</div></td><td>${esc(d.absender || '–')}${(d.kontakte || []).length ? `<div class="muted" style="font-size:12.5px">+ ${esc(d.kontakte.map(k => k.name).join(', '))}</div>` : ''}</td><td>${esc(d.vorgang)}<div class="muted" style="font-size:12.5px">${esc((d.bereiche || [d.bereich]).join(', '))}</div></td><td class="num">${groesse(d.groesse)}</td>
+  const row = d => `<tr data-act="arch-edit" data-doc="${d.id}" title="Klicken zum Bearbeiten"><td><div class="docname"><button class="docico" data-act="view" data-doc="${d.id}" title="${TYP_NAME[TYP(d.mime)[0]]} ansehen" aria-label="${esc(d.titel)} ansehen">${typIcon(d.mime)}</button><div style="min-width:0"><b>${esc(d.titel)}</b><div class="muted" style="font-size:12.5px">${esc(d.dateiname)}</div></div></div></td><td class="num">${dt(d.datum)}<div class="muted" style="font-size:12px">${esc(typName(d))}</div></td><td>${esc(d.absender || '–')}${(d.kontakte || []).length ? `<div class="muted" style="font-size:12.5px">+ ${esc(d.kontakte.map(k => k.name).join(', '))}</div>` : ''}</td><td>${esc(d.vorgang)}<div class="muted" style="font-size:12.5px">${esc((d.bereiche || [d.bereich]).join(', '))}</div></td><td class="num">${groesse(d.groesse)}</td>
     <td style="white-space:nowrap"><button class="iconbtn sm" data-act="arch-move" data-doc="${d.id}" data-v="${d.vorgang_id}" data-t="${esc(d.titel)}" title="In anderen Vorgang verschieben" aria-label="${esc(d.titel)} verschieben">${I('move')}</button><button class="iconbtn sm" data-act="arch-del" data-doc="${d.id}" data-v="${d.vorgang_id}" data-t="${esc(d.titel)}" title="Löschen" aria-label="${esc(d.titel)} löschen">${I('trash')}</button></td></tr>`;
   const thead = `<thead><tr>${sortTh('A','titel','Dokument')}${sortTh('A','datum','Datum')}${sortTh('A','absender','Absender')}${sortTh('A','vorgang','Vorgang')}${sortTh('A','groesse','Größe')}<th><span class="sr">Aktionen</span></th></tr></thead>`;
   return `<h1>Archiv</h1><p class="muted" style="margin:6px 0 0">${D.archiv.length} archivierte Dokumente. Wird ein Vorgang erledigt, verschwindet er aus „Vorgänge“; seine Dokumente stehen hier. ${list.length !== D.archiv.length ? `${list.length} passen zu den Filtern.` : ''}</p>
 
   <div class="filters"><span class="lbl">Gruppieren</span>${[['vorgang','Vorgang'],['bereich','Bereich'],['typ','Typ'],['absender','Absender'],['jahr','Jahr'],['keine','Keine']].map(([k, l]) => `<button class="fchip ${S.aGroup === k ? 'on' : ''}" data-act="agroup" data-id="${k}">${l}</button>`).join('')}
-   <span style="flex:1"></span><input class="inp" id="atext" type="search" placeholder="Im Archiv filtern" value="${esc(S.aText)}" style="max-width:240px" aria-label="Im Archiv filtern"></div>
-  <div class="filters" style="margin-top:-6px"><span class="lbl">Bereich</span>${['alle', ...bereiche].map(b => `<button class="fchip ${S.aBereich === b ? 'on' : ''}" data-act="abereich" data-id="${esc(b)}">${b === 'alle' ? 'Alle' : esc(b)}</button>`).join('')}</div>
-  <div class="filters" style="margin-top:-6px"><span class="lbl">Typ</span>${['alle', ...typen].map(t => `<button class="fchip ${(S.aTyp || 'alle') === t ? 'on' : ''}" data-act="atyp" data-id="${esc(t)}">${t === 'alle' ? 'Alle' : esc(t)}</button>`).join('')}</div>
-  <div class="filters" style="margin-top:-6px"><span class="lbl">Jahr</span>${['alle', ...jahre].map(j => `<button class="fchip ${S.aJahr === j ? 'on' : ''}" data-act="ajahr" data-id="${j}">${j === 'alle' ? 'Alle' : j}</button>`).join('')}
-   <label class="chk" style="margin-left:12px"><input type="checkbox" id="aerl" ${S.aErledigt ? 'checked' : ''}>nur abgeschlossene Vorgänge</label></div>
+   <span class="trenner"></span><span class="lbl">Bereich</span>${['alle', ...bereiche].map(b => `<button class="fchip ${S.aBereich === b ? 'on' : ''}" data-act="abereich" data-id="${esc(b)}">${b === 'alle' ? 'Alle' : esc(b)}</button>`).join('')}</div>
+  <div class="filters" style="margin-top:-6px"><span class="lbl">Typ</span>${['alle', ...typen].map(t => `<button class="fchip ${(S.aTyp || 'alle') === t ? 'on' : ''}" data-act="atyp" data-id="${esc(t)}">${t === 'alle' ? 'Alle' : esc(t)}</button>`).join('')}
+   <span class="trenner"></span><span class="lbl">Jahr</span>${['alle', ...jahre].map(j => `<button class="fchip ${S.aJahr === j ? 'on' : ''}" data-act="ajahr" data-id="${j}">${j === 'alle' ? 'Alle' : j}</button>`).join('')}
+   <span style="flex:1"></span><input class="inp" id="atext" type="search" placeholder="Im Archiv filtern" value="${esc(S.aText)}" style="max-width:220px" aria-label="Im Archiv filtern">
+   <label class="chk" style="margin-left:8px"><input type="checkbox" id="aerl" ${S.aErledigt ? 'checked' : ''}>nur erledigte Vorgänge</label></div>
   ${groups.length ? groups.map(g => `${S.aGroup !== 'keine' ? `<div class="agrp"><h3>${esc(g.k)}</h3><span class="muted num">${g.items.length}</span></div>` : ''}<div class="tbl-wrap" style="margin-bottom:16px"><table>${thead}<tbody>${g.items.map(row).join('')}</tbody></table></div>`).join('') : '<div class="panel muted">Keine Dokumente für diese Filter.</div>'}`;
 }
 
@@ -728,7 +764,7 @@ function vAb() {
   return `<div class="head" style="justify-content:space-between"><h1>Adressbuch</h1><button class="btn" data-act="k-new">${I('plus')}Neuer Kontakt</button></div>
   <div class="ab" style="margin-top:16px"><div class="stack" style="gap:8px"><input class="inp" id="abq" type="search" placeholder="Kontakt suchen" value="${esc(S.abq)}" aria-label="Kontakt suchen">
    <div class="ablist">${list.map(x => `<button data-act="contact" data-id="${x.id}" class="${k && x.id === k.id ? 'on' : ''}">${esc(x.name)}<small>${esc(x.typ || '')}${x.vorgaenge.length ? ` · ${x.vorgaenge.length} Vorgänge` : ''}</small></button>`).join('') || '<span class="muted" style="padding:8px">Keine Kontakte.</span>'}</div></div>
-   ${k ? `<div class="stack"><div class="panel"><div class="chron-h"><h2>${esc(k.name)}</h2><button class="iconbtn" data-act="k-del" data-id="${k.id}" title="Kontakt löschen" aria-label="Kontakt löschen">${I('trash')}</button></div><span class="muted">${esc([k.typ, k.notiz].filter(Boolean).join(' · '))}</span></div>
+   ${k ? `<div class="stack"><div class="panel"><div class="chron-h"><h2>${esc(k.name)}</h2><span style="display:flex;gap:4px"><button class="iconbtn" data-act="k-edit" data-id="${k.id}" title="Kontakt bearbeiten" aria-label="Kontakt bearbeiten">${I('draft')}</button><button class="iconbtn" data-act="k-del" data-id="${k.id}" title="Kontakt löschen" aria-label="Kontakt löschen">${I('trash')}</button></span></div><span class="muted">${esc([k.typ, k.notiz].filter(Boolean).join(' · '))}</span></div>
     ${k.abteilungen.map(a => `<div class="panel stack"><div class="chron-h"><h3>${esc(a.name || 'Kontakt')}</h3><button class="btn sm" data-act="adr-new" data-id="${a.id}">Neue Anschrift</button></div>
      <dl class="dl">${a.ansprechpartner ? `<dt>Ansprechpartner</dt><dd>${esc(a.ansprechpartner)}</dd>` : ''}${a.email ? `<dt>E-Mail</dt><dd>${esc(a.email)}</dd>` : ''}${a.telefon ? `<dt>Telefon</dt><dd>${esc(a.telefon)}</dd>` : ''}</dl>
      ${a.anschriften.length ? `<div class="adrbox">${a.anschriften.map(r => `<div class="adr ${r.gueltig_bis ? 'old' : ''}"><b style="font-size:12px;text-transform:uppercase;letter-spacing:.05em">${r.gueltig_bis ? `Frühere Anschrift · bis ${dt(r.gueltig_bis)}` : `Aktuelle Anschrift · seit ${dt(r.gueltig_von)}`}</b><div class="lines">${esc(r.zeilen)}</div>${r.verwendet ? `<small>Bei ${r.verwendet} Versand${r.verwendet === 1 ? '' : 'en'} verwendet</small>` : ''}</div>`).join('')}</div>` : '<p class="muted" style="margin:0">Noch keine Anschrift.</p>'}</div>`).join('')}
@@ -744,7 +780,10 @@ function vTrash() {
 function vSettings() {
   return `<h1>Einstellungen</h1><div class="grid2" style="margin-top:16px">
    <div class="panel stack"><div class="chron-h"><h2>Bereiche</h2><button class="btn sm" data-act="b-add">${I('plus')}Bereich</button></div>
-    <ul class="mini">${D.groups.map(b => { const n = D.cases.filter(c => c.bereich === b).length; return `<li><span>${esc(b)} <span class="muted">· ${n} ${n === 1 ? 'Vorgang' : 'Vorgänge'}</span></span><span style="display:flex;gap:6px"><button class="btn sm ghost" data-act="b-ren" data-b="${esc(b)}">Umbenennen</button>${n ? '' : `<button class="btn sm ghost" data-act="b-del" data-b="${esc(b)}">Entfernen</button>`}</span></li>`; }).join('')}</ul></div>
+    <ul class="mini">${D.groups.map(b => { const n = D.cases.filter(c => c.bereich === b).length; return `<li><span>${esc(b)} <span class="muted">· ${n} ${n === 1 ? 'Vorgang' : 'Vorgänge'}</span></span><span style="display:flex;gap:6px"><button class="iconbtn sm" data-act="b-hoch" data-b="${esc(b)}" title="Nach oben" aria-label="${esc(b)} nach oben">↑</button><button class="iconbtn sm" data-act="b-runter" data-b="${esc(b)}" title="Nach unten" aria-label="${esc(b)} nach unten">↓</button><button class="btn sm ghost" data-act="b-ren" data-b="${esc(b)}">Umbenennen</button>${n ? '' : `<button class="btn sm ghost" data-act="b-del" data-b="${esc(b)}">Entfernen</button>`}</span></li>`; }).join('')}</ul></div>
+   <div class="panel stack"><div class="chron-h"><h2>Eintragsarten</h2><button class="btn sm" data-act="art-neu">${I('plus')}Art</button></div>
+    <p style="margin:0" class="muted">Eigene Arten für die Chronik, z. B. Besprechung oder Ortstermin. Die eingebauten Arten (Eingang, Versendet, Telefonat, Notiz …) bleiben immer.</p>
+    <ul class="mini">${(D.arten || []).map(t => `<li><span>${esc(t)}</span><button class="btn sm ghost" data-act="art-del" data-name="${esc(t)}">Entfernen</button></li>`).join('') || '<li class="muted">Noch keine eigenen Arten.</li>'}</ul></div>
    <div class="panel stack"><h2>Eigene Angaben</h2><p style="margin:0">Ihr Name und Ihre Anschrift, eine Angabe pro Zeile. Die Absendererkennung schlägt diese Angaben nie als Absender vor.</p>
     <textarea id="eigene" class="inp" rows="4">${esc(D.eigene)}</textarea><div><button class="btn" data-act="eigene-save">Speichern</button></div></div>
    <div class="panel stack"><h2>Apple Mail</h2><p style="margin:0">„Aus Mail holen“ übernimmt alle E-Mails mit dieser Markierung samt Anlagen in den Posteingang. Die Markierung in Mail bleibt; jede E-Mail wird nur einmal übernommen, auch wenn sie in mehreren Postfächern liegt.</p>
@@ -780,8 +819,10 @@ function openViewer(docId, title) {
   const w = $('#viewer');
   w.innerHTML = `<div class="vbar"><b>${esc(title || 'Original')}</b><a class="btn sm" href="/api/documents/${docId}/original" target="_blank" rel="noopener">In neuem Fenster</a><button class="btn sm" data-act="vw-close">Schließen</button></div>
    <div class="vbody" style="padding:0">${(() => { const d = [...D.inbox, ...(D.akte?.dokumente || []), ...D.archiv].find(x => x.id === +docId);
-     return originalHtml(d || {id: docId}, 'Original', true); })()}</div>`;
-  w.hidden = false; w.querySelector('[data-act=vw-close]').focus(); requestAnimationFrame(() => drehungAnwenden(w));
+     return d && d.mime === 'application/pdf' ? `<div class="seiten" data-pdf="${docId}" data-rot="0">Wird geladen …</div>` : originalHtml(d || {id: docId}, 'Original', true); })()}</div>`;
+  w.hidden = false; w.querySelector('[data-act=vw-close]').focus();
+  const d = [...D.inbox, ...(D.akte?.dokumente || []), ...D.archiv].find(x => x.id === +docId);
+  requestAnimationFrame(() => { drehungAnwenden(w); const box = w.querySelector('.seiten'); if (box) seitenAnzeigen(box, `/api/documents/${docId}/original`, d?.drehung_manuell || 0); });
 }
 const closeViewer = () => { const w = $('#viewer'); w.hidden = true; w.innerHTML = ''; };
 const bereichSelect = (id, cur) => `<label>Bereich<select id="${id}">${D.groups.map(b => `<option ${b === cur ? 'selected' : ''}>${esc(b)}</option>`).join('')}</select></label>`;
@@ -801,14 +842,15 @@ function newVorgang(after) {
 function entryModal(bezugId) {
   const a = D.akte, bezug = bezugId ? a.eintraege.find(e => e.id === bezugId) : null;
   modal(bezug ? 'Antwort-Entwurf anlegen' : 'Eintrag hinzufügen', `${bezug ? `<div class="src">Bezug: ${esc(bezug.titel)} vom ${dt(bezug.ereignis_datum)}</div>` : ''}
-   <div class="two"><label>Art<select id="m-ea">${(bezug ? [['entwurf','Entwurf']] : [['telefonat','Telefonat'],['notiz','Notiz'],['entscheidung','Entscheidung'],['entwurf','Entwurf'],['fehlt','Original fehlt'],['chat','Chat-Notiz']]).map(([k, l]) => `<option value="${k}">${l}</option>`).join('')}</select></label><label>Ereignisdatum<input id="m-ed" type="date" value="${isoHeute()}"></label></div>
+   <div class="two"><label>Art<select id="m-ea">${(bezug ? [['entwurf','Entwurf']] : [['telefonat','Telefonat'],['notiz','Notiz'],['entscheidung','Entscheidung'],['entwurf','Entwurf'],['fehlt','Original fehlt'],['chat','Chat-Notiz'], ...(D.arten || []).map(t => ['typ:' + t, t]), ['__neu', '+ Neue Art …']]).map(([k, l]) => `<option value="${esc(k)}">${esc(l)}</option>`).join('')}</select></label><label>Ereignisdatum<input id="m-ed" type="date" value="${isoHeute()}"></label></div>
    <label>Titel<input id="m-et" maxlength="200" value="${bezug ? esc('Antwort: ' + bezug.titel) : ''}"></label><label>Inhalt<textarea id="m-ex" rows="5"></textarea></label>
    <div class="two">${a.teilvorgaenge.length ? `<label>Teilvorgang<select id="m-etl"><option value="">Ganzer Vorgang</option>${a.teilvorgaenge.map(t => `<option value="${t.id}" ${(bezug ? bezug.teile[0] : S.teil) === t.id ? 'selected' : ''}>${esc(t.name)}</option>`).join('')}</select></label>` : ''}
    <label>Beteiligter<select id="m-ek"><option value="">–</option>${a.beteiligte.map(b => `<option value="${b.kontakt_id}" ${bezug && bezug.kontakt_id === b.kontakt_id ? 'selected' : ''}>${esc(b.kurzname || b.name)}</option>`).join('')}</select></label></div>
    <p class="muted" style="margin:0;font-size:13px">Liegt das Ereignisdatum in der Vergangenheit, wird der Eintrag als nacherfasst gekennzeichnet.</p>`, async () => {
     const titel = val('m-et').trim(); if (!titel) { $('#m-et').focus(); return false; }
-    const art = val('m-ea'), k = val('m-ek');
-    const body = {art, titel, datum: val('m-ed'), text: val('m-ex'), teile: val('m-etl') ? [+val('m-etl')] : [], kontakt_id: k ? +k : null,
+    const wahl = val('m-ea'), k = val('m-ek'), typ = wahl.startsWith('typ:') ? wahl.slice(4) : null, art = typ ? 'notiz' : wahl;
+    if (wahl === '__neu') { toast('Bitte zuerst die neue Art benennen.'); return false; }
+    const body = {art, typ, titel, datum: val('m-ed'), text: val('m-ex'), teile: val('m-etl') ? [+val('m-etl')] : [], kontakt_id: k ? +k : null,
       richtung: k ? (art === 'entwurf' ? 'an' : 'mit') : null, bezug_id: bezug ? bezug.id : null, quelle: art === 'chat' ? 'Chat' : null};
     closeModal(); await act(async () => { const r = await api(`akte/${a.id}/eintraege`, body); S.entry = r.id; }, 'Eintrag angelegt.');
     return false;
@@ -842,6 +884,20 @@ function dokVerschieben(docId, vonId, titel) {
     } catch (e) { toast(e.message); }
     return false;
   }, 'Verschieben');
+}
+function neuerKontakt(docId) {
+  const p = D.inbox.find(x => x.id === docId), vor = p?.vorschlag?.absender;
+  modal('Neuer Kontakt', `<label>Name der Organisation oder Person<input id="m-nkn" maxlength="160" value="${esc(vor ? vor.name : '')}"></label>
+   <div class="two"><label>Ansprechpartner<input id="m-nkp"></label><label>E-Mail<input id="m-nke" type="email" value="${esc(vor?.email || '')}"></label></div>
+   <label>Anschrift<textarea id="m-nka" rows="3">${esc(vor?.anschrift || '')}</textarea></label>`, async () => {
+    const name = val('m-nkn').trim(); if (!name) { $('#m-nkn').focus(); return false; }
+    closeModal();
+    try { const r = await api('kontakte', {name, abteilungen: [{ansprechpartner: val('m-nkp'), email: val('m-nke'), anschrift: val('m-nka')}]});
+      D.kontakte = (await api('kontakte')).kontakte; if (draft[docId]) draft[docId].kontakt = String(r.id); toast(`Kontakt „${name}“ angelegt und als Absender gewählt.`); await render(); }
+    catch (e) { toast(e.message); }
+    return false;
+  }, 'Anlegen');
+  const sel = document.querySelector(`select[data-ib=kontakt][data-id="${docId}"]`); if (sel) sel.value = draft[docId]?.kontakt || '';
 }
 function archivBearbeiten(docId) {
   const d = D.archiv.find(x => x.id === docId); if (!d) return;
@@ -936,6 +992,16 @@ document.addEventListener('click', async ev => {
   case 'drehen': { const doc = +el.dataset.doc; try { const r = await api(`dokumente/${doc}/drehen`, {grad: +el.dataset.grad});
       for (const liste of [D.akte?.dokumente || [], D.archiv, D.inbox]) for (const x of liste) if (x.id === doc) x.drehung_manuell = r.drehung;
       if (S.view === 'akte') paintAkte(); else drehungAnwenden(); } catch (e) { toast(e.message); } break; }
+  case 'k-edit': { const k = D.kontakte.find(x => x.id === id); modal('Kontakt bearbeiten', `<label>Name<input id="m-kn" maxlength="160" value="${esc(k.name)}"></label>
+      <div class="two"><label>Kurzname<input id="m-kk" value="${esc(k.kurzname || '')}"></label><label>Art<input id="m-kt" value="${esc(k.typ || '')}" placeholder="z. B. Versicherung, Behörde"></label></div>
+      <label>Notiz<textarea id="m-kno" rows="2">${esc(k.notiz || '')}</textarea></label>`, async () => {
+      if (!val('m-kn').trim()) { $('#m-kn').focus(); return false; }
+      closeModal(); await act(() => api('kontakte/' + k.id, {name: val('m-kn'), kurzname: val('m-kk'), typ: val('m-kt'), notiz: val('m-kno')}), 'Kontakt gespeichert.'); return false; }); break; }
+  case 'chat-export': $('#chatinp').click(); break;
+  case 'b-hoch': case 'b-runter': { const n = [...D.groups], i = n.indexOf(el.dataset.b), j = i + (el.dataset.act === 'b-hoch' ? -1 : 1);
+      if (j < 0 || j >= n.length) break; [n[i], n[j]] = [n[j], n[i]]; await act(() => api('bereiche/reihenfolge', {namen: n})); break; }
+  case 'art-del': await act(() => api('eintragsarten/entfernen', {name: el.dataset.name}), 'Art entfernt. Bestehende Einträge behalten ihre Bezeichnung.'); break;
+  case 'art-neu': { const name = prompt('Name der neuen Eintragsart:'); if (name && name.trim()) await act(() => api('eintragsarten', {name: name.trim()}), 'Art angelegt.'); break; }
   case 'pv-info': S.pvInfo = !S.pvInfo; paintAkte(); break;
   case 'restore-file': $('#restoreinp').click(); break;
   case 'restore-list': wiederherstellenFrage(el.dataset.name, null); break;
@@ -975,12 +1041,18 @@ document.addEventListener('click', async ev => {
   case 'tags': modal('Schlagwörter', `<label>Durch Komma getrennt<input id="m-tg" value="${esc(D.akte.schlagwoerter.join(', '))}"></label>`, async () => {
       closeModal(); await act(() => api(`akte/${D.akte.id}/schlagwoerter`, {namen: val('m-tg').split(',').map(s => s.trim()).filter(Boolean)}), 'Gespeichert.'); return false; }); break;
   case 'entry-add': entryModal(el.dataset.bezug ? +el.dataset.bezug : null); break;
-  case 'entry-edit': { const e = D.akte.eintraege.find(x => x.id === id); modal('Eintrag bearbeiten', `<div class="two"><label>Titel<input id="m-et" value="${esc(e.titel)}"></label><label>Ereignisdatum<input id="m-ed" type="date" value="${e.ereignis_datum}"></label></div>
+  case 'entry-edit': { const e = D.akte.eintraege.find(x => x.id === id); const frei = ['eingang','ausgang','telefonat','notiz','entscheidung','fehlt'].includes(e.art);
+    modal('Eintrag bearbeiten', `<div class="two"><label>Titel<input id="m-et" value="${esc(e.titel)}"></label><label>Ereignisdatum<input id="m-ed" type="date" value="${e.ereignis_datum}"></label></div>
+      <div class="two">${frei ? `<label>Art<select id="m-eart">${[['eingang','Eingang'],['ausgang','Versendet'],['telefonat','Telefonat'],['notiz','Notiz'],['entscheidung','Entscheidung'],['fehlt','Original fehlt'], ...(D.arten || []).map(t => ['typ:' + t, t])].map(([k, l]) => `<option value="${esc(k)}" ${(e.typ ? 'typ:' + e.typ : e.art) === k ? 'selected' : ''}>${esc(l)}</option>`).join('')}</select></label>` : `<label>Art<input value="${esc(e.typ || KIND[e.art][0])}" disabled></label>`}
+       <label>Beteiligter<select id="m-ekon"><option value="">–</option>${D.kontakte.map(k => `<option value="${k.id}" ${e.kontakt_id === k.id ? 'selected' : ''}>${esc(k.kurzname || k.name)}</option>`).join('')}</select></label></div>
+      <label>Dokument<select id="m-edok"><option value="">– kein Dokument –</option>${D.akte.dokumente.map(d => `<option value="${d.id}" ${e.dokument_id === d.id ? 'selected' : ''}>${esc(d.titel)} (${esc(d.dateiname)})</option>`).join('')}<option value="__datei">+ Datei hochladen und zuweisen …</option></select><input type="file" id="m-edatei" hidden accept=".pdf,.jpg,.jpeg,.png,.tif,.tiff,.docx,.eml"></label>
       ${D.akte.teilvorgaenge.length ? `<label>Gehört zu</label><div style="display:flex;gap:14px;flex-wrap:wrap">${D.akte.teilvorgaenge.map(t => `<label class="chk"><input type="checkbox" class="m-etk" value="${t.id}" ${e.teile.includes(t.id) ? 'checked' : ''}>${esc(t.name)}</label>`).join('')}</div>` : ''}
       <label>Inhalt<textarea id="m-ex" rows="4">${esc(e.text || '')}</textarea></label>${e.art === 'chat' ? `<label class="chk"><input type="checkbox" id="m-eg" ${e.geprueft ? 'checked' : ''}>Inhalt geprüft</label>` : ''}
       <label>Zusätzlich in Vorgang zeigen<select id="m-ev"><option value="">–</option>${e.dokument_id ? aktiv().filter(c => c.id !== D.akte.id).map(c => `<option value="${c.id}">${esc(c.titel)}</option>`).join('') : ''}</select></label>
       <div><button class="btn sm" data-act="entry-del" data-id="${e.id}">${I('trash')}In den Papierkorb</button></div>`, async () => {
-      const body = {titel: val('m-et'), datum: val('m-ed'), text: val('m-ex')};
+      const body = {titel: val('m-et'), datum: val('m-ed'), text: val('m-ex'), kontakt_id: val('m-ekon') ? +val('m-ekon') : null};
+      if (val('m-edok') !== '__datei') body.dokument_id = val('m-edok') ? +val('m-edok') : null;
+      if ($('#m-eart') || snap['m-eart']) { const w = val('m-eart'); if (w.startsWith('typ:')) { body.art = 'notiz'; body.typ = w.slice(4); } else { body.art = w; body.typ = null; } }
       if (D.akte.teilvorgaenge.length) body.teile = [...document.querySelectorAll('.m-etk:checked')].map(x => +x.value);
       if ($('#m-eg')) body.geprueft = $('#m-eg').checked;
       if (val('m-ev')) body.auch_in_vorgang = +val('m-ev');
@@ -1054,13 +1126,31 @@ document.addEventListener('change', async ev => {
   if (el.id === 'mailflag') await act(() => api('mail/markierung', {markierung: +el.value}), 'Markierung gespeichert.');
   if (el.id === 'aerl') { S.aErledigt = el.checked; $('#view').innerHTML = vArchiv(); }
   if (el.id === 'fileinp') { const files = [...el.files]; el.value = ''; await importFiles(files, el.dataset.ziel === 'archiv' ? 'archiv' : el.dataset.ziel ? +el.dataset.ziel : null); }
+  if (el.id === 'm-ea' && el.value === '__neu') { const name = prompt('Name der neuen Eintragsart (z. B. Besprechung, Ortstermin):'); el.value = 'notiz';
+    if (name && name.trim()) { try { const r = await api('eintragsarten', {name: name.trim()}); D.arten = [...(D.arten || []), r.name]; el.insertAdjacentHTML('beforeend', `<option value="${esc('typ:' + r.name)}">${esc(r.name)}</option>`); el.value = 'typ:' + r.name; toast(`Art „${r.name}“ angelegt.`); } catch (e) { toast(e.message); } } }
+  if (el.id === 'm-edok' && el.value === '__datei') $('#m-edatei').click();
+  if (el.id === 'm-edatei' && el.files[0]) { const f = el.files[0]; el.value = ''; try { const r = await upload(`cases/${D.akte.id}/documents`, f);
+      D.akte.dokumente.unshift({id: r.id, titel: f.name.replace(/\.[^.]+$/, ''), dateiname: f.name}); const sel = $('#m-edok');
+      sel.insertAdjacentHTML('afterbegin', `<option value="${r.id}">${esc(f.name)}</option>`); sel.value = String(r.id); toast('Datei hochgeladen; beim Speichern wird sie dem Eintrag zugewiesen.'); } catch (e) { toast(e.message); $('#m-edok').value = ''; } }
   if (el.classList.contains('madd') && el.value) { const id = el.dataset.multi; multiSetzen(id, [...multiWert(id), el.value]); }
+  if (el.id === 'chatinp' && el.files[0]) { const f = el.files[0]; el.value = ''; toast('Export wird gelesen …');
+    try { const res = await holen('/api/chat/preview', {method: 'POST', body: f, headers: {'X-Korrespondenz': 'lokal'}}); const r = await res.json(); if (!res.ok) throw new Error(r.error || 'Export nicht lesbar.');
+      modal(`ChatGPT-Export · ${r.threads.length} Unterhaltungen`, `<p style="margin:0">Unterhaltungen auswählen (bis zu 100). Bereits importierte werden aktualisiert.</p>
+        <input class="inp" id="m-cfil" type="search" placeholder="Titel filtern">
+        <div class="stack" id="m-cliste" style="gap:4px;max-height:50vh;overflow:auto">${r.threads.map(t => `<label class="chk" data-t="${esc(t.title.toLowerCase())}"><input type="checkbox" class="m-cth" value="${esc(t.id)}">${esc(t.title)} <span class="muted" style="font-size:12px">${t.date ? dt(new Date(t.date * 1000).toISOString().slice(0, 10)) : ''}${t.known ? ' · bereits importiert' : ''}</span></label>`).join('')}</div>`, async () => {
+        const ids = [...document.querySelectorAll('.m-cth:checked')].map(x => x.value); if (!ids.length) { toast('Bitte mindestens eine Unterhaltung wählen.'); return false; }
+        closeModal(); try { const z = await api('chat/import', {token: r.token, threads: ids}); toast(`${ids.length} Unterhaltung(en) importiert: ${z.notes} neue Beiträge${z.missing ? `, ${z.missing} Anlagen fehlen` : ''}.`); await render(); } catch (e) { toast(e.message); }
+        return false; }, 'Importieren', 'wide');
+    } catch (e) { toast(e.message); } }
+  if (el.id === 'm-cfil') { const q = el.value.toLowerCase(); for (const l of document.querySelectorAll('#m-cliste [data-t]')) l.hidden = !l.dataset.t.includes(q); }
   if (el.id === 'restoreinp') { const f = el.files[0]; el.value = ''; if (f) wiederherstellenFrage(null, f); }
-  if (el.dataset.ib) { const d = draft[+el.dataset.id]; if (d) d[el.dataset.ib] = el.value; }
+  if (el.dataset.ib && el.value !== '__neu') { const d = draft[+el.dataset.id]; if (d) d[el.dataset.ib] = el.value; }
   if (el.dataset.fr) { const f = draft[+el.dataset.id]?.fristen[+el.dataset.i]; if (f) f[el.dataset.fr] = el.type === 'checkbox' ? el.checked : el.value; }
 });
 document.addEventListener('input', ev => {
   const el = ev.target;
+  if (el.id === 'm-cfil') { const q = el.value.toLowerCase(); for (const l of document.querySelectorAll('#m-cliste [data-t]')) l.hidden = !l.dataset.t.includes(q); }
+  if (el.dataset.ib === 'kontakt' && el.value === '__neu') { neuerKontakt(+el.dataset.id); return; }
   if (el.dataset.ib) { const d = draft[+el.dataset.id]; if (d) d[el.dataset.ib] = el.value; }
   if (el.dataset.fr) { const f = draft[+el.dataset.id]?.fristen[+el.dataset.i]; if (f) f[el.dataset.fr] = el.type === 'checkbox' ? el.checked : el.value; }
   if (el.id === 'q') search(el.value.trim());

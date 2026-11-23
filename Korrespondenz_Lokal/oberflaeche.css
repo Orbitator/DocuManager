@@ -423,3 +423,14 @@ button.heute:hover{background:var(--surface-2,rgba(127,127,127,.18))}
 .pvrot.full{height:100%;max-height:none}
 .pvrot .pvframe{height:100%;max-height:none;min-height:0}
 .pvimg{transition:transform .15s}
+.ftyp{display:inline-grid;place-items:center;min-width:34px;height:18px;padding:0 4px;border-radius:4px;font:700 9.5px/1 var(--f-ui,system-ui);letter-spacing:.04em;color:#fff;flex:none;vertical-align:middle}
+.ftyp-pdf{background:#d93a3a}.ftyp-bild{background:#2e9b5f}.ftyp-mail{background:#3b78d8}.ftyp-word{background:#2b579a}.ftyp-datei{background:#777}
+.docico .ftyp{min-width:30px}
+.docico{width:auto;height:auto;padding:6px 4px;background:transparent;border-color:transparent}
+.ent .row1 .ftyp{margin-right:2px}
+.filters .trenner{width:1px;align-self:stretch;background:var(--line);margin:0 6px}
+.seiten{height:100%;overflow:auto;display:grid;grid-template-columns:1fr;justify-items:center;align-content:start;gap:16px;padding:16px;background:#2a2d35}
+.seiten.zwei{grid-template-columns:1fr 1fr}
+.seiten.zwei canvas:nth-child(odd){justify-self:end}.seiten.zwei canvas:nth-child(even){justify-self:start}
+.seiten canvas{background:#fff;box-shadow:0 2px 12px rgba(0,0,0,.35)}
+#viewer .vbody > .seiten,#viewer .vbody > .pvrot,#viewer .vbody > .pvimgwrap{flex:1 1 auto;align-self:stretch;width:100%;min-height:0;height:auto;max-height:none}

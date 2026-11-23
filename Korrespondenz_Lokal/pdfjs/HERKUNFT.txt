@@ -1,0 +1,2 @@
+pdf.js 3.11.174 (Mozilla, Apache-2.0), legacy build aus dem npm-Paket pdfjs-dist.
+Wird lokal ausgeliefert, damit die Seitenansicht ohne Internet funktioniert.

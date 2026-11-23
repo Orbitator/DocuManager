@@ -70,6 +70,12 @@ Die bisherigen Schnittstellen (`/api/cases`, Dokumente, Scan, Chat) bleiben unve
 | POST `/api/dokumente/{id}/entfernen` | `vorgang_id`; löst die Verknüpfung oder legt das Dokument in den Papierkorb |
 | POST `/api/dokumente/{id}/aendern` | `titel`, `dateiname`, `datum`, `kontakt_id`, `bereiche` (Liste, leer = vom Vorgang), `kontakte` (weitere) – jeweils optional |
 | POST `/api/dokumente/{id}/drehen` | `grad` 90, −90 oder 180; Anzeige drehen, Original bleibt unverändert |
+| POST `/api/kontakte/{id}` | `name`, `kurzname`, `typ`, `notiz` |
+| POST `/api/bereiche/reihenfolge` | `namen`: alle Bereiche in neuer Reihenfolge |
+| GET/POST `/api/eintragsarten` | eigene Eintragsarten lesen / `name` anlegen; POST `/api/eintragsarten/entfernen` |
+| POST `/api/eintraege/{id}` | zusätzlich `art`, `typ`, `dokument_id`, `kontakt_id` |
+| GET `/api/documents/{id}/html` | Word-Dokument als lesbare HTML-Seite |
+| POST `/api/chat/preview`, `/api/chat/import` | ChatGPT-Export lesen (Körper: Datei) und ausgewählte Unterhaltungen übernehmen |
 | POST `/api/beenden` | Beendet die Anwendung |
 | POST `/api/sicherungen/{name}/pruefen` | Prüft Vollständigkeit, Prüfsummen und Datenbank, ohne etwas zu ändern |
 | POST `/api/mail/markierung` | `markierung` 0–6 (Rot, Orange, Gelb, Grün, Blau, Violett, Grau) |

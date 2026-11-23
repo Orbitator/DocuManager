@@ -2,6 +2,7 @@
 """Lokale Korrespondenzverwaltung. Startet ausschließlich auf diesem Mac."""
 import argparse
 import hashlib
+import io
 import json
 import logging
 import logging.handlers
@@ -17,6 +18,7 @@ import sys
 import tempfile
 import time
 import unicodedata
+import zipfile
 from contextlib import closing
 from datetime import date
 from email.utils import encode_rfc2231
@@ -34,10 +36,10 @@ from mail_import import MailImport, migrate_5, test_mail
 
 ROOT = Path(__file__).resolve().parent
 PORT = 8765
-APP_VERSION = "DocuManager 0.9 · Mehrere Bereiche und Kontakte, Drehen, Archiv nach Typ"
+APP_VERSION = "DocuManager 0.10 · Word und E-Mail, Seitenansicht, eigene Eintragsarten"
 MAX_UPLOAD = 25 * 1024 * 1024
 MIN_MACOS = "14.0"
-SCHEMA_VERSION = 10
+SCHEMA_VERSION = 11
 OCR_WAITING = "Wartet auf Texterkennung"
 # Scan-Ordner für Scanner-Software und „Digitale Bilder“: Dateien darin kommen automatisch in den Posteingang.
 # Bewusst nicht unter „Dokumente“: Diesen Ordner schützt macOS, ein über Launchpad gestartetes Programm bräuchte
@@ -55,6 +57,7 @@ TYPES = {
     ".png": "image/png",
     ".tif": "image/tiff",
     ".tiff": "image/tiff",
+    ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
 }
 HEADING = re.compile(r"bescheid|widerspruch|einspruch|mahnung|rechnung|kündigung|schaden|"
                      r"zahlungsaufforderung|stellungnahme|anforderung|rückfrage|mitteilung|"
@@ -109,13 +112,85 @@ def select_title(pages):
 def file_type(name, raw):
     suffix = Path(name).suffix.lower()
     if suffix not in TYPES:
-        raise ValueError("Erlaubt sind PDF, JPEG, PNG und TIFF.")
+        raise ValueError("Erlaubt sind PDF, JPEG, PNG, TIFF, Word (.docx) und E-Mail (.eml).")
+    if suffix == ".docx":
+        try:
+            with zipfile.ZipFile(io.BytesIO(raw)) as z:
+                if "word/document.xml" not in z.namelist():
+                    raise ValueError("Die Datei ist kein Word-Dokument (.docx).")
+        except zipfile.BadZipFile:
+            raise ValueError("Die Datei ist kein Word-Dokument (.docx).") from None
+        return suffix
     signatures = {".pdf": b"%PDF-", ".jpg": b"\xff\xd8\xff", ".jpeg": b"\xff\xd8\xff",
                   ".png": b"\x89PNG\r\n\x1a\n",
                   ".tif": (b"II*\x00", b"MM\x00*"), ".tiff": (b"II*\x00", b"MM\x00*")}
     if not raw.startswith(signatures[suffix]):
         raise ValueError("Der Dateiinhalt passt nicht zur Endung.")
     return suffix
+
+
+_W = "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}"
+
+
+def docx_absaetze(raw):
+    """Absätze eines Word-Dokuments als (Formatvorlage, Text), nur mit der Standardbibliothek."""
+    import xml.etree.ElementTree as ET
+    with zipfile.ZipFile(io.BytesIO(raw)) as z:
+        wurzel = ET.fromstring(z.read("word/document.xml"))
+    absaetze = []
+    for p in wurzel.iter(_W + "p"):
+        stil = p.find(f"{_W}pPr/{_W}pStyle")
+        teile = []
+        for el in p.iter():
+            if el.tag == _W + "t":
+                teile.append(el.text or "")
+            elif el.tag == _W + "tab":
+                teile.append("\t")
+            elif el.tag in (_W + "br", _W + "cr"):
+                teile.append("\n")
+        absaetze.append((stil.get(_W + "val") if stil is not None else "", "".join(teile)))
+    return absaetze
+
+
+def docx_text(raw):
+    return "\n".join(t for _, t in docx_absaetze(raw)).strip()
+
+
+def docx_html(raw, titel):
+    """Lesbare HTML-Ansicht eines Word-Dokuments (Ersatz, wenn macOS-textutil fehlt)."""
+    import html as h
+    zeilen = []
+    for stil, text in docx_absaetze(raw):
+        if not text.strip():
+            zeilen.append("<p>&nbsp;</p>")
+        elif re.match(r"(?i)(heading|überschrift|titel|title)", stil):
+            zeilen.append(f"<h2>{h.escape(text)}</h2>")
+        else:
+            zeilen.append("<p>" + h.escape(text).replace("\n", "<br>").replace("\t", "&emsp;") + "</p>")
+    return ("<!doctype html><meta charset='utf-8'><title>" + h.escape(titel) + "</title><style>body{font:15px/1.5 Georgia,serif;"
+            "max-width:21cm;margin:24px auto;padding:2cm;background:#fff;color:#111;box-shadow:0 0 0 1px #ddd}"
+            "p{margin:0 0 .6em}h2{font-size:1.2em}</style>" + "".join(zeilen))
+
+
+def datei_erstellt(raw, suffix):
+    """Erstellungsdatum aus den Daten der Datei: PDF-Metadaten, EXIF bei Fotos und Scans, Word-Eigenschaften."""
+    try:
+        if suffix == ".pdf":
+            m = re.search(rb"/CreationDate\s*\(D:(\d{4})(\d{2})(\d{2})", raw) or re.search(
+                rb"<xmp:CreateDate>(\d{4})-(\d{2})-(\d{2})", raw)
+        elif suffix == ".docx":
+            with zipfile.ZipFile(io.BytesIO(raw)) as z:
+                kern = z.read("docProps/core.xml") if "docProps/core.xml" in z.namelist() else b""
+            m = re.search(rb"<dcterms:created[^>]*>(\d{4})-(\d{2})-(\d{2})", kern)
+        elif suffix in (".jpg", ".jpeg", ".png", ".tif", ".tiff"):
+            m = re.search(rb"(\d{4}):(\d{2}):(\d{2}) \d{2}:\d{2}:\d{2}", raw[:256 * 1024])
+        else:
+            m = None
+        if m:
+            return date(int(m[1]), int(m[2]), int(m[3])).isoformat()
+    except (ValueError, zipfile.BadZipFile, KeyError):
+        pass
+    return None
 
 
 def case_due_date(value):
@@ -247,8 +322,19 @@ def migrate_10(db):
     db.execute("INSERT OR IGNORE INTO vorgang_bereich(vorgang_id,bereich) SELECT id,bereich FROM vorgang WHERE system IS NULL")
 
 
+def migrate_11(db):
+    """Erstellungsdatum der Datei (PDF-Metadaten, EXIF, Word) als Vorschlag für das Dokumentdatum."""
+    if "datei_datum" not in columns_of(db, "dokument"):
+        db.execute("ALTER TABLE dokument ADD COLUMN datei_datum TEXT")
+    if "typ" not in columns_of(db, "eintrag"):  # eigene Eintragsart (Name); die Grundart bleibt z. B. „notiz“
+        db.execute("ALTER TABLE eintrag ADD COLUMN typ TEXT")
+    if "reihenfolge" not in columns_of(db, "bereich"):  # Bereiche in den Einstellungen sortierbar
+        db.execute("ALTER TABLE bereich ADD COLUMN reihenfolge INTEGER")
+        db.execute("UPDATE bereich SET reihenfolge=id")
+
+
 MIGRATIONS = ((1, migrate_1), (2, migrate_2), (3, migrate_3), (4, migrate_4), (5, migrate_5), (6, migrate_6),
-              (7, migrate_7), (8, migrate_8), (9, migrate_9), (10, migrate_10))
+              (7, migrate_7), (8, migrate_8), (9, migrate_9), (10, migrate_10), (11, migrate_11))
 
 
 class Store:
@@ -320,13 +406,18 @@ class Store:
                     weitere.setdefault(r[0], []).append(r[1])
             except sqlite3.OperationalError:
                 weitere = {}
+            typen = {}
+            for r in db.execute("""SELECT dv.vorgang_id, d.mime, count(*) FROM dokument_vorgang dv JOIN dokument d
+                ON d.id=dv.dokument_id WHERE d.geloescht_am IS NULL GROUP BY dv.vorgang_id, d.mime"""):
+                typen.setdefault(r[0], {})[r[1]] = r[2]
             for f in faelle:  # Hauptbereich zuerst, weitere danach
                 f["bereiche"] = [f["bereich"]] + sorted(b for b in weitere.get(f["id"], []) if b != f["bereich"])
+                f["typen"] = typen.get(f["id"], {})
             return faelle
 
     def groups(self):
         with closing(self.connect()) as db:
-            return [row["name"] for row in db.execute("SELECT name FROM bereich ORDER BY id")]
+            return [row["name"] for row in db.execute("SELECT name FROM bereich ORDER BY coalesce(reihenfolge, id), id")]
 
     def create_case(self, title, group, description, status=DEFAULT_STATUS, due=None):
         title = title.strip()
@@ -394,6 +485,20 @@ class Store:
         ziel = self.data / "Vorschau" / f"{row['sha256']}-{drehung}.jpg"
         if ziel.is_file():
             return ziel.read_bytes()
+        if row["mime"] == TYPES[".docx"]:  # Word: Vorschaubild über Quick Look (nur macOS)
+            if not Path("/usr/bin/qlmanage").exists():
+                return None
+            ziel.parent.mkdir(exist_ok=True)
+            with tempfile.TemporaryDirectory() as tmp:
+                try:
+                    subprocess.run(["/usr/bin/qlmanage", "-t", "-s", "520", "-o", tmp, str(original)], capture_output=True, timeout=60)
+                    bild = next(Path(tmp).glob("*.png"), None)
+                    if bild:
+                        ziel.write_bytes(bild.read_bytes())
+                        return ziel.read_bytes()
+                except (subprocess.SubprocessError, OSError):
+                    pass
+            return None
         sips = Path("/usr/bin/sips")
         if not sips.exists():
             return original.read_bytes() if drehung == 0 and row["mime"] in ("image/jpeg", "image/png") else None
@@ -488,6 +593,16 @@ class Store:
         with closing(self.connect()) as db, db:
             db.execute("UPDATE dokument SET ocr_status=? WHERE id=?", (OCR_RUNNING, doc_id))
         started = time.monotonic()
+        if Path(row["dateipfad"]).suffix == ".docx":  # Word: Text direkt aus der Datei, keine Bilderkennung
+            try:
+                text = docx_text((self.uploads / row["dateipfad"]).read_bytes())
+                seiten = [{"number": 1, "method": "docx", "text": text, "lines": [{"text": z} for z in text.splitlines() if z.strip()]}]
+                self._set_ocr_result(doc_id, seiten if text else [], "Text übernommen" if text else "Kein Text erkannt", None)
+            except (OSError, ValueError, zipfile.BadZipFile) as error:
+                self._set_ocr_result(doc_id, [], "Texterkennung fehlgeschlagen", str(error))
+            if self.nach_texterkennung:
+                self.nach_texterkennung(doc_id)
+            return
         self.ansicht.mkdir(exist_ok=True)
         stage = self.ansicht / f"{doc_id}.tmp"
         stage.unlink(missing_ok=True)
@@ -541,8 +656,9 @@ class Store:
         """Interner Vorgang, der noch nicht zugeordnete Dokumente des Posteingangs trägt."""
         return db.execute("SELECT id FROM vorgang WHERE system='posteingang'").fetchone()[0]
 
-    def import_document(self, case_id, name, raw):
-        """Legt ein Original ab. Ohne Vorgang (case_id=None) landet es im Posteingang."""
+    def import_document(self, case_id, name, raw, geaendert=None):
+        """Legt ein Original ab. Ohne Vorgang (case_id=None) landet es im Posteingang.
+        `geaendert` (Änderungsdatum der Datei laut Browser) dient als Ersatz, wenn die Datei kein Erstellungsdatum trägt."""
         name = unicodedata.normalize("NFC", name)
         if not name or len(name) > 240 or any(c in name for c in "/\\") or any(ord(c) < 32 for c in name):
             raise ValueError("Ungültiger Dateiname.")
@@ -585,10 +701,11 @@ class Store:
         # Das Original ist gespeichert. Titel und Text folgen aus der Warteschlange,
         # damit der Upload sofort antwortet und andere Anfragen nicht warten müssen.
         with closing(self.connect()) as db, db:
+            erstellt = datei_erstellt(raw, suffix) or (geaendert if geaendert and re.fullmatch(r"\d{4}-\d{2}-\d{2}", geaendert) else None)
             doc_id = db.execute("""INSERT INTO dokument(vorgang_id,dateiname,titel,titel_seite,titel_quelle,mime,
-                dateipfad,sha256,ocr_status) VALUES(?,?,?,?,?,?,?,?,?)""",
+                dateipfad,sha256,ocr_status,datei_datum) VALUES(?,?,?,?,?,?,?,?,?,?)""",
                 (case_id, name, Path(name).stem[:160], None, "Dateiname", TYPES[suffix], path.name, digest,
-                 OCR_WAITING)).lastrowid
+                 OCR_WAITING, erstellt)).lastrowid
             if not inbox:
                 db.execute("INSERT INTO dokument_vorgang(dokument_id,vorgang_id) VALUES(?,?)", (doc_id, case_id))
         log.info("Dokument %s %s abgelegt (%s Bytes).", doc_id,
@@ -740,6 +857,24 @@ class Handler(BaseHTTPRequestHandler):
     def send_json(self, value, status=200):
         self.send_bytes(status, "application/json; charset=utf-8", json.dumps(value, ensure_ascii=False).encode())
 
+    def ablegen(self, vorgang):
+        """Nimmt eine hochgeladene Datei an. E-Mails (.eml) laufen über den Mail-Import (mit Anlagen), alle anderen
+        Dateien über die normale Ablage. Mit `vorgang` wird eine E-Mail anschließend dem Vorgang zugeordnet."""
+        name = unquote(self.headers.get("X-Dateiname", ""), errors="strict")
+        raw = self.read_body(MAX_UPLOAD)
+        geaendert = self.headers.get("X-Datei-Datum") or None
+        if Path(name).suffix.lower() != ".eml":
+            return self.store.import_document(vorgang, name, raw, geaendert)
+        neu = self.mail.uebernehmen(raw, None, "Datei")
+        with closing(self.store.connect()) as db:
+            row = db.execute("SELECT id FROM dokument WHERE sha256=? AND mime='message/rfc822' ORDER BY id",
+                             (hashlib.sha256(raw).hexdigest(),)).fetchone()
+        if not row:
+            raise ValueError("Die E-Mail konnte nicht gelesen werden.")
+        if vorgang and neu:
+            self.akte.zuordnen(row[0], {"vorgang_id": vorgang})
+        return row[0], neu
+
     def read_body(self, limit):
         size = int(self.headers.get("Content-Length", "0"))
         if not 0 < size <= limit:
@@ -765,7 +900,9 @@ class Handler(BaseHTTPRequestHandler):
                   "/oberflaeche.css": ("oberflaeche.css", "text/css; charset=utf-8"),
                   "/alt": ("Korrespondenz_Rechtsberatung.html", "text/html; charset=utf-8"),
                   "/lokale_vorgaenge.js": ("lokale_vorgaenge.js", "text/javascript; charset=utf-8"),
-                  "/chat_notizen.js": ("chat_notizen.js", "text/javascript; charset=utf-8")}
+                  "/chat_notizen.js": ("chat_notizen.js", "text/javascript; charset=utf-8"),
+                  "/pdfjs/pdf.min.js": ("pdfjs/pdf.min.js", "text/javascript; charset=utf-8"),
+                  "/pdfjs/pdf.worker.min.js": ("pdfjs/pdf.worker.min.js", "text/javascript; charset=utf-8")}
         if path in static:
             name, mime = static[path]
             self.send_bytes(200, mime, (ROOT / name).read_bytes())
@@ -822,6 +959,19 @@ class Handler(BaseHTTPRequestHandler):
                                 "attachment; filename*=" + encode_rfc2231(name, "utf-8"))
         elif match := re.fullmatch(r"/api/cases/(\d+)/documents", path):
             self.send_json({"documents": self.store.case_documents(int(match[1]))})
+        elif match := re.fullmatch(r"/api/documents/(\d+)/html", path):  # Word-Dokument lesbar anzeigen
+            row = self.store.document(int(match[1]))
+            if not row or row["mime"] != TYPES[".docx"]:
+                self.send_json({"error": "Kein Word-Dokument."}, 404)
+            else:
+                datei = self.store.uploads / row["dateipfad"]
+                inhalt = None
+                if Path("/usr/bin/textutil").exists():
+                    lauf = subprocess.run(["/usr/bin/textutil", "-convert", "html", "-stdout", str(datei)], capture_output=True, timeout=60)
+                    inhalt = lauf.stdout if lauf.returncode == 0 and lauf.stdout else None
+                if inhalt is None:
+                    inhalt = docx_html(datei.read_bytes(), row["titel"]).encode("utf-8")
+                self.send_bytes(200, "text/html; charset=utf-8", inhalt)
         elif match := re.fullmatch(r"/api/documents/(\d+)/vorschaubild", path):
             bild = self.store.vorschaubild(int(match[1]))
             if bild is None:
@@ -890,8 +1040,7 @@ class Handler(BaseHTTPRequestHandler):
                 self.store.change_case_status(int(match[1]), json.loads(self.read_body(4000))["status"])
                 self.send_json({"ok": True})
             elif path == "/api/posteingang/dokumente":
-                name = unquote(self.headers.get("X-Dateiname", ""), errors="strict")
-                doc_id, created = self.store.import_document(None, name, self.read_body(MAX_UPLOAD))
+                doc_id, created = self.ablegen(None)
                 self.send_json({"id": doc_id, "created": created}, 201 if created else 200)
             elif path == "/api/sicherungen":
                 ziel = sicherung_erstellen(self.store)
@@ -926,8 +1075,7 @@ class Handler(BaseHTTPRequestHandler):
                 log.info("Sicherung %s wiederhergestellt.", match[1])
                 self.send_json(pruefung)
             elif path == "/api/archiv/dokumente":  # direkt ins Archiv, Texterkennung läuft wie im Posteingang
-                name = unquote(self.headers.get("X-Dateiname", ""), errors="strict")
-                doc_id, created = self.store.import_document(None, name, self.read_body(MAX_UPLOAD))
+                doc_id, created = self.ablegen(None)
                 row = self.store.document(doc_id)
                 if created or (row and self.akte.posteingang_id_von(doc_id)):
                     self.akte.zuordnen(doc_id, {"ablage": True})
@@ -957,8 +1105,7 @@ class Handler(BaseHTTPRequestHandler):
             elif match := re.fullmatch(r"/api/scans/([0-9a-f]{32})/poll", path):
                 self.send_json(self.scanner.finish(match[1]))
             elif match := re.fullmatch(r"/api/cases/(\d+)/documents", path):
-                name = unquote(self.headers.get("X-Dateiname", ""), errors="strict")
-                doc_id, created = self.store.import_document(int(match[1]), name, self.read_body(MAX_UPLOAD))
+                doc_id, created = self.ablegen(int(match[1]))
                 self.send_json({"id": doc_id, "created": created}, 201 if created else 200)
             elif match := re.fullmatch(r"/api/documents/(\d+)/title", path):
                 self.store.rename_document(int(match[1]), json.loads(self.read_body(4000))["title"])
@@ -1099,6 +1246,41 @@ def build_scanner():
                          "-framework", "Cocoa", "-framework", "Quartz", "-framework", "ImageCaptureCore"], 120)
 
 
+def test_dateien(store):
+    """Word-Dokumente (Text, Ansicht, Datum), Erstellungsdatum aus PDF und EXIF, Ersatz für das Dokumentdatum."""
+    store = type(store)(store.data / "Dateitest", None)
+    akte = Akte(store, today=lambda: "2026-11-23")
+    puffer = io.BytesIO()
+    with zipfile.ZipFile(puffer, "w") as z:
+        z.writestr("word/document.xml", '<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">'
+                   '<w:body><w:p><w:pPr><w:pStyle w:val="Heading1"/></w:pPr><w:r><w:t>Kündigung Mietvertrag</w:t></w:r></w:p>'
+                   '<w:p><w:r><w:t>Bitte bestätigen Sie den Eingang bis zum 15.12.2026.</w:t></w:r></w:p></w:body></w:document>')
+        z.writestr("docProps/core.xml", '<cp:coreProperties xmlns:cp="x" xmlns:dcterms="y"><dcterms:created xsi:type="z">'
+                   '2026-10-02T08:00:00Z</dcterms:created></cp:coreProperties>')
+    docx = puffer.getvalue()
+    assert datei_erstellt(docx, ".docx") == "2026-10-02"
+    assert datei_erstellt(b"%PDF-1.4\n<< /CreationDate (D:20250314101500+01'00') >>", ".pdf") == "2025-03-14"
+    assert datei_erstellt(b"\xff\xd8\xff\xe1Exif..2024:07:09 12:00:00", ".jpg") == "2024-07-09"
+    assert datei_erstellt(b"%PDF-1.4\nohne", ".pdf") is None
+    doc, _ = store.import_document(None, "Kuendigung.docx", docx)
+    store.process_pending()
+    row = store.document(doc)
+    assert row["datei_datum"] == "2026-10-02" and row["ocr_status"] == "Text übernommen", dict(row)
+    assert "15.12.2026" in store.pages(doc)[0]["text"] and row["titel"] == "Kündigung Mietvertrag", row["titel"]
+    p = [x for x in akte.posteingang() if x["id"] == doc][0]
+    assert p["vorschlag"]["datum"] == "2026-10-02" and p["vorschlag"]["datum_quelle"] == "Erstellungsdatum der Datei"
+    assert p["vorschlag"]["fristen"][0]["faellig_am"] == "2026-12-15"
+    assert "<h2>Kündigung Mietvertrag</h2>" in docx_html(docx, "x")
+    try:
+        file_type("falsch.docx", b"PK\x03\x04kaputt")
+        raise AssertionError("Kaputte Word-Datei muss abgelehnt werden")
+    except ValueError:
+        pass
+    # Datum aus dem Browser als Ersatz, wenn die Datei keins trägt
+    d2, _ = store.import_document(None, "Scan.pdf", b"%PDF-1.4\nohne Datum", "2026-09-30")
+    assert store.document(d2)["datei_datum"] == "2026-09-30"
+
+
 def self_test(ocr=None, image=None):
     line = {"text": "Betreff: Stellungnahme zum Frontschaden"}
     assert select_title([{"number": 1, "lines": [{"text": "Aktenzeichen 4711"}, line]}]) == (
@@ -1185,6 +1367,7 @@ def self_test(ocr=None, image=None):
         test_absender(store)
         test_archiv(store)
         test_fristen_ablage(store)
+        test_dateien(store)
         test_mail(store)
         test_chatnotiz(store)
         test_export(store)

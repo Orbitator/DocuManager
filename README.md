@@ -55,6 +55,10 @@ python3 -B Korrespondenz_Lokal/app.py --self-test
 Der Selbsttest arbeitet mit synthetischen Daten in einem temporären Ordner und fasst echte Daten nicht an.
 Die Prüfung auf dem Mac mit echter Texterkennung beschreibt [docs/TESTANLEITUNG_MAC.md](docs/TESTANLEITUNG_MAC.md).
 
+## Fremdbestandteile
+
+`Korrespondenz_Lokal/pdfjs/`: pdf.js 3.11.174 von Mozilla (Apache-2.0, Lizenztext liegt bei), lokal ausgeliefert für die Seitenansicht.
+
 ## Daten
 
 Alle Daten liegen in `Daten/` neben `app.py` – nach der Installation als Programm also in `~/DocuManager/Daten/`, sonst in `Korrespondenz_Lokal/Daten/`. Sie sind von Git ausgeschlossen.

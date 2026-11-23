@@ -399,7 +399,15 @@ class Akte:
         with closing(self.connect()) as db:
             return [dict(r) for r in db.execute("""SELECT b.name, count(v.id) AS vorgaenge FROM bereich b
                 LEFT JOIN vorgang v ON v.bereich=b.name COLLATE NOCASE AND v.geloescht_am IS NULL AND v.system IS NULL
-                GROUP BY b.id ORDER BY b.id""")]
+                GROUP BY b.id ORDER BY coalesce(b.reihenfolge, b.id), b.id""")]
+
+    def bereiche_sortieren(self, namen):
+        """Neue Reihenfolge der Bereiche (vollständige Liste der Namen)."""
+        if not isinstance(namen, list) or sorted(namen) != sorted(self.bereich_namen()):
+            raise ValueError("Bitte alle Bereiche in der neuen Reihenfolge angeben.")
+        with closing(self.connect()) as db, db:
+            db.executemany("UPDATE bereich SET reihenfolge=? WHERE name=?", ((i, n) for i, n in enumerate(namen, 1)))
+        return {"ok": True}
 
     def bereich_namen(self):
         return [b["name"] for b in self.bereiche()]
@@ -408,7 +416,7 @@ class Akte:
         name = _text(name, "Bereich", 80, True)
         with closing(self.connect()) as db, db:
             try:
-                db.execute("INSERT INTO bereich(name) VALUES(?)", (name,))
+                db.execute("INSERT INTO bereich(name,reihenfolge) VALUES(?,(SELECT coalesce(max(reihenfolge),0)+1 FROM bereich))", (name,))
             except sqlite3.IntegrityError:
                 raise ValueError("Diesen Bereich gibt es schon.") from None
         return name
@@ -643,6 +651,22 @@ class Akte:
             return [dict(r) for r in db.execute("SELECT id,name FROM kontakt WHERE geloescht_am IS NULL")
                     if name in r["name"].lower() or any(w in r["name"].lower() for w in woerter)]
 
+    def kontakt_aendern(self, kontakt_id, data):
+        """Name, Kurzname, Art und Notiz eines Kontakts ändern."""
+        felder = {}
+        if "name" in data:
+            felder["name"] = _text(data.get("name"), "Name", 160, True)
+        for feld, label, laenge in (("kurzname", "Kurzname", 80), ("typ", "Art", 60), ("notiz", "Notiz", 2000)):
+            if feld in data:
+                felder[feld] = _text(data.get(feld), label, laenge)
+        if not felder:
+            raise ValueError("Keine Änderung angegeben.")
+        with closing(self.connect()) as db, db:
+            if not db.execute(f"UPDATE kontakt SET {','.join(k + '=?' for k in felder)} WHERE id=? AND geloescht_am IS NULL",
+                              (*felder.values(), kontakt_id)).rowcount:
+                raise ValueError("Kontakt nicht gefunden.")
+        return {"ok": True}
+
     def kontakt_anlegen(self, data):
         name = _text(data.get("name"), "Name", 160, True)
         with closing(self.connect()) as db, db:
@@ -712,8 +736,42 @@ class Akte:
                 raise ValueError("Referenz nicht gefunden.")
 
     # --- Chronik ---------------------------------------------------------------------------
+    def eintragsarten(self):
+        """Eigene Eintragsarten (z. B. „Besprechung“, „Ortstermin“). Sie werden wie Notizen geführt."""
+        with closing(self.connect()) as db:
+            row = db.execute("SELECT wert FROM einstellung WHERE schluessel='eintrag_arten'").fetchone()
+        return json.loads(row[0]) if row else []
+
+    def eintragsart_anlegen(self, name):
+        name = _text(name, "Art", 40, True)
+        eingebaut = {"eingang", "versendet", "ausgang", "entwurf", "versandnachweis", "telefonat", "notiz", "entscheidung",
+                     "chat-notiz", "chat", "original fehlt"}
+        arten = self.eintragsarten()
+        if name.lower() in eingebaut or name.lower() in (a.lower() for a in arten):
+            raise ValueError("Diese Art gibt es schon.")
+        with closing(self.connect()) as db, db:
+            db.execute("INSERT OR REPLACE INTO einstellung(schluessel,wert) VALUES('eintrag_arten',?)",
+                       (json.dumps(arten + [name], ensure_ascii=False),))
+        return name
+
+    def eintragsart_entfernen(self, name):
+        """Entfernt die Art aus der Auswahl; bestehende Einträge behalten ihre Bezeichnung."""
+        arten = [a for a in self.eintragsarten() if a != name]
+        with closing(self.connect()) as db, db:
+            db.execute("INSERT OR REPLACE INTO einstellung(schluessel,wert) VALUES('eintrag_arten',?)",
+                       (json.dumps(arten, ensure_ascii=False),))
+        return {"ok": True}
+
+    def _typ(self, wert):
+        if not wert:
+            return None
+        if wert not in self.eintragsarten():
+            raise ValueError("Unbekannte Eintragsart.")
+        return wert
+
     def eintrag_anlegen(self, vorgang_id, data):
-        art = _choice(data.get("art"), EINTRAG_ARTEN, "Art")
+        typ = self._typ(data.get("typ"))
+        art = _choice(data.get("art") or ("notiz" if typ else None), EINTRAG_ARTEN, "Art")
         titel = _text(data.get("titel"), "Titel", 200, True)
         datum = _date(data.get("datum"), "Ereignisdatum", False) or self.today()
         richtung = data.get("richtung")
@@ -727,11 +785,11 @@ class Akte:
                                       (dok, vorgang_id)).fetchone():
                 raise ValueError("Das Dokument ist diesem Vorgang nicht zugeordnet.")
             eid = db.execute("""INSERT INTO eintrag(vorgang_id,art,titel,ereignis_datum,richtung,kontakt_id,
-                dokument_id,bezug_id,text,quelle,geprueft,brief) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)""",
+                dokument_id,bezug_id,text,quelle,geprueft,brief,typ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                 (vorgang_id, art, titel, datum, richtung, _id(data.get("kontakt_id"), "Kontakt"), dok,
                  _id(data.get("bezug_id"), "Bezug"), _text(data.get("text"), "Text", 20000),
                  _text(data.get("quelle"), "Quelle", 300), 1 if data.get("geprueft") else 0,
-                 _brief(data.get("brief")))).lastrowid
+                 _brief(data.get("brief")), typ)).lastrowid
             db.executemany("INSERT INTO eintrag_teil VALUES(?,?)", ((eid, t) for t in teile))
             return eid
 
@@ -753,6 +811,21 @@ class Akte:
                 felder["geprueft"] = 1 if data["geprueft"] else 0
             if "brief" in data:
                 felder["brief"] = _brief(data["brief"])
+            if "typ" in data:
+                felder["typ"] = self._typ(data["typ"])
+            if "art" in data:  # nur zwischen Arten ohne eigene Abläufe (Brief, Versand, Chat bleiben, wie sie sind)
+                frei = ("eingang", "ausgang", "telefonat", "notiz", "entscheidung", "fehlt")
+                if e["art"] not in frei:
+                    raise ValueError("Die Art dieses Eintrags lässt sich nicht ändern.")
+                felder["art"] = _choice(data["art"], frei, "Art")
+            if "dokument_id" in data:  # Dokument zuweisen oder lösen; es muss zum Vorgang gehören
+                dok = _id(data["dokument_id"], "Dokument")
+                if dok and not db.execute("SELECT 1 FROM dokument_vorgang WHERE dokument_id=? AND vorgang_id=?",
+                                          (dok, e["vorgang_id"])).fetchone():
+                    raise ValueError("Das Dokument gehört nicht zu diesem Vorgang.")
+                felder["dokument_id"] = dok
+                if dok and e["art"] == "fehlt" and "art" not in data:  # fehlendes Original ist jetzt da
+                    felder["art"] = "eingang"
             if felder:
                 db.execute(f"UPDATE eintrag SET {','.join(k + '=?' for k in felder)} WHERE id=?",
                            (*felder.values(), eintrag_id))
@@ -944,7 +1017,7 @@ class Akte:
         """Noch nicht zugeordnete Dokumente mit Vorschlägen für Datum, Absender, Referenz und Vorgang."""
         with closing(self.connect()) as db:
             rows = [dict(r) for r in db.execute("""SELECT d.id,d.titel,d.titel_quelle,d.titel_seite,d.dateiname,d.mime,
-                d.dateipfad,d.ocr_status,d.ocr_fehler,d.angelegt_am,d.dokument_datum FROM dokument d
+                d.dateipfad,d.ocr_status,d.ocr_fehler,d.angelegt_am,d.dokument_datum,d.datei_datum FROM dokument d
                 JOIN vorgang v ON v.id=d.vorgang_id AND v.system='posteingang'
                 WHERE d.geloescht_am IS NULL ORDER BY d.id DESC""")]
             for r in rows:
@@ -954,6 +1027,8 @@ class Akte:
                     "SELECT nummer,methode,text FROM dokumentseite WHERE dokument_id=? ORDER BY nummer", (r["id"],))]
                 r["seiten"] = seiten
                 r["vorschlag"] = self._vorschlag(db, "\n".join(s["text"] for s in seiten))
+                if not r["vorschlag"]["datum"] and r["datei_datum"]:  # kein Datum im Text: Erstellungsdatum der Datei
+                    r["vorschlag"]["datum"], r["vorschlag"]["datum_quelle"] = r["datei_datum"], "Erstellungsdatum der Datei"
                 r["vorschlag"]["fristen"] = fristen_erkennen(seiten, r["vorschlag"]["datum"], self.today())
             return rows
 
@@ -1117,7 +1192,7 @@ class Akte:
     def ablage_nachtragen(self, dokument_id):
         """Nach der Texterkennung: Bei direkt archivierten Dokumenten Datum, Titel und Absender aus dem Text übernehmen."""
         with closing(self.connect()) as db, db:
-            e = db.execute("""SELECT e.id, e.kontakt_id, d.dokument_datum, d.titel FROM eintrag e
+            e = db.execute("""SELECT e.id, e.kontakt_id, d.dokument_datum, d.datei_datum, d.titel FROM eintrag e
                 JOIN vorgang v ON v.id=e.vorgang_id AND v.system='ablage' JOIN dokument d ON d.id=e.dokument_id
                 WHERE e.dokument_id=? AND e.geloescht_am IS NULL""", (dokument_id,)).fetchone()
             if not e:
@@ -1127,6 +1202,8 @@ class Akte:
             if not text.strip():
                 return
             v = self._vorschlag(db, text)
+            if not v["datum"]:
+                v["datum"] = e["datei_datum"]
             db.execute("UPDATE eintrag SET titel=? WHERE id=?", (e["titel"], e["id"]))
             if v["datum"] and not e["dokument_datum"]:
                 db.execute("UPDATE dokument SET dokument_datum=? WHERE id=?", (v["datum"], dokument_id))
@@ -1270,6 +1347,8 @@ class Akte:
                        (SELECT count(*) FROM dokumentseite s WHERE s.dokument_id=d.id) AS seiten,
                        (SELECT e.art FROM eintrag e WHERE e.dokument_id=d.id AND e.vorgang_id=dv.vorgang_id
                           AND e.geloescht_am IS NULL ORDER BY e.id LIMIT 1) AS art,
+                       (SELECT e.typ FROM eintrag e WHERE e.dokument_id=d.id AND e.vorgang_id=dv.vorgang_id
+                          AND e.geloescht_am IS NULL ORDER BY e.id LIMIT 1) AS typ,
                        (SELECT k.name FROM eintrag e JOIN kontakt k ON k.id=e.kontakt_id WHERE e.dokument_id=d.id
                           AND e.geloescht_am IS NULL ORDER BY e.id LIMIT 1) AS absender,
                        (SELECT e.kontakt_id FROM eintrag e WHERE e.dokument_id=d.id AND e.kontakt_id IS NOT NULL
@@ -1403,6 +1482,7 @@ def _route_table():
         ("GET", r"/api/akte/(\d+)", lambda a, m, d: a.akte(i(m[1]))),
         ("GET", r"/api/akte/(\d+)/offen", lambda a, m, d: a.offene_punkte(i(m[1]), i(d["teil"]) if str(d.get("teil", "")).isdigit() else None)),
         ("GET", r"/api/bereiche", lambda a, m, d: {"bereiche": a.bereiche()}),
+        ("GET", r"/api/eintragsarten", lambda a, m, d: {"arten": a.eintragsarten()}),
         ("GET", r"/api/kontakte", lambda a, m, d: {"kontakte": a.kontakte()}),
         ("GET", r"/api/kontakte/dubletten", lambda a, m, d: {"dubletten": a.moegliche_dubletten(d.get("name"))}),
         ("GET", r"/api/papierkorb", lambda a, m, d: {"eintraege": a.papierkorb()}),
@@ -1437,8 +1517,12 @@ def _route_table():
         ("POST", r"/api/bereiche", lambda a, m, d: {"name": a.bereich_anlegen(d.get("name"))}),
         ("POST", r"/api/bereiche/umbenennen", lambda a, m, d: a.bereich_umbenennen(d.get("alt"), d.get("neu"))),
         ("POST", r"/api/bereiche/entfernen", lambda a, m, d: a.bereich_entfernen(d.get("name"))),
+        ("POST", r"/api/bereiche/reihenfolge", lambda a, m, d: a.bereiche_sortieren(d.get("namen"))),
+        ("POST", r"/api/eintragsarten", lambda a, m, d: {"name": a.eintragsart_anlegen(d.get("name"))}),
+        ("POST", r"/api/eintragsarten/entfernen", lambda a, m, d: a.eintragsart_entfernen(d.get("name"))),
         ("POST", r"/api/kontakte", lambda a, m, d: {"id": a.kontakt_anlegen(d)}),
         ("POST", r"/api/kontakte/(\d+)/abteilungen", lambda a, m, d: {"id": a.abteilung_anlegen(i(m[1]), d)}),
+        ("POST", r"/api/kontakte/(\d+)", lambda a, m, d: a.kontakt_aendern(i(m[1]), d)),
         ("POST", r"/api/abteilungen/(\d+)/anschrift", lambda a, m, d: {"id": a.anschrift_aendern(i(m[1]), d.get("zeilen"), d.get("gueltig_von"))}),
         ("POST", r"/api/documents/(\d+)/verknuepfen", lambda a, m, d: a.dokument_verknuepfen(i(m[1]), d.get("vorgang_id"))),
         ("POST", r"/api/(vorgang|dokument|eintrag|frist|kontakt)/(\d+)/loeschen", lambda a, m, d: a.loeschen(m[1], i(m[2]))),
@@ -1830,6 +1914,36 @@ def test_fristen_ablage(store):  # noqa: C901
     z = [x for x in akte.archiv() if x["id"] == d1][0]
     assert (z["titel"], z["dateiname"], z["datum"], z["absender"], z["kontakt_id"]) == (
         "Info Stadtwerke", "Stadtwerke-Info.pdf", "2026-10-01", "Finanzamt Rostock", k), z
+    # Eintrag bearbeiten: Dokument zuweisen, fehlendes Original wird zum Eingang
+    dz, _ = store.import_document(b, "Nachgereicht.pdf", b"%PDF-1.4\nNachgereicht")
+    ef = akte.eintrag_anlegen(b, {"art": "fehlt", "titel": "Bescheid vom 01.10.2026", "datum": "2026-10-01"})
+    akte.eintrag_aendern(ef, {"dokument_id": dz})
+    e_f = [e for e in akte.akte(b)["eintraege"] if e["id"] == ef][0]
+    assert (e_f["art"], e_f["dokument_id"]) == ("eingang", dz)
+    try:
+        akte.eintrag_aendern(ef, {"dokument_id": d1})  # gehört nicht zu Vorgang b
+        raise AssertionError("Fremdes Dokument darf nicht zugewiesen werden")
+    except ValueError:
+        pass
+    # Eigene Eintragsart
+    assert akte.eintragsart_anlegen("Ortstermin") == "Ortstermin"
+    try:
+        akte.eintragsart_anlegen("ortstermin")
+        raise AssertionError("Doppelte Art muss abgelehnt werden")
+    except ValueError:
+        pass
+    eo = akte.eintrag_anlegen(b, {"typ": "Ortstermin", "titel": "Besichtigung", "datum": "2026-11-20"})
+    e_ort = [e for e in akte.akte(b)["eintraege"] if e["id"] == eo][0]
+    assert (e_ort["art"], e_ort["typ"]) == ("notiz", "Ortstermin")
+    akte.eintragsart_entfernen("Ortstermin")
+    assert akte.eintragsarten() == [] and [e for e in akte.akte(b)["eintraege"] if e["id"] == eo][0]["typ"] == "Ortstermin"
+    # Kontakt umbenennen; Bereiche sortieren
+    akte.kontakt_aendern(k, {"name": "Finanzamt Rostock-Land", "kurzname": "FA Rostock"})
+    assert [x for x in akte.kontakte() if x["id"] == k][0]["name"] == "Finanzamt Rostock-Land"
+    alt = store.groups()
+    akte.bereiche_sortieren(list(reversed(alt)))
+    assert store.groups() == list(reversed(alt)) and akte.bereich_namen() == list(reversed(alt))
+    akte.bereiche_sortieren(alt)
     # Mehrere Bereiche und weitere Kontakte am Dokument; Drehung von Hand
     k2 = akte.kontakt_anlegen({"name": "Steuerbüro Nord"})
     namen = store.groups()
