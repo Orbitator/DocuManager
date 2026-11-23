@@ -30,7 +30,13 @@ Der Fahrplan steht in [docs/ETAPPEN.md](docs/ETAPPEN.md). Die Übergabe aus der 
 
 ## Starten
 
-Im Finder `Korrespondenz_Lokal/Korrespondenz.app` öffnen oder im Terminal:
+**Als Programm (empfohlen):** Im entpackten Download `Korrespondenz_Lokal/DocuManager_Installieren.command`
+doppelklicken. Das kopiert die Anwendung nach `~/DocuManager` (Daten in `~/DocuManager/Daten`, bleiben bei Updates
+erhalten) und legt das Programm **DocuManager** unter Programme an. Danach startet DocuManager über Launchpad,
+Spotlight oder das Dock, ohne Terminal; beendet wird es über „Beenden“ in der Anwendung. Für ein Update die neue ZIP
+entpacken und das Installationsprogramm erneut doppelklicken.
+
+Zum Entwickeln im Terminal:
 
 ```bash
 cd Korrespondenz_Lokal

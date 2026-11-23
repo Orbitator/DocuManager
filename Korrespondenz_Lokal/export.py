@@ -202,10 +202,22 @@ def _zaehlen(db):
 
 
 def sicherung_erstellen(store, ziel=None):
-    """Vollständige Sicherung: Datenbank, Originale, Chat-Anlagen und eine Prüfliste mit Prüfsummen."""
+    """Vollständige Sicherung: Datenbank, Originale, Chat-Anlagen und eine Prüfliste mit Prüfsummen.
+    Ohne `ziel` gibt es immer nur eine Sicherungsdatei: Nach erfolgreicher Prüfung der neuen werden ältere entfernt."""
     ordner = store.data / "Sicherungen"
     ordner.mkdir(parents=True, exist_ok=True)
-    ziel = ziel or ordner / f"Korrespondenz-Sicherung_{time.strftime('%Y-%m-%d_%H%M%S')}.zip"
+    if ziel is None:
+        ziel = ordner / f"Korrespondenz-Sicherung_{time.strftime('%Y-%m-%d_%H%M%S')}.zip"
+        _sicherung_schreiben(store, ziel)
+        if sicherung_pruefen(ziel)["ok"]:
+            for alt in ordner.glob("Korrespondenz-Sicherung_*.zip"):
+                if alt != ziel:
+                    alt.unlink(missing_ok=True)
+        return ziel
+    return _sicherung_schreiben(store, ziel)
+
+
+def _sicherung_schreiben(store, ziel):
     with tempfile.TemporaryDirectory() as tmp:
         kopie = Path(tmp) / "Rechtsberatung.sqlite3"
         with closing(store.connect()) as quelle, closing(sqlite3.connect(kopie)) as db:
@@ -277,6 +289,34 @@ def wiederherstellen(pfad, daten, ueberschreiben=False):
     return pruefung
 
 
+def wiederherstellen_laufend(store, pfad):
+    """Stellt eine geprüfte Sicherung bei laufender Anwendung wieder her. Die Datenbank wird über die
+    SQLite-Sicherungsschnittstelle ersetzt (sicher bei offenen Verbindungen); Originale und Chat-Anlagen werden
+    ergänzt. Die bisherige Datenbank bleibt als Kopie in `Sicherungen/` erhalten."""
+    pruefung = sicherung_pruefen(pfad)
+    if not pruefung["ok"]:
+        raise ValueError("Die Sicherung ist nicht in Ordnung: " + "; ".join(pruefung["fehler"]))
+    ordner = store.data / "Sicherungen"
+    ordner.mkdir(parents=True, exist_ok=True)
+    with closing(store.connect()) as quelle, closing(sqlite3.connect(
+            ordner / f"Rechtsberatung.vor-wiederherstellung-{time.strftime('%Y%m%d%H%M%S')}.sqlite3")) as kopie:
+        quelle.backup(kopie)
+    with tempfile.TemporaryDirectory() as tmp, zipfile.ZipFile(pfad) as z:
+        for name in z.namelist():
+            if name.endswith("/") or ".." in Path(name).parts or Path(name).is_absolute():
+                continue
+            if name.startswith(("Uploads/", "Chat_Originale/")):
+                ziel = store.data / name
+                ziel.parent.mkdir(parents=True, exist_ok=True)
+                ziel.write_bytes(z.read(name))
+        db_datei = Path(tmp) / "Rechtsberatung.sqlite3"
+        db_datei.write_bytes(z.read("Rechtsberatung.sqlite3"))
+        with closing(sqlite3.connect(db_datei)) as quelle, closing(store.connect()) as ziel:
+            quelle.backup(ziel)
+    store.migrate()
+    return pruefung
+
+
 def test_export(store):
     """Export, Briefansicht, Sicherung und geprüfte Wiederherstellung auf einer frischen Installation."""
     from akte import Akte
@@ -325,6 +365,16 @@ def test_export(store):
         pass
     else:
         raise AssertionError("Bestehende Daten wurden ohne Rückfrage überschrieben.")
+    # Immer nur eine Sicherungsdatei
+    time.sleep(1.1)
+    zweite = sicherung_erstellen(store)
+    assert sorted(p.name for p in (store.data / "Sicherungen").glob("Korrespondenz-Sicherung_*.zip")) == [zweite.name]
+    sicherung = zweite
+    # Wiederherstellen bei laufender Anwendung: Änderungen nach der Sicherung verschwinden, Daten der Sicherung sind da
+    spaeter = store.create_case("Nach der Sicherung", "Versicherungen", "")
+    wiederherstellen_laufend(store, sicherung)
+    assert spaeter not in [c["id"] for c in store.list_cases()] and v in [c["id"] for c in store.list_cases()]
+    assert list((store.data / "Sicherungen").glob("Rechtsberatung.vor-wiederherstellung-*.sqlite3"))
     # Beschädigte Sicherung wird erkannt
     kaputt = store.data / "kaputt.zip"
     with zipfile.ZipFile(sicherung) as z, zipfile.ZipFile(kaputt, "w") as k2:

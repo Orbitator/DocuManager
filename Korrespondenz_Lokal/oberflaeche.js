@@ -42,6 +42,9 @@ const P = {
   link:'<path d="M10 14a4 4 0 0 0 6 0l3-3a4 4 0 0 0-6-6l-1 1"/><path d="M14 10a4 4 0 0 0-6 0l-3 3a4 4 0 0 0 6 6l1-1"/>',
   photo:'<rect x="3" y="5" width="18" height="14" rx="2"/><circle cx="9" cy="10" r="2"/><path d="m21 16-5-5-8 8"/>',
   mail:'<rect x="3" y="5" width="18" height="14" rx="2"/><path d="m3 7 9 6 9-6"/>',
+  move:'<path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><path d="M9 13h7M13 10l3 3-3 3"/>',
+  info:'<circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8h.01"/>',
+  refresh:'<path d="M20 12a8 8 0 1 1-2.3-5.6M20 4v5h-5"/>',
   gear:'<circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9 7 7M17 17l2.1 2.1M4.9 19.1 7 17M17 7l2.1-2.1"/>'
 };
 const I = (n, cls = '') => `<svg class="i ${cls}" viewBox="0 0 24 24">${P[n]}</svg>`;
@@ -128,6 +131,9 @@ async function render() {
   $('#view').innerHTML = ({uebersicht: vHome, posteingang: vInbox, vorgaenge: vList, akte: vAkte, fristen: vFristen,
     archiv: vArchiv, adressbuch: vAb, chat: vChat, papierkorb: vTrash, einstellungen: vSettings})[S.view]();
   textPanes();
+  document.querySelector('.imp').hidden = !['posteingang', 'archiv'].includes(S.view);
+  $('#impbtn').firstChild.textContent = S.view === 'archiv' ? 'Im Archiv ablegen ' : 'Dokument importieren ';
+  if (S.view === 'archiv' && D.archiv.some(d => /Wartet|läuft/.test(d.ocr_status || ''))) { clearTimeout(followTimer); followTimer = setTimeout(() => { if (S.view === 'archiv' && !$('#modalroot').innerHTML) render(); }, 3000); }
   mailTexte();
   followInbox();
 }
@@ -342,7 +348,7 @@ function chronik() {
     const wer = e.kontakt_id ? ` · ${e.richtung || ''} ${esc(kontaktName(e.kontakt_id))}` : '';
     return mh + `<li class="ent k-${e.art} ${S.entry === e.id ? 'sel' : ''}"><span class="ico" title="${k[0]}">${I(k[1])}</span>
      <div class="card" data-act="entry" data-id="${e.id}" tabindex="0" role="button" aria-pressed="${S.entry === e.id}">
-      <div class="row1"><span class="date num">${dt(e.ereignis_datum)}</span><span class="ttl">${esc(e.titel)}</span></div>
+      <div class="row1"><span class="date num">${dt(e.ereignis_datum)}</span><span class="ttl">${esc(e.titel)}</span>${e.dokument_id ? `<span class="rowacts"><button class="iconbtn sm" data-act="doc-move" data-doc="${e.dokument_id}" title="In anderen Vorgang verschieben" aria-label="Dokument verschieben">${I('move')}</button><button class="iconbtn sm" data-act="doc-remove" data-doc="${e.dokument_id}" title="Aus diesem Vorgang löschen" aria-label="Dokument löschen">${I('trash')}</button></span>` : ''}</div>
       <div class="row2"><span>${k[0]}${wer}</span>${badges.join('')}</div>${chips || acts ? `<div class="row3">${chips}${acts}</div>` : ''}</div></li>`;
   }).join('');
   const types = [['alle','Alle Typen'],['eingang','Eingang'],['ausgang','Versendet'],['entwurf','Entwürfe'],['gespraech','Telefonate & Notizen'],['chat','Chat-Notizen'],['fehlt','Fehlende Originale']];
@@ -366,14 +372,21 @@ function preview() {
   if (!e.dokument_id) return kopf + vers + (text || `<p class="muted">${e.art === 'fehlt' ? 'Das Original fehlt noch in der Akte.' : 'Kein Dokument zu diesem Eintrag.'}</p>`);
   const d = a.dokumente.find(x => x.id === e.dokument_id) || {};
   const mail = d.mime === 'message/rfc822', modus = mail ? 'text' : S.pvMode;
-  return kopf + vers + `<details class="dd"><summary>Dokumentdetails <span class="muted">· ${esc(d.dateiname || '')}</span></summary><dl class="meta">
+  const info = S.pvInfo ? `<dl class="meta pvinfo">
     <div><dt>Titel</dt><dd>${esc(d.titel)} <button class="linkbtn" data-act="doc-rename" data-doc="${d.id}">ändern</button></dd></div>
+    <div><dt>Datei</dt><dd>${esc(d.dateiname || '')}</dd></div>
     <div><dt>Titelquelle</dt><dd>${esc(d.titel_quelle || '')}${d.titel_seite ? ', Seite ' + d.titel_seite : ''}</dd></div>
-    <div><dt>Text</dt><dd>${esc(d.ocr_status || '')}</dd></div><div><dt>Vorgänge</dt><dd>${d.vorgaenge || 1}</dd></div></dl></details>
-   <div class="frame" style="margin-top:12px"><div class="tool">
-    ${mail ? '<span class="muted" style="font-size:13px">E-Mail</span>' : `<span class="seg" role="group" aria-label="Ansicht"><button class="${modus === 'original' ? 'on' : ''}" data-act="pv-mode" data-id="original"><b>Original</b></button><button class="${modus === 'text' ? 'on' : ''}" data-act="pv-mode" data-id="text"><b>Text &amp; Fundstellen</b></button></span>`}
-    ${d.gedreht ? `<span class="pill grey" style="font-size:11.5px" title="Die Anzeige ist aufrecht gedreht. Das Original bleibt unverändert gespeichert.">automatisch gedreht</span><a class="linkbtn" style="font-size:12.5px" href="/api/documents/${d.id}/original?fassung=original" target="_blank" rel="noopener">Original ungedreht</a>` : ''}
-    <span class="sp"></span>${mail ? '' : `<button class="btn sm" data-act="ocr-retry" data-doc="${d.id}" title="Text erneut erkennen">Neu erkennen</button>`}<button class="btn sm" data-act="doc-move" data-doc="${d.id}" title="Dokument in einen anderen Vorgang verschieben">Vorgang ändern</button><button class="btn sm" data-act="view" data-doc="${d.id}">${I('expand')}Öffnen</button></div>
+    <div><dt>Text</dt><dd>${esc(d.ocr_status || '')}</dd></div><div><dt>Vorgänge</dt><dd>${d.vorgaenge || 1}</dd></div>
+    ${d.gedreht ? `<div><dt>Lage</dt><dd>automatisch aufrecht gedreht · <a class="linkbtn" href="/api/documents/${d.id}/original?fassung=original" target="_blank" rel="noopener">Original ungedreht</a></dd></div>` : ''}</dl>` : '';
+  return kopf + vers + `<div class="frame" style="margin-top:8px"><div class="tool pvtool">
+    ${mail ? '<span class="muted" style="font-size:13px">E-Mail</span>' : `<span class="seg" role="group" aria-label="Ansicht"><button class="${modus === 'original' ? 'on' : ''}" data-act="pv-mode" data-id="original">Original</button><button class="${modus === 'text' ? 'on' : ''}" data-act="pv-mode" data-id="text">Text</button></span>`}
+    <span class="pvname" title="${esc(d.dateiname || '')}">${esc(d.dateiname || '')}${d.gedreht ? ` <span class="pill grey" title="Automatisch aufrecht gedreht. Das Original bleibt unverändert.">gedreht</span>` : ''}</span>
+    <span class="sp"></span>
+    <button class="iconbtn ${S.pvInfo ? 'on' : ''}" data-act="pv-info" title="Dokumentdetails" aria-label="Dokumentdetails" aria-pressed="${!!S.pvInfo}">${I('info')}</button>
+    ${mail ? '' : `<button class="iconbtn" data-act="ocr-retry" data-doc="${d.id}" title="Text neu erkennen" aria-label="Text neu erkennen">${I('refresh')}</button>`}
+    <button class="iconbtn" data-act="doc-move" data-doc="${d.id}" title="In anderen Vorgang verschieben" aria-label="In anderen Vorgang verschieben">${I('move')}</button>
+    <button class="iconbtn" data-act="doc-remove" data-doc="${d.id}" title="Aus diesem Vorgang löschen" aria-label="Aus diesem Vorgang löschen">${I('trash')}</button>
+    <button class="iconbtn" data-act="view" data-doc="${d.id}" title="Groß öffnen" aria-label="Groß öffnen">${I('expand')}</button></div>${info}
     ${modus === 'text' ? `<div class="textpane" data-text="${d.id}" data-entry="${e.id}">Wird geladen …</div>` : originalHtml(d)}</div>
    ${modus === 'text' ? '<p class="muted" style="font-size:12.5px;margin:8px 2px 0">Text markieren, um ihn als Frist, Aktenzeichen, Dokumentdatum oder Notiz mit Fundstelle zu übernehmen.</p>' : ''}` + text;
 }
@@ -538,7 +551,7 @@ function exportDialog() {
 }
 function vChat() {
   return `<div class="head" style="justify-content:space-between"><h1>Chat-Notizen</h1><button class="btn pri" data-act="chat-new">${I('plus')}Chat-Notiz übernehmen</button></div>
-  <p class="muted" style="margin:6px 0 16px;max-width:75ch">Zusammenfassungen und Auszüge aus Chats, etwa aus ChatGPT, mit Quellenhinweis. Sie bleiben als ungeprüft gekennzeichnet, bis Sie sie mit den Originalen abgeglichen haben. Im Text erwähnte Schreiben, die in der Akte fehlen, werden als „Original fehlt“ vermerkt.</p>
+  <p class="muted" style="margin:6px 0 16px;max-width:75ch"><a href="/alt" class="linkbtn">ChatGPT-Export importieren</a> · Zusammenfassungen und Auszüge aus Chats, etwa aus ChatGPT, mit Quellenhinweis. Sie bleiben als ungeprüft gekennzeichnet, bis Sie sie mit den Originalen abgeglichen haben. Im Text erwähnte Schreiben, die in der Akte fehlen, werden als „Original fehlt“ vermerkt.</p>
   <div class="panel">${D.chats.length ? D.chats.map(c => `<div class="frow" style="grid-template-columns:minmax(0,1fr) auto"><div style="min-width:0"><div class="t"><a href="#akte-${c.vorgang_id}">${esc(c.titel)}</a></div>
     <div class="m"><span>${esc(c.vorgang)}</span><span>· ${dt(c.ereignis_datum)}</span><span>· ${esc(c.quelle || '')}</span></div><div class="m" style="margin-top:4px;color:var(--fg)">${esc(c.auszug || '')}</div></div>
     <div class="acts">${c.geprueft ? '<span class="pill ok">geprüft</span>' : `<span class="pill warn">ungeprüft</span><button class="btn sm" data-act="chat-ok" data-id="${c.id}">Geprüft</button>`}</div></div>`).join('') : '<p class="muted" style="margin:0">Noch keine Chat-Notizen.</p>'}</div>
@@ -561,7 +574,7 @@ function docTable() {
   const a = D.akte, so = S.sortD;
   const key = {titel: d => d.titel, datei: d => d.dateiname, datum: d => d.angelegt_am, text: d => d.ocr_status}[so.k];
   const rows = [...a.dokumente].sort((x, y) => cmp(key(x), key(y)) * so.d).map(d => `<tr data-act="doc-open" data-doc="${d.id}"><td><b>${esc(d.titel)}</b></td><td>${esc(d.dateiname)}</td><td class="num">${dt(d.angelegt_am)}</td><td>${esc(d.ocr_status)}</td>
-    <td style="white-space:nowrap"><button class="iconbtn" data-act="view" data-doc="${d.id}" title="Original ansehen" aria-label="Original ansehen">${I('expand')}</button> <button class="iconbtn" data-act="d-del" data-doc="${d.id}" title="Löschen" aria-label="${esc(d.titel)} löschen">${I('trash')}</button></td></tr>`).join('');
+    <td style="white-space:nowrap"><button class="iconbtn sm" data-act="doc-move" data-doc="${d.id}" title="In anderen Vorgang verschieben" aria-label="${esc(d.titel)} verschieben">${I('move')}</button><button class="iconbtn sm" data-act="doc-remove" data-doc="${d.id}" title="Aus diesem Vorgang löschen" aria-label="${esc(d.titel)} löschen">${I('trash')}</button></td></tr>`).join('');
   return `<div style="margin-top:18px" class="tbl-wrap"><table><thead><tr>${sortTh('D','titel','Dokument')}${sortTh('D','datei','Datei')}${sortTh('D','datum','Abgelegt')}${sortTh('D','text','Text')}<th><span class="sr">Aktionen</span></th></tr></thead><tbody>${rows || '<tr><td colspan="5" class="muted">Noch keine Dokumente.</td></tr>'}</tbody></table></div>`;
 }
 function beteiligteTab() {
@@ -609,7 +622,7 @@ function vArchiv() {
   for (const d of list) { const k = gkey(d); let g = groups.find(x => x.k === k); if (!g) groups.push(g = {k, items: []}); g.items.push(d); }
   if (S.aGroup === 'jahr') groups.sort((x, y) => cmp(y.k, x.k)); else if (S.aGroup !== 'keine') groups.sort((x, y) => cmp(x.k, y.k));
   const row = d => `<tr data-act="arch-open" data-v="${d.vorgang_id}" data-doc="${d.id}" ${d.system === 'ablage' ? 'data-ablage="1"' : ''}><td><b>${esc(d.titel)}</b><div class="muted" style="font-size:12.5px">${esc(d.dateiname)}</div></td><td class="num">${dt(d.datum)}</td><td>${esc(d.absender || '–')}</td><td>${esc(d.vorgang)}<div class="muted" style="font-size:12.5px">${esc(d.bereich)}</div></td><td class="num">${groesse(d.groesse)}</td>
-    <td style="white-space:nowrap"><button class="btn sm ghost" data-act="arch-move" data-doc="${d.id}" data-v="${d.vorgang_id}" data-t="${esc(d.titel)}" title="In einen anderen Vorgang verschieben">Vorgang ändern</button><button class="iconbtn" data-act="view" data-doc="${d.id}" title="Original ansehen" aria-label="Original ansehen">${I('expand')}</button></td></tr>`;
+    <td style="white-space:nowrap"><button class="iconbtn sm" data-act="arch-move" data-doc="${d.id}" data-v="${d.vorgang_id}" data-t="${esc(d.titel)}" title="In anderen Vorgang verschieben" aria-label="${esc(d.titel)} verschieben">${I('move')}</button><button class="iconbtn sm" data-act="arch-del" data-doc="${d.id}" data-v="${d.vorgang_id}" data-t="${esc(d.titel)}" title="Löschen" aria-label="${esc(d.titel)} löschen">${I('trash')}</button></td></tr>`;
   const thead = `<thead><tr>${sortTh('A','titel','Dokument')}${sortTh('A','datum','Datum')}${sortTh('A','absender','Absender')}${sortTh('A','vorgang','Vorgang')}${sortTh('A','groesse','Größe')}<th><span class="sr">Aktionen</span></th></tr></thead>`;
   return `<h1>Archiv</h1><p class="muted" style="margin:6px 0 0">${D.archiv.length} archivierte Dokumente. Wird ein Vorgang erledigt, verschwindet er aus „Vorgänge“; seine Dokumente stehen hier. ${list.length !== D.archiv.length ? `${list.length} passen zu den Filtern.` : ''}</p>
 
@@ -654,11 +667,10 @@ function vSettings() {
     <div><button class="btn" data-act="mail-get">${I('mail')}Jetzt aus Mail holen</button></div></div>
    <div class="panel stack"><h2>Scannen</h2><p style="margin:0">Erscheint Ihr Scanner im Scan-Dialog nicht, scannen Sie mit „Digitale Bilder“ von macOS oder der Software des Herstellers in diesen Ordner. Neue Dateien darin kommen nach wenigen Sekunden in den Posteingang und werden danach in „Übernommen“ verschoben.</p>
     <div class="src">${esc(D.scanordner ? D.scanordner.pfad : '')}</div><div><button class="btn" data-act="scan-folder">Ordner im Finder öffnen</button></div></div>
-   <div class="panel stack"><h2>Datensicherung</h2><p style="margin:0">Eine Sicherung enthält Datenbank, alle Originale und Chat-Anlagen sowie eine Prüfliste. Sie liegt in <code>Daten/Sicherungen</code>. Kopieren Sie sie zusätzlich auf ein NAS oder einen externen Datenträger.</p>
-    <div><button class="btn" data-act="backup">Sicherung erstellen</button></div>
-    ${D.sicherungen && D.sicherungen.length ? `<ul class="mini">${D.sicherungen.map(b => `<li><span>${esc(b.name.replace('Korrespondenz-Sicherung_', '').replace('.zip', '').replace('_', ' '))} <span class="muted">· ${groesse(b.groesse)}</span></span><span style="display:flex;gap:6px"><button class="btn sm ghost" data-act="backup-check" data-name="${esc(b.name)}">Prüfen</button><a class="btn sm" href="/api/sicherungen/${esc(b.name)}">Herunterladen</a></span></li>`).join('')}</ul>` : '<p class="muted" style="margin:0">Noch keine Sicherung.</p>'}
-    <p class="muted" style="margin:0;font-size:12.5px">Wiederherstellen bei beendeter Anwendung im Terminal: <code>python3 app.py --wiederherstellen &lt;Datei.zip&gt;</code></p></div>
-   <div class="panel stack"><h2>Bisherige Ansicht</h2><p style="margin:0">Chat-Import und die Archivliste „Rechtsberatung“ liegen vorerst noch in der bisherigen Oberfläche.</p><div><a class="btn" href="/alt">Bisherige Ansicht öffnen</a></div></div></div>`;
+   <div class="panel stack"><h2>Datensicherung</h2><p style="margin:0">Eine Sicherung enthält Datenbank, alle Originale und Chat-Anlagen sowie eine Prüfliste. Es gibt immer nur eine Sicherungsdatei: Eine neue ersetzt die vorige. Sie liegt in <code>Daten/Sicherungen</code>; laden Sie sie herunter und kopieren Sie sie auf ein NAS oder einen externen Datenträger.</p>
+    <div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn" data-act="backup">Sicherung erstellen</button><button class="btn" data-act="restore-file">${I('restore')}Sicherung wiederherstellen …</button></div>
+    ${D.sicherungen && D.sicherungen.length ? `<ul class="mini">${D.sicherungen.map(b => `<li><span>${esc(b.name.replace('Korrespondenz-Sicherung_', '').replace('.zip', '').replace('_', ' '))} <span class="muted">· ${groesse(b.groesse)}</span></span><span style="display:flex;gap:6px"><button class="btn sm ghost" data-act="backup-check" data-name="${esc(b.name)}">Prüfen</button><button class="btn sm ghost" data-act="restore-list" data-name="${esc(b.name)}">Wiederherstellen</button><a class="btn sm" href="/api/sicherungen/${esc(b.name)}">Herunterladen</a></span></li>`).join('')}</ul>` : '<p class="muted" style="margin:0">Noch keine Sicherung.</p>'}
+    <p class="muted" style="margin:0;font-size:12.5px">„Sicherung wiederherstellen …“ lädt eine Sicherungsdatei (.zip) von Ihrem Mac, zum Beispiel vom externen Datenträger.</p></div></div>`;
 }
 
 // ---------- Dialoge, Meldungen, Originalansicht ----------
@@ -734,9 +746,10 @@ function versandModal(e) {
 }
 function dokVerschieben(docId, vonId, titel) {
   modal('Vorgang ändern', `<p style="margin:0">„${esc(titel || 'Dokument')}“ samt Chronik-Eintrag in einen anderen Vorgang verschieben.</p>
-   <label>Neuer Vorgang<select id="m-mv">${vorgangOptionen(null, vonId)}<option value="ablage">Ohne Vorgang (nur Archiv)</option></select></label>
+   <label>Neuer Vorgang<select id="m-mv">${vorgangOptionen(null, vonId)}<option value="__new">+ Neuer Vorgang …</option><option value="ablage">Ohne Vorgang (nur Archiv)</option></select></label>
    <p class="muted" style="margin:0;font-size:12.5px">Fristen aus diesem Dokument bleiben im bisherigen Vorgang. Ist der Ziel-Vorgang erledigt, steht das Dokument im Archiv.</p>`, async () => {
     const ziel = val('m-mv'); closeModal();
+    if (ziel === '__new') { newVorgang(async nv => { try { await api(`dokumente/${docId}/verschieben`, {von_vorgang_id: vonId, vorgang_id: nv}); toast('In den neuen Vorgang verschoben.'); S.v = nv; S.tab = 'chronik'; S.teil = 'all'; S.entry = null; location.hash = 'akte-' + nv; } catch (e) { toast(e.message); } }); return false; }
     try {
       const r = await api(`dokumente/${docId}/verschieben`, ziel === 'ablage' ? {von_vorgang_id: vonId, ablage: true} : {von_vorgang_id: vonId, vorgang_id: +ziel});
       toast(r.ablage ? 'Ohne Vorgang ins Archiv gelegt.' : r.archiviert ? 'Verschoben. Der Vorgang ist erledigt, das Dokument steht im Archiv.' : 'In den Vorgang verschoben.');
@@ -744,6 +757,29 @@ function dokVerschieben(docId, vonId, titel) {
     } catch (e) { toast(e.message); }
     return false;
   }, 'Verschieben');
+}
+function dokEntfernen(docId, vonId, titel) {
+  const v = D.cases.find(c => c.id === vonId);
+  modal('Dokument löschen', `<p style="margin:0">„${esc(titel || 'Dokument')}“ aus ${v ? `dem Vorgang „${esc(v.titel)}“` : 'dem Archiv'} löschen?</p>
+   <p class="muted" style="margin:0;font-size:13px">Gehört es noch zu einem anderen Vorgang, bleibt es dort. Sonst kommt es in den Papierkorb und lässt sich von dort wiederherstellen.</p>`, async () => {
+    closeModal();
+    try { const r = await api(`dokumente/${docId}/entfernen`, {vorgang_id: vonId}); if (S.entry && D.akte?.eintraege.find(e => e.id === S.entry)?.dokument_id === docId) S.entry = null;
+      toast(r.papierkorb ? 'In den Papierkorb verschoben.' : 'Aus diesem Vorgang entfernt; in den anderen Vorgängen bleibt es.'); await render(); } catch (e) { toast(e.message); }
+    return false;
+  }, 'Löschen');
+}
+function wiederherstellenFrage(name, datei) {
+  modal('Sicherung wiederherstellen', `<p style="margin:0">Den Datenbestand durch die Sicherung <b>${esc(name || datei.name)}</b> ersetzen?</p>
+   <div class="notice warn" style="margin:0">${I('alert')}<p>Alles, was nach dieser Sicherung erfasst wurde, ist danach nicht mehr in der Anwendung. Die bisherige Datenbank wird vorher als Kopie in <code>Daten/Sicherungen</code> abgelegt.</p></div>`, async () => {
+    closeModal(); toast('Sicherung wird geprüft und wiederhergestellt …');
+    try {
+      let r;
+      if (datei) { const res = await fetch('/api/sicherungen/wiederherstellen', {method: 'POST', body: datei, headers: {'X-Korrespondenz': 'lokal'}}); r = await res.json(); if (!res.ok) throw new Error(r.error || 'Wiederherstellen fehlgeschlagen.'); }
+      else r = await api(`sicherungen/${name}/wiederherstellen`, {});
+      toast(`Wiederhergestellt: ${r.anzahl.vorgang} Vorgänge, ${r.anzahl.dokument} Dokumente.`); setTimeout(() => location.reload(), 1200);
+    } catch (e) { toast(e.message); }
+    return false;
+  }, 'Wiederherstellen');
 }
 function fristNeu() {
   if (!aktiv().length) { toast('Legen Sie zuerst einen Vorgang an.'); return; }
@@ -777,8 +813,9 @@ document.addEventListener('click', async ev => {
   if (!el) return;
   const a = el.dataset.act, id = el.dataset.id ? (isNaN(+el.dataset.id) ? el.dataset.id : +el.dataset.id) : null;
   switch (a) {
-  case 'import': { const m = $('#impmenu'); m.hidden = !m.hidden; el.setAttribute('aria-expanded', String(!m.hidden)); break; }
+  case 'import': if (S.view === 'archiv') { $('#fileinp').dataset.ziel = 'archiv'; $('#fileinp').click(); break; } { const m = $('#impmenu'); m.hidden = !m.hidden; el.setAttribute('aria-expanded', String(!m.hidden)); break; }
   case 'imp-file': $('#impmenu').hidden = true; $('#fileinp').dataset.ziel = ''; $('#fileinp').click(); break;
+  case 'arch-import': $('#fileinp').dataset.ziel = 'archiv'; $('#fileinp').click(); break;
   case 'doc-add': $('#fileinp').dataset.ziel = String(D.akte.id); $('#fileinp').click(); break;
   case 'imp-scan': $('#impmenu').hidden = true; scan(); break;
   case 'scan-folder': $('#impmenu').hidden = true; try { const r = await api('scanordner/oeffnen', {}); toast(`Ordner „${r.pfad.split('/').pop()}“ geöffnet. Was Sie dort hineinscannen oder ablegen, kommt automatisch in den Posteingang.`); } catch (e) { toast(e.message); } break;
@@ -788,7 +825,16 @@ document.addEventListener('click', async ev => {
   case 'ib-assign': try { await assign(id, el.dataset.v); } catch (e) { toast(e.message); } break;
   case 'ib-archiv': try { await assign(id, 'ablage'); } catch (e) { toast(e.message); } break;
   case 'ib-fadd': { const d = draft[id]; d.fristen.push({titel: '', faellig_am: plusTage(isoHeute(), 14), an: true}); await render(); const f = document.querySelectorAll(`[data-fr=titel][data-id="${id}"]`); f[f.length - 1]?.focus(); break; }
-  case 'doc-move': dokVerschieben(+el.dataset.doc, D.akte.id, D.akte.dokumente.find(x => x.id === +el.dataset.doc)?.titel); break;
+  case 'doc-move': ev.stopPropagation(); dokVerschieben(+el.dataset.doc, D.akte.id, D.akte.dokumente.find(x => x.id === +el.dataset.doc)?.titel); break;
+  case 'doc-remove': ev.stopPropagation(); dokEntfernen(+el.dataset.doc, D.akte.id, D.akte.dokumente.find(x => x.id === +el.dataset.doc)?.titel); break;
+  case 'arch-del': dokEntfernen(+el.dataset.doc, +el.dataset.v, el.dataset.t); break;
+  case 'beenden': modal('DocuManager beenden?', '<p style="margin:0">Die Anwendung wird beendet. Starten Sie sie wieder über das Programm „DocuManager“.</p>', async () => {
+      closeModal(); try { await api('beenden', {}); } catch (e) { /* Server bereits weg */ }
+      document.body.innerHTML = '<div style="display:grid;place-items:center;height:100vh;font:16px system-ui;color:#999;background:#111">DocuManager ist beendet. Sie können dieses Fenster schließen.</div>'; return false; }, 'Beenden'); break;
+  case 'pv-info': S.pvInfo = !S.pvInfo; paintAkte(); break;
+  case 'restore-file': $('#restoreinp').click(); break;
+  case 'restore-list': wiederherstellenFrage(el.dataset.name, null); break;
+  case 'heute': { const inp = el.previousElementSibling; if (inp) { inp.value = isoHeute(); inp.dispatchEvent(new Event('input', {bubbles: true})); inp.dispatchEvent(new Event('change', {bubbles: true})); } break; }
   case 'arch-move': dokVerschieben(+el.dataset.doc, +el.dataset.v, el.dataset.t); break;
   case 'f-neu': fristNeu(); break;
   case 'ib-manual': { const v = val('mv-' + id); if (v === '__new') newVorgang(nv => assign(id, nv)); else try { await assign(id, v); } catch (e) { toast(e.message); } break; }
@@ -856,7 +902,7 @@ document.addEventListener('click', async ev => {
   case 'agroup': S.aGroup = el.dataset.id; $('#view').innerHTML = vArchiv(); break;
   case 'abereich': S.aBereich = el.dataset.id; $('#view').innerHTML = vArchiv(); break;
   case 'ajahr': S.aJahr = el.dataset.id; $('#view').innerHTML = vArchiv(); break;
-  case 'arch-open': if (ev.target.closest('[data-act=view], [data-act=arch-move]')) break;
+  case 'arch-open': if (ev.target.closest('[data-act=view], [data-act=arch-move], [data-act=arch-del]')) break;
     if (el.dataset.ablage) { openViewer(el.dataset.doc, el.querySelector('b')?.textContent); break; }
     S.v = +el.dataset.v; S.tab = 'chronik'; S.teil = 'all'; S.ktype = 'alle';
     S.entry = null; location.hash = 'akte-' + el.dataset.v; setTimeout(() => { const e = D.akte?.eintraege.find(x => x.dokument_id === +el.dataset.doc); if (e) { S.entry = e.id; paintAkte(); } }, 400); break;
@@ -903,7 +949,8 @@ document.addEventListener('change', async ev => {
   if (el.dataset.change === 't-status') await statusSetzen(+el.dataset.id, el.value, render);
   if (el.id === 'mailflag') await act(() => api('mail/markierung', {markierung: +el.value}), 'Markierung gespeichert.');
   if (el.id === 'aerl') { S.aErledigt = el.checked; $('#view').innerHTML = vArchiv(); }
-  if (el.id === 'fileinp') { const files = [...el.files]; el.value = ''; await importFiles(files, el.dataset.ziel ? +el.dataset.ziel : null); }
+  if (el.id === 'fileinp') { const files = [...el.files]; el.value = ''; await importFiles(files, el.dataset.ziel === 'archiv' ? 'archiv' : el.dataset.ziel ? +el.dataset.ziel : null); }
+  if (el.id === 'restoreinp') { const f = el.files[0]; el.value = ''; if (f) wiederherstellenFrage(null, f); }
   if (el.dataset.ib) { const d = draft[+el.dataset.id]; if (d) d[el.dataset.ib] = el.value; }
   if (el.dataset.fr) { const f = draft[+el.dataset.id]?.fristen[+el.dataset.i]; if (f) f[el.dataset.fr] = el.type === 'checkbox' ? el.checked : el.value; }
 });
@@ -943,9 +990,10 @@ async function importFiles(files, vorgangId) {
   let neu = 0, vorhanden = 0; const fehler = [];
   for (const f of files) {
     toast(`„${f.name}“ wird abgelegt …`);
-    try { const r = await upload(vorgangId ? `cases/${vorgangId}/documents` : 'posteingang/dokumente', f); r.created ? neu++ : vorhanden++; }
+    try { const r = await upload(vorgangId === 'archiv' ? 'archiv/dokumente' : vorgangId ? `cases/${vorgangId}/documents` : 'posteingang/dokumente', f); r.created ? neu++ : vorhanden++; }
     catch (e) { fehler.push(f.name + ': ' + e.message); }
   }
+  if (vorgangId === 'archiv') { toast(`${neu} im Archiv abgelegt${vorhanden ? ` · ${vorhanden} bereits vorhanden` : ''}. Die Texterkennung läuft; Titel, Datum und Absender werden ergänzt.${fehler.length ? ' · ' + fehler.join(' · ') : ''}`); await render(); return; }
   toast(`${neu} abgelegt${vorhanden ? ` · ${vorhanden} bereits vorhanden` : ''}${fehler.length ? ' · ' + fehler.join(' · ') : ''}`);
   if (!vorgangId && location.hash !== '#posteingang') location.hash = 'posteingang'; else await render();
 }
@@ -969,7 +1017,18 @@ async function scan() {
 }
 addEventListener('dragover', e => { if ([...(e.dataTransfer?.types || [])].includes('Files')) { e.preventDefault(); document.body.classList.add('dragging'); } });
 addEventListener('dragleave', e => { if (!e.relatedTarget) document.body.classList.remove('dragging'); });
-addEventListener('drop', e => { document.body.classList.remove('dragging'); if (e.dataTransfer?.files?.length) { e.preventDefault(); importFiles([...e.dataTransfer.files], S.view === 'akte' ? D.akte.id : null); } });
+addEventListener('drop', e => { document.body.classList.remove('dragging'); if (e.dataTransfer?.files?.length) { e.preventDefault(); importFiles([...e.dataTransfer.files], S.view === 'akte' ? D.akte.id : S.view === 'archiv' ? 'archiv' : null); } });
 addEventListener('hashchange', route);
 route();
 })();
+
+// „Heute“ neben jedem Datumsfeld
+function heuteKnoepfe(root) {
+  for (const inp of root.querySelectorAll('input[type=date]:not([data-heute])')) {
+    inp.dataset.heute = '1';
+    const b = document.createElement('button');
+    b.type = 'button'; b.className = 'heute'; b.dataset.act = 'heute'; b.textContent = 'Heute'; b.title = 'Heutiges Datum einsetzen';
+    inp.insertAdjacentElement('afterend', b);
+  }
+}
+new MutationObserver(() => heuteKnoepfe(document.body)).observe(document.body, {childList: true, subtree: true});

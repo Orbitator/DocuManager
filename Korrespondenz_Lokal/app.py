@@ -27,13 +27,14 @@ from urllib.parse import parse_qsl, unquote, urlsplit
 
 from akte import (Akte, fristen_erkennen, ROUTES as AKTE_ROUTES, STATUSES, migrate_3, migrate_4, migrate_6, route_akte, test_absender, test_fristen_ablage,
                   test_akte, test_archiv, test_chatnotiz, test_posteingang)
-from export import akte_zip, brief_html, sicherung_erstellen, sicherung_pruefen, test_export, wiederherstellen
+from export import (akte_zip, brief_html, sicherung_erstellen, sicherung_pruefen, test_export, wiederherstellen,
+                    wiederherstellen_laufend)
 from chat_sync import ChatSync, MAX_EXPORT, test_chat_sync
 from mail_import import MailImport, migrate_5, test_mail
 
 ROOT = Path(__file__).resolve().parent
 PORT = 8765
-APP_VERSION = "DocuManager 0.7 · Fristen erkennen, Archiv ohne Vorgang, Vorgang ändern"
+APP_VERSION = "DocuManager 0.8 · Programm ohne Terminal, Wiederherstellen, kompakte Vorschau"
 MAX_UPLOAD = 25 * 1024 * 1024
 MIN_MACOS = "14.0"
 SCHEMA_VERSION = 8
@@ -216,6 +217,7 @@ class Store:
         self.ocr_ready.set()
         self.queue = queue.Queue()
         self.worker = None
+        self.nach_texterkennung = None
         self.uploads = data / "Uploads"
         self.uploads.mkdir(parents=True, exist_ok=True)
         self.ansicht = data / "Ansicht"  # aufrecht gedrehte Fassungen zur Anzeige, jederzeit neu erzeugbar
@@ -450,6 +452,11 @@ class Store:
         self._set_ocr_result(doc_id, pages, status, error, ansicht)
         log.info("Dokument %s: %s nach %.1f s%s", doc_id, status, time.monotonic() - started,
                  f" ({error})" if error else "")
+        if self.nach_texterkennung:  # z. B. Datum und Absender bei direkt archivierten Dokumenten nachtragen
+            try:
+                self.nach_texterkennung(doc_id)
+            except Exception:
+                log.exception("Nachbearbeitung nach der Texterkennung für Dokument %s fehlgeschlagen.", doc_id)
 
     def _set_ocr_result(self, doc_id, pages, status, error, ansicht=None):
         title, page, source = select_title(pages)
@@ -651,6 +658,8 @@ class Handler(BaseHTTPRequestHandler):
     akte = None
     mail = None
     mail_lock = Lock()
+    restore_lock = Lock()
+    server_ref = None
     scanordner = None
     scanner = None
     chat = None
@@ -839,9 +848,48 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_json({"name": ziel.name, "groesse": ziel.stat().st_size, "pruefung": sicherung_pruefen(ziel)}, 201)
             elif match := re.fullmatch(r"/api/sicherungen/(Korrespondenz-Sicherung_[0-9_-]+\.zip)/pruefen", path):
                 self.send_json(sicherung_pruefen(self.store.data / "Sicherungen" / match[1]))
+            elif path == "/api/sicherungen/wiederherstellen":  # hochgeladene Sicherungsdatei
+                size = int(self.headers.get("Content-Length", "0"))
+                if not 0 < size <= 8 * 1024 ** 3:
+                    raise ValueError("Die Sicherungsdatei ist leer oder zu groß.")
+                with tempfile.NamedTemporaryFile(suffix=".zip", dir=self.store.data, delete=False) as stage:
+                    rest = size
+                    while rest:
+                        block = self.rfile.read(min(rest, 1024 * 1024))
+                        if not block:
+                            break
+                        stage.write(block)
+                        rest -= len(block)
+                try:
+                    if rest:
+                        raise ValueError("Übertragung unvollständig.")
+                    with self.restore_lock:
+                        pruefung = wiederherstellen_laufend(self.store, Path(stage.name))
+                finally:
+                    Path(stage.name).unlink(missing_ok=True)
+                log.info("Sicherung wiederhergestellt (hochgeladen).")
+                self.send_json(pruefung)
+            elif match := re.fullmatch(r"/api/sicherungen/(Korrespondenz-Sicherung_[0-9_-]+\.zip)/wiederherstellen", path):
+                with self.restore_lock:
+                    pruefung = wiederherstellen_laufend(self.store, self.store.data / "Sicherungen" / match[1])
+                log.info("Sicherung %s wiederhergestellt.", match[1])
+                self.send_json(pruefung)
+            elif path == "/api/archiv/dokumente":  # direkt ins Archiv, Texterkennung läuft wie im Posteingang
+                name = unquote(self.headers.get("X-Dateiname", ""), errors="strict")
+                doc_id, created = self.store.import_document(None, name, self.read_body(MAX_UPLOAD))
+                row = self.store.document(doc_id)
+                if created or (row and self.akte.posteingang_id_von(doc_id)):
+                    self.akte.zuordnen(doc_id, {"ablage": True})
+                    self.akte.ablage_nachtragen(doc_id)
+                self.send_json({"id": doc_id, "created": created}, 201 if created else 200)
             elif path == "/api/mail/abholen":
                 with self.mail_lock:  # ein Abruf zur Zeit
                     self.send_json(self.mail.abholen())
+            elif path == "/api/beenden":  # Anwendung ohne Terminal beenden
+                self.send_json({"ok": True})
+                if self.server_ref:
+                    log.info("Beendet über die Oberfläche.")
+                    Thread(target=self.server_ref.shutdown, daemon=True).start()
             elif path == "/api/scanordner/oeffnen":
                 ordner = self.scanordner.ordner if self.scanordner else SCAN_ORDNER
                 ordner.mkdir(parents=True, exist_ok=True)
@@ -1284,6 +1332,7 @@ def main():
     Handler.scanner = Scanner(Handler.store)
     Handler.chat = ChatSync(Handler.store)
     Handler.akte = Akte(Handler.store)
+    Handler.store.nach_texterkennung = Handler.akte.ablage_nachtragen
     Handler.mail = MailImport(Handler.store)
     Handler.scanordner = ScanOrdner(Handler.store, SCAN_ORDNER)
     try:
@@ -1303,6 +1352,7 @@ def main():
         finally:
             Handler.store.ocr_ready.set()
 
+    Handler.server_ref = server
     with server:
         if not args.ocr_binary:
             Handler.store.ocr_ready.clear()

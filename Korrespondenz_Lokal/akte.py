@@ -224,10 +224,9 @@ def daten_in(zeile):
 
 # --- Fristen aus dem Text ------------------------------------------------------------------
 _DATUM_TEIL = r"(\d{1,2}\.\s?\d{1,2}\.\s?(?:\d{4}|\d{2})|\d{1,2}\.\s*(?:" + "|".join(MONATE) + r")\s+\d{4})"
-_FRIST_ABSOLUT = re.compile(
-    r"(?:\bbis\s+(?:spätestens\s+)?(?:zum\s+|am\s+)?|\bspätestens\s+(?:bis\s+)?(?:zum\s+|am\s+)?|"
-    r"\bfrist\w*\s+(?:\w+\s+){0,3}?(?:bis\s+)?(?:zum\s+|am\s+)?|\bfällig\w*\s+(?:am\s+|zum\s+|bis\s+)?|"
-    r"\bzahlbar\s+(?:bis\s+)?(?:zum\s+)?|\bnicht\s+später\s+als\s+(?:am\s+)?)" + _DATUM_TEIL, re.I)
+# Nur die eindeutige Formulierung „bis zum <Datum>“ (auch „bis spätestens zum“, „spätestens bis zum“) gilt als Frist.
+# Beliebige Datumsangaben im Text werden bewusst nicht vorgeschlagen.
+_FRIST_ABSOLUT = re.compile(r"\b(?:spätestens\s+)?bis\s+(?:spätestens\s+)?zum\s+" + _DATUM_TEIL, re.I)
 _ZAHLWORT = {"einem": 1, "einer": 1, "eines": 1, "ein": 1, "zwei": 2, "drei": 3, "vier": 4, "fünf": 5, "sechs": 6,
              "sieben": 7, "acht": 8, "neun": 9, "zehn": 10, "zwölf": 12, "vierzehn": 14, "einundzwanzig": 21,
              "dreißig": 30}
@@ -257,19 +256,13 @@ def _plus(start, menge, einheit):
 
 
 def fristen_erkennen(seiten, dokument_datum=None, heute=None):
-    """Erkennt Fristen im Text: „bis zum 16.12.2026“, „spätestens am …“, „zahlbar bis …“ sowie relative Angaben
-    („innerhalb von 14 Tagen“, „binnen eines Monats“, gerechnet ab Dokumentdatum). Liefert Vorschläge mit
-    Datum, Titel, Seite und Zitat. Vergangene Daten werden übergangen."""
+    """Erkennt Fristen der Form „bis zum 16.12.2026“ (auch „bis spätestens zum …“). Liefert Vorschläge mit Datum,
+    Titel, Seite und Zitat. Vergangene Daten und alle anderen Datumsangaben werden übergangen."""
     basis = date.fromisoformat(dokument_datum) if dokument_datum else date.fromisoformat(heute or date.today().isoformat())
     gefunden, gesehen = [], set()
     for seite in seiten:
         text = re.sub(r"\s+", " ", seite.get("text") or "")
-        treffer = [(m, daten_in(m.group(1))) for m in _FRIST_ABSOLUT.finditer(text)]
-        for m in _FRIST_RELATIV.finditer(text):
-            menge = int(m.group(1)) if m.group(1).isdigit() else _ZAHLWORT[m.group(1).lower()]
-            ziel = _plus(basis, menge, m.group(2))
-            treffer.append((m, [ziel.isoformat()] if ziel else []))
-        for m, daten in treffer:
+        for m, daten in [(m, daten_in(m.group(1))) for m in _FRIST_ABSOLUT.finditer(text)]:
             if not daten or daten[0] < basis.isoformat() or daten[0] in gesehen:
                 continue
             gesehen.add(daten[0])
@@ -282,7 +275,7 @@ def fristen_erkennen(seiten, dokument_datum=None, heute=None):
             titel = next((t for bereich in (zitat.lower(), umfeld) for t, muster in _FRIST_THEMA
                           if re.search(muster, bereich)), "Frist")
             gefunden.append({"faellig_am": daten[0], "titel": titel, "seite": seite.get("nummer") or 1,
-                             "zitat": zitat[:480], "relativ": m.re is _FRIST_RELATIV})
+                             "zitat": zitat[:480], "relativ": False})
     return sorted(gefunden, key=lambda f: f["faellig_am"])[:6]
 
 
@@ -1048,6 +1041,54 @@ class Akte:
                                             "teilvorgang_id": teile[0] if len(teile) == 1 else None})
         return eid
 
+    def dokument_entfernen(self, dokument_id, vorgang_id):
+        """Entfernt ein Dokument aus einem Vorgang. Gehört es noch zu weiteren Vorgängen, wird nur die Verknüpfung
+        gelöst; sonst kommt es samt Chronik-Eintrag in den Papierkorb."""
+        with closing(self.connect()) as db, db:
+            if not db.execute("SELECT 1 FROM dokument_vorgang WHERE dokument_id=? AND vorgang_id=?", (dokument_id, vorgang_id)).fetchone():
+                raise ValueError("Das Dokument gehört nicht zu diesem Vorgang.")
+            weitere = db.execute("SELECT vorgang_id FROM dokument_vorgang WHERE dokument_id=? AND vorgang_id<>?",
+                                 (dokument_id, vorgang_id)).fetchall()
+            db.execute("""UPDATE eintrag SET geloescht_am=CURRENT_TIMESTAMP WHERE dokument_id=? AND vorgang_id=?
+                AND geloescht_am IS NULL""", (dokument_id, vorgang_id))
+            if weitere:
+                db.execute("DELETE FROM dokument_vorgang WHERE dokument_id=? AND vorgang_id=?", (dokument_id, vorgang_id))
+                db.execute("UPDATE dokument SET vorgang_id=? WHERE id=? AND vorgang_id=?", (weitere[0][0], dokument_id, vorgang_id))
+                return {"papierkorb": False}
+            db.execute("UPDATE dokument SET geloescht_am=CURRENT_TIMESTAMP WHERE id=?", (dokument_id,))
+            return {"papierkorb": True}
+
+    def posteingang_id_von(self, dokument_id):
+        """True, wenn das Dokument (noch) im Posteingang liegt."""
+        with closing(self.connect()) as db:
+            return bool(db.execute("""SELECT 1 FROM dokument d JOIN vorgang v ON v.id=d.vorgang_id AND v.system='posteingang'
+                WHERE d.id=? AND d.geloescht_am IS NULL""", (dokument_id,)).fetchone())
+
+    def ablage_nachtragen(self, dokument_id):
+        """Nach der Texterkennung: Bei direkt archivierten Dokumenten Datum, Titel und Absender aus dem Text übernehmen."""
+        with closing(self.connect()) as db, db:
+            e = db.execute("""SELECT e.id, e.kontakt_id, d.dokument_datum, d.titel FROM eintrag e
+                JOIN vorgang v ON v.id=e.vorgang_id AND v.system='ablage' JOIN dokument d ON d.id=e.dokument_id
+                WHERE e.dokument_id=? AND e.geloescht_am IS NULL""", (dokument_id,)).fetchone()
+            if not e:
+                return
+            text = "\n".join(r[0] for r in db.execute(
+                "SELECT text FROM dokumentseite WHERE dokument_id=? ORDER BY nummer", (dokument_id,)))
+            if not text.strip():
+                return
+            v = self._vorschlag(db, text)
+            db.execute("UPDATE eintrag SET titel=? WHERE id=?", (e["titel"], e["id"]))
+            if v["datum"] and not e["dokument_datum"]:
+                db.execute("UPDATE dokument SET dokument_datum=? WHERE id=?", (v["datum"], dokument_id))
+                db.execute("UPDATE eintrag SET ereignis_datum=? WHERE id=?", (v["datum"], e["id"]))
+            if not e["kontakt_id"]:
+                kontakt = v["kontakt"]["id"] if v.get("kontakt") else None
+                if not kontakt and v.get("absender"):
+                    kontakt = db.execute("INSERT INTO kontakt(name) VALUES(?)", (v["absender"]["name"][:160],)).lastrowid
+                    self._abteilung(db, kontakt, {"anschrift": v["absender"].get("anschrift")})
+                if kontakt:
+                    db.execute("UPDATE eintrag SET kontakt_id=?, richtung='von' WHERE id=?", (kontakt, e["id"]))
+
     def dokument_fristen(self, dokument_id):
         """Im Text eines Dokuments erkannte Fristen, gerechnet ab Dokumentdatum."""
         with closing(self.connect()) as db:
@@ -1260,6 +1301,7 @@ def _route_table():
         ("POST", r"/api/einstellungen", lambda a, m, d: a.eigene_angaben_setzen(d.get("eigene_angaben"))),
         ("POST", r"/api/posteingang/(\d+)/zuordnen", lambda a, m, d: {"id": a.zuordnen(i(m[1]), d)}),
         ("POST", r"/api/dokumente/(\d+)/verschieben", lambda a, m, d: a.dokument_verschieben(i(m[1]), d)),
+        ("POST", r"/api/dokumente/(\d+)/entfernen", lambda a, m, d: a.dokument_entfernen(i(m[1]), _id(d.get("vorgang_id"), "Vorgang"))),
         ("GET", r"/api/dokumente/(\d+)/fristen", lambda a, m, d: {"fristen": a.dokument_fristen(i(m[1]))}),
         ("POST", r"/api/akte/(\d+)", lambda a, m, d: a.vorgang_aendern(i(m[1]), d)),
         ("POST", r"/api/akte/(\d+)/schlagwoerter", lambda a, m, d: {"schlagwoerter": a.schlagwoerter_setzen(i(m[1]), d.get("namen"))}),
@@ -1610,11 +1652,12 @@ def test_archiv(store):
 def test_fristen_ablage(store):  # noqa: C901
     """Fristen aus dem Text, direkte Ablage ins Archiv, Dokument in anderen Vorgang verschieben."""
     seiten = [{"nummer": 1, "text": "Ihr Schreiben vom 10.08.2026\nWir bitten um Ihre Stellungnahme bis zum 16.12.2026.\n"
-                                    "Der Betrag ist innerhalb von 14 Tagen zu überweisen. Frist zum 01.01.2020 ist abgelaufen."}]
+                                    "Bitte überweisen Sie den Betrag bis spätestens zum 2. Dezember 2026. Termin am 20.12.2026. "
+                                    "Der Betrag ist innerhalb von 14 Tagen zu überweisen. Zahlbar bis 05.12.2026. Frist bis zum 01.01.2020."}]
     f = fristen_erkennen(seiten, "2026-11-18")
+    # Nur „bis zum <Datum>“: weder „Termin am …“, „zahlbar bis …“, relative Angaben noch vergangene Daten
     assert [(x["faellig_am"], x["titel"]) for x in f] == [("2026-12-02", "Zahlung"), ("2026-12-16", "Stellungnahme")], f
     assert "16.12.2026" in f[1]["zitat"] and f[1]["seite"] == 1
-    assert fristen_erkennen([{"nummer": 1, "text": "binnen eines Monats Widerspruch einlegen"}], "2026-01-31")[0]["faellig_am"] == "2026-02-28"
     assert fristen_erkennen([{"nummer": 1, "text": "Ihr Schreiben vom 10.08.2026 und Rechnung vom 12.12.2026"}], "2026-08-01") == []
 
     store = type(store)(store.data / "Ablagetest", store.ocr)
@@ -1650,6 +1693,22 @@ def test_fristen_ablage(store):  # noqa: C901
     assert [d["id"] for d in akte.akte(a)["dokumente"]] == [d1]
     r = akte.dokument_verschieben(d1, {"von_vorgang_id": a, "ablage": True})
     assert r["ablage"] and [x["id"] for x in akte.archiv()] == [d1]
+    # Entfernen: mehrfach verknüpft -> nur Verknüpfung lösen; sonst Papierkorb
+    store.import_document(a, "Brief.pdf", b"%PDF-1.4\nBrief")  # d2 zusätzlich in a verknüpft
+    assert akte.dokument_entfernen(d2, a) == {"papierkorb": False}
+    assert [d["id"] for d in akte.akte(b)["dokumente"]] == [d2] and akte.akte(a)["dokumente"] == []
+    assert akte.dokument_entfernen(d2, b) == {"papierkorb": True}
+    assert akte.akte(b)["dokumente"] == [] and any(t["id"] == d2 for t in akte.papierkorb() if t["typ"] == "dokument")
+    # Direkt archiviert: Datum, Absender und Titel werden nach der Texterkennung nachgetragen
+    d3, _ = store.import_document(None, "Scan_0007.pdf", b"%PDF-1.4\nNachtrag")
+    akte.zuordnen(d3, {"ablage": True})
+    with closing(store.connect()) as db, db:
+        db.execute("INSERT INTO dokumentseite(dokument_id,nummer,methode,text) VALUES(?,?,?,?)", (d3, 1, "ocr",
+                   "Stadtwerke Musterstadt GmbH · Hafenweg 3 · 18055 Rostock\nHerrn Max Muster\nRostock, 12.11.2026\nJahresabrechnung"))
+        db.execute("UPDATE dokument SET titel='Jahresabrechnung', titel_quelle='Überschrift' WHERE id=?", (d3,))
+    akte.ablage_nachtragen(d3)
+    z = [x for x in akte.archiv() if x["id"] == d3][0]
+    assert z["datum"] == "2026-11-12" and z["absender"] and "Stadtwerke" in z["absender"] and z["titel"] == "Jahresabrechnung", z
 
 
 def test_chatnotiz(store):

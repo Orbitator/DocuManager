@@ -3,6 +3,15 @@
 Dauer etwa 15 Minuten. Die Schritte arbeiten zuerst mit einer Kopie, die echte Datenbank bleibt bis Schritt 5
 unberührt.
 
+## 0. Als Programm installieren (ab Version 0.8)
+
+1. ZIP herunterladen und entpacken. Falls Sie mit Ihren bisherigen Daten weiterarbeiten: den Ordner
+   `Korrespondenz_Lokal/Daten` aus dem vorigen Download in den neuen Ordner `Korrespondenz_Lokal` kopieren.
+2. Im neuen Ordner `Korrespondenz_Lokal` **DocuManager_Installieren.command** doppelklicken.
+3. Erwartet: „Fertig.“, der Finder zeigt **DocuManager** unter Programme, auf die Frage „Jetzt starten?“ öffnet
+   sich die Anwendung im Browser. Ab jetzt über Launchpad oder Spotlight starten; beenden über **Beenden** unten links.
+4. Updates: neue ZIP entpacken, Installationsprogramm erneut doppelklicken. Ihre Daten liegen in `~/DocuManager/Daten`.
+
 ## 1. Stand holen
 
 Neuen Ordner anlegen, zum Beispiel `~/Projekte`, dann im Terminal:

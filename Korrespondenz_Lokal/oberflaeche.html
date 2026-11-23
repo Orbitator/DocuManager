@@ -14,7 +14,7 @@
     <div class="side-foot">
       <a class="btn ghost" href="#papierkorb" id="trashlink">Papierkorb</a>
       <a class="btn ghost" href="#einstellungen">Einstellungen</a>
-      <a class="btn ghost" href="/alt" title="Chat-Import und Rechtsberatung aus der bisherigen Oberfläche">Bisherige Ansicht</a>
+      <button class="btn ghost" data-act="beenden" style="justify-content:flex-start">Beenden</button>
       <small id="version"></small>
     </div>
   </aside>
@@ -33,6 +33,7 @@
           <button role="menuitem" data-act="mail-get"><b>Aus Apple Mail holen</b><small>E-Mails mit der Markierung „Erfasster Beleg“</small></button>
         </div></div>
       <input type="file" id="fileinp" multiple accept=".pdf,.jpg,.jpeg,.png,.tif,.tiff" hidden>
+      <input type="file" id="restoreinp" accept=".zip,application/zip" hidden>
     </header>
     <main class="view" id="view"><p class="muted">Wird geladen …</p></main>
   </div>

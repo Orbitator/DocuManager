@@ -107,6 +107,18 @@ Teil 2 (umgesetzt, Schemaversion 7):
 - Vorgang ändern: Ein Dokument samt Chronik-Eintrag (und Mail-Anlagen) lässt sich in jeden bestehenden Vorgang
   verschieben, auch in einen erledigten oder zurück ins Archiv ohne Vorgang (`dokument_verschieben`).
 - Vorschau: Bilder werden vollständig ins Fenster eingepasst, PDFs als ganze Seite geöffnet.
+- Bedienung (0.8): „Heute“-Knopf an jedem Datumsfeld; je Dokumentzeile (Chronik, Dokumente, Archiv) zwei kleine
+  Knöpfe „verschieben“ und „löschen“ (`dokument_entfernen`: bei mehreren Vorgängen nur die Verknüpfung lösen, sonst
+  Papierkorb); „Vorgang ändern“ bietet „+ Neuer Vorgang …“; kompakte Werkzeugzeile der Vorschau mit Details per
+  Info-Knopf; „Dokument importieren“ nur in Posteingang und Archiv. Im Archiv wird direkt abgelegt; nach der
+  Texterkennung werden Titel, Datum und Absender ergänzt (`ablage_nachtragen`). „Bisherige Ansicht“ entfällt im Menü
+  (ChatGPT-Export-Import über Chat-Notizen).
+- Fristen werden nur noch bei der Formulierung „bis zum <Datum>“ (auch „bis spätestens zum“) vorgeschlagen.
+- Datensicherung: immer nur eine Sicherungsdatei; Wiederherstellen in den Einstellungen (Datei laden oder aus der
+  Liste) bei laufender Anwendung über die SQLite-Sicherungsschnittstelle (`wiederherstellen_laufend`), die bisherige
+  Datenbank bleibt als Kopie erhalten.
+- Programm ohne Terminal: `DocuManager_Installieren.command` installiert nach `~/DocuManager` und erzeugt
+  `DocuManager.app` (Startskript, Symbol aus `icon.svg`); „Beenden“ in der Seitenleiste (`POST /api/beenden`).
 - Kacheln im Posteingang zeigen ein echtes Vorschaubild der ersten Seite, aufrecht gedreht (auf dem Mac mit `sips`,
   zwischengespeichert in `Daten/Vorschau/`).
 - Aktenexport als ZIP mit Chronik.pdf, akte.json und ausgewählten Originalen.
