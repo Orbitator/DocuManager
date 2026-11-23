@@ -72,8 +72,13 @@
     self.browser.delegate = self;
     self.browser.browsedDeviceTypeMask = ICDeviceTypeMaskScanner | ICDeviceLocationTypeMaskLocal | ICDeviceLocationTypeMaskShared;
     [self.browser start];
+    // Aus dem Terminal gestartet, holt macOS 14 das Fenster nicht von selbst nach vorne.
+    // Deshalb schwebt es über dem Browser und wird ausdrücklich in den Vordergrund gebracht.
+    self.window.level = NSFloatingWindowLevel;
     [self.window makeKeyAndOrderFront:nil];
+    [self.window orderFrontRegardless];
     [NSApp activate];
+    [NSRunningApplication.currentApplication activateWithOptions:NSApplicationActivateAllWindows];
 }
 
 - (void)refreshDevices {

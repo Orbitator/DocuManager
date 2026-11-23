@@ -4,6 +4,7 @@ Teilvorgänge, Chronik, Fristen mit Fundstelle und Verlauf, Kontakte mit Anschri
 Versand mit gespeicherter Anschrift, Referenzen, Bereiche, Schlagwörter, Papierkorb und Volltextsuche.
 Alle Daten liegen in derselben SQLite-Datei wie Vorgänge und Dokumente.
 """
+import json
 import re
 import sqlite3
 from contextlib import closing
@@ -164,6 +165,26 @@ def migrate_4(db):
         db.execute("""INSERT INTO vorgang(titel,bereich,beschreibung,status,system)
             VALUES('Posteingang','Anderes','Interner Vorgang für noch nicht zugeordnete Dokumente','Offen','posteingang')""")
     db.execute("DELETE FROM suche WHERE art='vorgang' AND ref_id=(SELECT id FROM vorgang WHERE system='posteingang')")
+
+
+def migrate_6(db):
+    """Briefangaben eines Entwurfs (Empfänger, Betreff, Zeichen, Anlagen) als JSON am Eintrag."""
+    if "brief" not in _columns(db, "eintrag"):
+        db.execute("ALTER TABLE eintrag ADD COLUMN brief TEXT")
+
+
+def _brief(value):
+    if value in (None, ""):
+        return None
+    if not isinstance(value, dict):
+        raise ValueError("Briefangaben: ungültig.")
+    erlaubt = {"empfaenger": 600, "betreff": 300, "zeichen": 120, "bezug_datum": 20, "datum": 20}
+    brief = {k: _text(value.get(k), k, n) for k, n in erlaubt.items() if value.get(k)}
+    anlagen = value.get("anlagen") or []
+    if not isinstance(anlagen, list) or len(anlagen) > 30:
+        raise ValueError("Anlagen: ungültige Liste.")
+    brief["anlagen"] = [_text(a, "Anlage", 200, True) for a in anlagen]
+    return json.dumps(brief, ensure_ascii=False)
 
 
 # --- Vorschläge für den Posteingang ------------------------------------------------------
@@ -414,6 +435,7 @@ class Akte:
             eintraege = q("""SELECT * FROM eintrag WHERE vorgang_id=? AND geloescht_am IS NULL
                 ORDER BY ereignis_datum DESC, id DESC""", vorgang_id)
             for e in eintraege:
+                e["brief"] = json.loads(e["brief"]) if e.get("brief") else None
                 e["teile"] = [r["teilvorgang_id"] for r in q(
                     "SELECT teilvorgang_id FROM eintrag_teil WHERE eintrag_id=? ORDER BY teilvorgang_id", e["id"])]
                 # Nacherfasst: Telefonat, Notiz o. Ä. später eingetragen. Ein Brief ist naturgemäß älter als sein Eingang.
@@ -597,10 +619,11 @@ class Akte:
                                       (dok, vorgang_id)).fetchone():
                 raise ValueError("Das Dokument ist diesem Vorgang nicht zugeordnet.")
             eid = db.execute("""INSERT INTO eintrag(vorgang_id,art,titel,ereignis_datum,richtung,kontakt_id,
-                dokument_id,bezug_id,text,quelle,geprueft) VALUES(?,?,?,?,?,?,?,?,?,?,?)""",
+                dokument_id,bezug_id,text,quelle,geprueft,brief) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)""",
                 (vorgang_id, art, titel, datum, richtung, _id(data.get("kontakt_id"), "Kontakt"), dok,
                  _id(data.get("bezug_id"), "Bezug"), _text(data.get("text"), "Text", 20000),
-                 _text(data.get("quelle"), "Quelle", 300), 1 if data.get("geprueft") else 0)).lastrowid
+                 _text(data.get("quelle"), "Quelle", 300), 1 if data.get("geprueft") else 0,
+                 _brief(data.get("brief")))).lastrowid
             db.executemany("INSERT INTO eintrag_teil VALUES(?,?)", ((eid, t) for t in teile))
             return eid
 
@@ -620,6 +643,8 @@ class Akte:
                 felder["kontakt_id"] = _id(data["kontakt_id"], "Kontakt")
             if "geprueft" in data:
                 felder["geprueft"] = 1 if data["geprueft"] else 0
+            if "brief" in data:
+                felder["brief"] = _brief(data["brief"])
             if felder:
                 db.execute(f"UPDATE eintrag SET {','.join(k + '=?' for k in felder)} WHERE id=?",
                            (*felder.values(), eintrag_id))
@@ -962,6 +987,34 @@ class Akte:
                 r["datum"] = r["dokument_datum"] or r["ereignis_datum"] or r["angelegt_am"][:10]
             return rows
 
+    def chat_notiz(self, vorgang_id, data):
+        """Chat-Notiz mit Quellenhinweis. Im Text erwähnte Schreiben ohne Original werden als fehlend vermerkt."""
+        text = _text(data.get("text"), "Text", 20000, True)
+        eid = self.eintrag_anlegen(vorgang_id, {**data, "art": "chat", "text": text,
+                                                "quelle": data.get("quelle") or "Chat", "geprueft": False})
+        fehlend = 0
+        with closing(self.connect()) as db, db:
+            teile = [r[0] for r in db.execute("SELECT teilvorgang_id FROM eintrag_teil WHERE eintrag_id=?", (eid,))]
+            for art, tag in re.findall(r"(Schreiben|Brief|Bescheid|E-Mail|Mail|Rechnung|Gutachten|Bestätigung|Kündigung\w*)"
+                                       r"\s+vom\s+(\d{1,2}\.\d{1,2}\.\d{4})", text, re.I):
+                d = daten_in(tag)
+                if not d or db.execute("""SELECT 1 FROM eintrag WHERE vorgang_id=? AND ereignis_datum=? AND geloescht_am IS NULL
+                    AND (dokument_id IS NOT NULL OR art='fehlt')""", (vorgang_id, d[0])).fetchone():
+                    continue
+                fid = db.execute("""INSERT INTO eintrag(vorgang_id,art,titel,ereignis_datum,text,bezug_id)
+                    VALUES(?,?,?,?,?,?)""", (vorgang_id, "fehlt", f"{art} vom {tag}", d[0],
+                                             "Erwähnt in einer Chat-Notiz. Das Original ist nicht in der Akte.", eid)).lastrowid
+                db.executemany("INSERT INTO eintrag_teil VALUES(?,?)", ((fid, t) for t in teile))
+                fehlend += 1
+        return {"id": eid, "fehlend": fehlend}
+
+    def chat_notizen(self):
+        with closing(self.connect()) as db:
+            return [dict(r) for r in db.execute("""SELECT e.id,e.vorgang_id,v.titel AS vorgang,e.titel,e.ereignis_datum,
+                e.quelle,e.geprueft,substr(e.text,1,240) AS auszug FROM eintrag e JOIN vorgang v ON v.id=e.vorgang_id
+                WHERE e.art='chat' AND e.geloescht_am IS NULL AND v.geloescht_am IS NULL
+                ORDER BY e.ereignis_datum DESC, e.id DESC""")]
+
     def fristen_alle(self):
         with closing(self.connect()) as db:
             return [dict(r) for r in db.execute("""SELECT f.*, v.titel AS vorgang, t.name AS teilvorgang
@@ -1042,6 +1095,8 @@ def _route_table():
         ("GET", r"/api/posteingang", lambda a, m, d: {"dokumente": a.posteingang()}),
         ("GET", r"/api/fristen", lambda a, m, d: {"fristen": a.fristen_alle()}),
         ("GET", r"/api/archiv", lambda a, m, d: {"dokumente": a.archiv()}),
+        ("GET", r"/api/chatnotizen", lambda a, m, d: {"notizen": a.chat_notizen()}),
+        ("POST", r"/api/akte/(\d+)/chatnotiz", lambda a, m, d: a.chat_notiz(i(m[1]), d)),
         ("GET", r"/api/einstellungen", lambda a, m, d: {"eigene_angaben": a.eigene_angaben()}),
         ("POST", r"/api/einstellungen", lambda a, m, d: a.eigene_angaben_setzen(d.get("eigene_angaben"))),
         ("POST", r"/api/posteingang/(\d+)/zuordnen", lambda a, m, d: {"id": a.zuordnen(i(m[1]), d)}),
@@ -1372,3 +1427,16 @@ def test_archiv(store):
     assert kia["absender"] == "Allsicher Versicherung AG" and kia["datum"] == "2026-11-10" and kia["art"] == "eingang"
     akte.loeschen("dokument", doc)
     assert akte.archiv() == []
+
+
+def test_chatnotiz(store):
+    store = type(store)(store.data / "Chattest", store.ocr)
+    akte = Akte(store, today=lambda: "2026-11-23")
+    v = store.create_case("Unitask", "Versicherungen", "")
+    r = akte.chat_notiz(v, {"titel": "Einschätzung", "text": "Die Kündigung vom 14.10.2026 ist wirksam. Siehe E-Mail vom 05.10.2026.",
+                            "quelle": "ChatGPT-Verlauf „Unitask“"})
+    a = akte.akte(v)
+    assert r["fehlend"] == 2 and sorted(e["titel"] for e in a["eintraege"] if e["art"] == "fehlt") == [
+        "E-Mail vom 05.10.2026", "Kündigung vom 14.10.2026"]
+    assert akte.chat_notiz(v, {"titel": "Nochmal", "text": "Kündigung vom 14.10.2026"})["fehlend"] == 0
+    assert akte.chat_notizen()[0]["geprueft"] == 0

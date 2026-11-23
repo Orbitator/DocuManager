@@ -25,8 +25,9 @@ from pathlib import Path
 from threading import Event, Lock, Thread
 from urllib.parse import parse_qsl, unquote, urlsplit
 
-from akte import (Akte, ROUTES as AKTE_ROUTES, STATUSES, migrate_3, migrate_4, route_akte, test_absender, test_akte,
-                  test_archiv, test_posteingang)
+from akte import (Akte, ROUTES as AKTE_ROUTES, STATUSES, migrate_3, migrate_4, migrate_6, route_akte, test_absender,
+                  test_akte, test_archiv, test_chatnotiz, test_posteingang)
+from export import akte_zip, brief_html, sicherung_erstellen, sicherung_pruefen, test_export, wiederherstellen
 from chat_sync import ChatSync, MAX_EXPORT, test_chat_sync
 from mail_import import MailImport, migrate_5, test_mail
 
@@ -35,7 +36,7 @@ PORT = 8765
 APP_VERSION = "DocuManager 0.4 · neue Oberfläche, Archiv, Apple Mail"
 MAX_UPLOAD = 25 * 1024 * 1024
 MIN_MACOS = "14.0"
-SCHEMA_VERSION = 5
+SCHEMA_VERSION = 6
 OCR_WAITING = "Wartet auf Texterkennung"
 OCR_RUNNING = "Texterkennung läuft"
 log = logging.getLogger("korrespondenz")
@@ -186,7 +187,7 @@ def migrate_2(db):
         db.execute("ALTER TABLE dokument ADD COLUMN ocr_aktualisiert_am TEXT")
 
 
-MIGRATIONS = ((1, migrate_1), (2, migrate_2), (3, migrate_3), (4, migrate_4), (5, migrate_5))
+MIGRATIONS = ((1, migrate_1), (2, migrate_2), (3, migrate_3), (4, migrate_4), (5, migrate_5), (6, migrate_6))
 
 
 class Store:
@@ -488,7 +489,14 @@ class Scanner:
         if self.job and self.job["result"] is None:
             self._finish(self.job["id"])
             if self.job["result"] is None:
-                raise ValueError("Der macOS-Scandialog ist bereits geöffnet.")
+                # Ein früheres Scanfenster läuft noch, ist aber womöglich nicht sichtbar: schließen und neu öffnen.
+                log.info("Vorheriger Scandialog läuft noch und wird für einen neuen Versuch beendet.")
+                self.job["process"].terminate()
+                try:
+                    self.job["process"].wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    self.job["process"].kill()
+                self._finish(self.job["id"])
         if case_id is not None and not any(item["id"] == case_id for item in self.store.list_cases()):
             raise ValueError("Vorgang nicht gefunden.")
         binary = build_scanner()
@@ -633,6 +641,36 @@ class Handler(BaseHTTPRequestHandler):
                             "ocr_loading": not self.store.ocr_ready.is_set(), "version": APP_VERSION})
         elif path == "/api/mail":
             self.send_json(self.mail.status())
+        elif match := re.fullmatch(r"/api/akte/(\d+)/export", path):
+            query = dict(parse_qsl(urlsplit(self.path).query))
+            auswahl = None if query.get("docs", "alle") == "alle" else {int(x) for x in query["docs"].split(",") if x.isdigit()}
+            try:
+                a = self.akte.akte(int(match[1]))
+            except ValueError as error:
+                self.send_json({"error": str(error)}, 404)
+                return
+            name, inhalt = akte_zip(self.store, self.akte, a, auswahl)
+            self.send_bytes(200, "application/zip", inhalt, "attachment; filename*=" + encode_rfc2231(name, "utf-8"))
+        elif match := re.fullmatch(r"/api/eintraege/(\d+)/brief", path):
+            eintrag = None
+            with closing(self.store.connect()) as db:
+                row = db.execute("SELECT vorgang_id FROM eintrag WHERE id=?", (int(match[1]),)).fetchone()
+            if row:
+                eintrag = next((e for e in self.akte.akte(row[0])["eintraege"] if e["id"] == int(match[1])), None)
+            if not eintrag:
+                self.send_json({"error": "Eintrag nicht gefunden."}, 404)
+            else:
+                self.send_bytes(200, "text/html; charset=utf-8", brief_html(eintrag, self.akte.eigene_angaben()).encode())
+        elif path == "/api/sicherungen":
+            ordner = self.store.data / "Sicherungen"
+            liste = sorted(ordner.glob("Korrespondenz-Sicherung_*.zip"), reverse=True) if ordner.is_dir() else []
+            self.send_json({"sicherungen": [{"name": p.name, "groesse": p.stat().st_size} for p in liste[:20]]})
+        elif match := re.fullmatch(r"/api/sicherungen/(Korrespondenz-Sicherung_[0-9_-]+\.zip)", path):
+            datei = self.store.data / "Sicherungen" / match[1]
+            if not datei.is_file():
+                self.send_json({"error": "Sicherung nicht gefunden."}, 404)
+            else:
+                self.send_bytes(200, "application/zip", datei.read_bytes(), "attachment; filename=" + match[1])
         elif path == "/api/chat/threads":
             self.send_json({"threads": self.chat.threads()})
         elif match := re.fullmatch(r"/api/chat/threads/([A-Za-z0-9_-]{1,160})", path):
@@ -706,6 +744,12 @@ class Handler(BaseHTTPRequestHandler):
                 name = unquote(self.headers.get("X-Dateiname", ""), errors="strict")
                 doc_id, created = self.store.import_document(None, name, self.read_body(MAX_UPLOAD))
                 self.send_json({"id": doc_id, "created": created}, 201 if created else 200)
+            elif path == "/api/sicherungen":
+                ziel = sicherung_erstellen(self.store)
+                log.info("Sicherung erstellt: %s", ziel)
+                self.send_json({"name": ziel.name, "groesse": ziel.stat().st_size, "pruefung": sicherung_pruefen(ziel)}, 201)
+            elif match := re.fullmatch(r"/api/sicherungen/(Korrespondenz-Sicherung_[0-9_-]+\.zip)/pruefen", path):
+                self.send_json(sicherung_pruefen(self.store.data / "Sicherungen" / match[1]))
             elif path == "/api/mail/abholen":
                 with self.mail_lock:  # ein Abruf zur Zeit
                     self.send_json(self.mail.abholen())
@@ -869,6 +913,19 @@ def self_test(ocr=None, image=None):
         process = type("Completed", (), {"poll": lambda self: 0})()
         scanner.job = {"id":"test", "case":case_id, "folder":scan_folder, "process":process, "result":None}
         assert scanner.finish("test") == {"state":"done", "imported":1, "duplicates":0, "errors":[]}
+        haengend = folder / "scan-haengt"
+        haengend.mkdir()
+        laeuft = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"])
+        scanner.job = {"id": "alt", "case": case_id, "folder": haengend, "process": laeuft, "result": None}
+        global build_scanner
+        echter_bau, build_scanner = build_scanner, lambda: None  # im Test kein echtes Scanfenster öffnen
+        try:
+            scanner.start(case_id)
+        except ValueError as error:
+            assert "bereits" not in str(error), error  # erwartet: „konnte nicht gestartet werden“
+        finally:
+            build_scanner = echter_bau
+        assert laeuft.poll() is not None, "Hängender Scandialog wurde nicht beendet."
         assert len(store.case_documents(case_id)) == 2
         assert not scan_folder.exists()
         test_chat_sync(store)
@@ -877,6 +934,8 @@ def self_test(ocr=None, image=None):
         test_absender(store)
         test_archiv(store)
         test_mail(store)
+        test_chatnotiz(store)
+        test_export(store)
         with closing(store.connect()) as db:
             assert db.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
             assert not db.execute("PRAGMA foreign_key_check").fetchall()
@@ -998,10 +1057,26 @@ def main():
     parser.add_argument("--test-image", type=Path)
     parser.add_argument("--ocr-binary", type=Path)
     parser.add_argument("--open", action="store_true")
+    parser.add_argument("--sicherung", action="store_true", help="Vollständige Sicherung erstellen und prüfen")
+    parser.add_argument("--wiederherstellen", type=Path, help="Sicherung (ZIP) in den Datenordner zurückspielen")
+    parser.add_argument("--ueberschreiben", action="store_true", help="Beim Wiederherstellen vorhandene Daten ersetzen")
     args = parser.parse_args()
     os.umask(0o077)
     if args.self_test:
         self_test(args.ocr_binary, args.test_image)
+        return
+    if args.wiederherstellen:  # Bei beendeter Anwendung ausführen
+        try:
+            p = wiederherstellen(args.wiederherstellen, ROOT / "Daten", args.ueberschreiben)
+        except ValueError as error:
+            print(error)
+            raise SystemExit(1) from None
+        print(f"Wiederhergestellt: Sicherung vom {p['erstellt']}, {p['anzahl']['vorgang']} Vorgänge, "
+              f"{p['anzahl']['dokument']} Dokumente, {p['dateien']} Dateien. Prüfung in Ordnung.")
+        return
+    if args.sicherung:
+        ziel = sicherung_erstellen(Store(ROOT / "Daten", None))
+        print(f"Sicherung: {ziel}\nPrüfung: {'in Ordnung' if sicherung_pruefen(ziel)['ok'] else 'FEHLER'}")
         return
     logfile = setup_logging(ROOT / "Daten" / "Logs")
     log.info("Start: Python %s, %s %s", platform.python_version(), platform.platform(), platform.machine())
