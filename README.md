@@ -11,7 +11,7 @@ Die Anwendung läuft auf dem Mac, wird im Browser bedient und braucht keinen Clo
 | Vorgänge mit Bereich, Status und nächster Frist | produktiv in SQLite |
 | Dokumentimport (PDF, JPEG, PNG, TIFF bis 25 MB), Original unverändert, Dubletten per SHA-256 | produktiv |
 | Texterkennung mit PDFKit und Apple Vision, Titel aus Betreff oder Überschrift | produktiv, läuft als Warteschlange im Hintergrund; Bilderkennung am 23.11.2026 auf dem Mac bestätigt |
-| Nativer macOS-Scandialog mit Netzwerkscannern, dazu überwachter Scan-Ordner `~/Documents/DocuManager Scans` | Test mit echtem Scanner offen |
+| Nativer macOS-Scandialog mit Netzwerkscannern, dazu überwachter Scan-Ordner `~/DocuManager Scans` | Test mit echtem Scanner offen |
 | ChatGPT-Export importieren (Auswahl einzelner Unterhaltungen, wiederholbar) | produktiv |
 | E-Mails aus Apple Mail übernehmen (Markierung „Erfasster Beleg“, mit Anlagen, ohne Doppelungen, letzter Abruf gespeichert) | neu, Test auf dem Mac offen |
 | Automatische Drehung auf dem Kopf stehender Seiten (Ansichtsfassung, Original unverändert) | neu, Test auf dem Mac offen |
@@ -66,7 +66,7 @@ Alle Daten liegen in `Daten/` neben `app.py` – nach der Installation als Progr
 | Anlagen aus ChatGPT-Exporten | `Daten/Chat_Originale/` |
 | Automatische Sicherungen vor Schemaänderungen und Datensicherungen aus den Einstellungen | `Daten/Sicherungen/` |
 | Aufrecht gedrehte Ansichtsfassungen und Vorschaubilder (neu erzeugbar) | `Daten/Ansicht/`, `Daten/Vorschau/` |
-| Scan-Ordner für Scanner-Software (wird automatisch übernommen) | `~/Documents/DocuManager Scans/` |
+| Scan-Ordner für Scanner-Software (wird automatisch übernommen) | `~/DocuManager Scans/` |
 | Protokoll | `Daten/Logs/korrespondenz.log` und `Daten/Logs/scanner.log` |
 | Scan-Zwischenablage | `Daten/Scan_Eingang/` |
 | Gebaute Helfer | `Daten/Laufzeit/` |

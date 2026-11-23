@@ -34,13 +34,15 @@ from mail_import import MailImport, migrate_5, test_mail
 
 ROOT = Path(__file__).resolve().parent
 PORT = 8765
-APP_VERSION = "DocuManager 0.8.1 · Programm ohne Terminal, Wiederherstellen, kompakte Vorschau"
+APP_VERSION = "DocuManager 0.8.2 · Programm ohne Terminal, Wiederherstellen, kompakte Vorschau"
 MAX_UPLOAD = 25 * 1024 * 1024
 MIN_MACOS = "14.0"
-SCHEMA_VERSION = 8
+SCHEMA_VERSION = 9
 OCR_WAITING = "Wartet auf Texterkennung"
 # Scan-Ordner für Scanner-Software und „Digitale Bilder“: Dateien darin kommen automatisch in den Posteingang.
-SCAN_ORDNER = Path.home() / "Documents" / "DocuManager Scans"
+# Bewusst nicht unter „Dokumente“: Diesen Ordner schützt macOS, ein über Launchpad gestartetes Programm bräuchte
+# dafür eine eigene Erlaubnis.
+SCAN_ORDNER = Path.home() / "DocuManager Scans"
 OCR_RUNNING = "Texterkennung läuft"
 log = logging.getLogger("korrespondenz")
 # Die ersten drei Werte und die Vorgabe „Schreiben verfassen“ stammen aus dem bisherigen Stand und bleiben gleich.
@@ -205,8 +207,33 @@ def migrate_8(db):
         AND id IN (SELECT dokument_id FROM dokumentseite WHERE methode='ocr')""", (OCR_WAITING,))
 
 
+def migrate_9(db):
+    """Entfernt die Regel UNIQUE(vorgang_id, sha256) aus `dokument`. Sie stammt aus der Zeit, als ein Dokument nur zu
+    einem Vorgang gehörte. Ein Dokument im Papierkorb blockierte damit das Zuordnen derselben, neu importierten Datei.
+    Die Zugehörigkeit regelt `dokument_vorgang` (Primärschlüssel verhindert Doppelungen je Vorgang).
+    Neuaufbau der Tabelle nach dem SQLite-Verfahren: Fremdschlüssel währenddessen aus, danach Prüfung."""
+    sql = db.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name='dokument'").fetchone()[0]
+    if "UNIQUE(vorgang_id, sha256)" not in sql.replace(" ", "").replace("UNIQUE(vorgang_id,sha256)", "UNIQUE(vorgang_id, sha256)"):
+        return
+    db.execute("PRAGMA foreign_keys=OFF")  # wirkt nur außerhalb einer Transaktion; hier ist noch keine offen
+    trigger = [r[0] for r in db.execute("SELECT sql FROM sqlite_master WHERE type='trigger' AND tbl_name='dokument'")]
+    neu = re.sub(r",\s*UNIQUE\s*\(\s*vorgang_id\s*,\s*sha256\s*\)", "", sql)
+    neu = re.sub(r"^CREATE TABLE\s+\"?dokument\"?\s*\(", "CREATE TABLE dokument_neu(", neu)
+    spalten = ",".join(r[1] for r in db.execute("PRAGMA table_info(dokument)"))
+    db.execute(neu)
+    db.execute(f"INSERT INTO dokument_neu({spalten}) SELECT {spalten} FROM dokument")
+    db.execute("DROP TABLE dokument")
+    db.execute("ALTER TABLE dokument_neu RENAME TO dokument")
+    for t in trigger:
+        db.execute(t)
+    db.execute("CREATE INDEX IF NOT EXISTS dokument_sha256 ON dokument(sha256)")
+    fehler = db.execute("PRAGMA foreign_key_check").fetchall()
+    if fehler:
+        raise sqlite3.IntegrityError(f"Fremdschlüssel nach dem Umbau verletzt: {fehler[:3]}")
+
+
 MIGRATIONS = ((1, migrate_1), (2, migrate_2), (3, migrate_3), (4, migrate_4), (5, migrate_5), (6, migrate_6),
-              (7, migrate_7), (8, migrate_8))
+              (7, migrate_7), (8, migrate_8), (9, migrate_9))
 
 
 class Store:
@@ -925,9 +952,14 @@ class Handler(BaseHTTPRequestHandler):
         except (ValueError, KeyError, AttributeError, TypeError) as error:
             log.info("Abgelehnt %s: %s", path, error)
             self.send_json({"error": str(error) if isinstance(error, ValueError) else "Ungültige Eingabe."}, 400)
-        except (OSError, sqlite3.Error):
+        except (OSError, sqlite3.Error) as error:
             log.exception("Fehler bei %s", path)
-            self.send_json({"error": "Speichern fehlgeschlagen. Prüfe freien Speicher und Schreibrechte. "
+            grund = getattr(error, "strerror", None) or str(error)
+            hinweis = (" macOS verweigert den Zugriff auf einen Ordner (Systemeinstellungen → Datenschutz & Sicherheit → "
+                       "Dateien und Ordner)." if isinstance(error, PermissionError) else
+                       " Eine andere Aktion schreibt gerade; bitte in einigen Sekunden erneut versuchen."
+                       if "locked" in str(error) else "")
+            self.send_json({"error": f"Speichern fehlgeschlagen ({grund}).{hinweis} "
                                      "Details stehen in Daten/Logs/korrespondenz.log."}, 500)
 
 

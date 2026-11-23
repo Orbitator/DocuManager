@@ -1699,6 +1699,14 @@ def test_fristen_ablage(store):  # noqa: C901
     assert [d["id"] for d in akte.akte(b)["dokumente"]] == [d2] and akte.akte(a)["dokumente"] == []
     assert akte.dokument_entfernen(d2, b) == {"papierkorb": True}
     assert akte.akte(b)["dokumente"] == [] and any(t["id"] == d2 for t in akte.papierkorb() if t["typ"] == "dokument")
+    # Gelöscht und dieselbe Datei erneut importiert: Zuordnen zum selben Vorgang muss gehen
+    d4, _ = store.import_document(None, "Wiederholt.pdf", b"%PDF-1.4\nWiederholt")
+    akte.zuordnen(d4, {"vorgang_id": a})
+    akte.dokument_entfernen(d4, a)
+    d5, neu5 = store.import_document(None, "Wiederholt.pdf", b"%PDF-1.4\nWiederholt")
+    assert neu5 and d5 != d4
+    akte.zuordnen(d5, {"vorgang_id": a})
+    assert [d["id"] for d in akte.akte(a)["dokumente"]] == [d5]
     # Direkt archiviert: Datum, Absender und Titel werden nach der Texterkennung nachgetragen
     d3, _ = store.import_document(None, "Scan_0007.pdf", b"%PDF-1.4\nNachtrag")
     akte.zuordnen(d3, {"ablage": True})

@@ -1,4 +1,4 @@
--- SQLite-Schema der Korrespondenzverwaltung, Schemaversion 8 (PRAGMA user_version).
+-- SQLite-Schema der Korrespondenzverwaltung, Schemaversion 9 (PRAGMA user_version).
 -- Erzeugt aus einer frischen Installation. Ausschließlich Struktur, keine Daten.
 -- Maßgeblich sind die Migrationen in app.py (MIGRATIONS), akte.py (migrate_3, migrate_4, migrate_6), mail_import.py
 -- (migrate_5) und ChatSync.__init__. Fremdschlüssel müssen pro Verbindung aktiviert werden.
@@ -43,13 +43,12 @@ CREATE TABLE chat_thread(
                     id TEXT PRIMARY KEY, titel TEXT NOT NULL, stand REAL, importiert_am TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
                 );
 
-CREATE TABLE dokument(
+CREATE TABLE "dokument"(
             id INTEGER PRIMARY KEY, vorgang_id INTEGER NOT NULL REFERENCES vorgang(id),
             dateiname TEXT NOT NULL, titel TEXT NOT NULL, titel_seite INTEGER,
             titel_quelle TEXT NOT NULL, mime TEXT NOT NULL, dateipfad TEXT NOT NULL,
             sha256 TEXT NOT NULL, ocr_status TEXT NOT NULL,
-            angelegt_am TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, ocr_fehler TEXT, ocr_aktualisiert_am TEXT, geloescht_am TEXT, dokument_datum TEXT, ansicht TEXT,
-            UNIQUE(vorgang_id, sha256)
+            angelegt_am TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, ocr_fehler TEXT, ocr_aktualisiert_am TEXT, geloescht_am TEXT, dokument_datum TEXT, ansicht TEXT
         );
 
 CREATE TABLE dokument_vorgang(
@@ -157,6 +156,8 @@ CREATE TABLE vorgang_schlagwort(
 
 CREATE INDEX archiv_typ ON archivdatei(mime_typ);
 
+CREATE INDEX dokument_sha256 ON dokument(sha256);
+
 CREATE INDEX dokument_vorgang_vorgang ON dokument_vorgang(vorgang_id);
 
 CREATE INDEX eintrag_vorgang ON eintrag(vorgang_id);
@@ -198,4 +199,4 @@ CREATE TRIGGER suche_vorgang_au AFTER UPDATE OF titel,beschreibung ON vorgang BE
   DELETE FROM suche WHERE art='vorgang' AND ref_id=OLD.id;
   INSERT INTO suche(art,ref_id,seite,text) VALUES('vorgang',NEW.id,NULL,NEW.titel||' '||NEW.beschreibung); END;
 
-PRAGMA user_version = 8;
+PRAGMA user_version = 9;

@@ -111,7 +111,7 @@
     if (self.hotFolder.length) {
         [[NSFileManager defaultManager] createDirectoryAtPath:self.hotFolder withIntermediateDirectories:YES attributes:nil error:nil];
         self.status.stringValue = [NSString stringWithFormat:@"In „Digitale Bilder“ links den Scanner wählen und bei „Scannen nach“ "
-            @"den Ordner „%@“ (in Dokumente) einstellen. Die Scans erscheinen dann von selbst im Posteingang.",
+            @"den Ordner „%@“ (in Ihrem Benutzerordner) einstellen. Die Scans erscheinen dann von selbst im Posteingang.",
             self.hotFolder.lastPathComponent];
     }
 }

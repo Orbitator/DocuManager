@@ -823,7 +823,7 @@ document.addEventListener('click', async ev => {
   case 'arch-import': $('#fileinp').dataset.ziel = 'archiv'; $('#fileinp').click(); break;
   case 'doc-add': $('#fileinp').dataset.ziel = String(D.akte.id); $('#fileinp').click(); break;
   case 'imp-scan': $('#impmenu').hidden = true; scan(); break;
-  case 'scan-folder': $('#impmenu').hidden = true; try { const r = await api('scanordner/oeffnen', {}); toast(`Ordner „${r.pfad.split('/').pop()}“ geöffnet. Was Sie dort hineinscannen oder ablegen, kommt automatisch in den Posteingang.`); } catch (e) { toast(e.message); } break;
+  case 'scan-folder': $('#impmenu').hidden = true; try { const r = await api('scanordner/oeffnen', {}); toast(`Ordner „${r.pfad.split('/').pop()}“ (in Ihrem Benutzerordner) geöffnet. Was Sie dort hineinscannen oder ablegen, kommt automatisch in den Posteingang.`); } catch (e) { toast(e.message); } break;
   case 'ib-open': S.ibSel = S.ibSel === id ? null : id; $('#view').innerHTML = vInbox(); if (S.ibSel) $('#it-' + S.ibSel)?.scrollIntoView({behavior: 'smooth', block: 'nearest'}); break;
   case 'ib-close': S.ibSel = null; $('#view').innerHTML = vInbox(); break;
   case 'ib-del': await act(() => api(`dokument/${id}/loeschen`, {}), 'In den Papierkorb verschoben.'); break;

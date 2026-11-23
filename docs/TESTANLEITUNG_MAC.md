@@ -139,7 +139,7 @@ Erst wenn Schritt 2 bis 4 funktionieren. Die bisherige Anwendung vorher beenden.
 1. **Dokument importieren → Scannen …**. Erwartet: Nach einigen Sekunden steht Ihr Scanner in der Liste oben,
    auch wenn er nur im WLAN hängt.
 2. Falls nicht: Unten links **„Digitale Bilder“ öffnen**, dort links den Scanner wählen und bei „Scannen nach“ den
-   Ordner **DocuManager Scans** (in Dokumente) einstellen. Scannen. Erwartet: Nach wenigen Sekunden erscheint der Scan
+   Ordner **DocuManager Scans** (in Ihrem Benutzerordner) einstellen. Scannen. Erwartet: Nach wenigen Sekunden erscheint der Scan
    im Posteingang. Den Ordner öffnet auch **Dokument importieren → Scan-Ordner öffnen**.
 3. Bitte mitteilen, ob Ihr Scanner in Schritt 1 erscheint, und den Inhalt von `Daten/Logs/scanner.log`.
 

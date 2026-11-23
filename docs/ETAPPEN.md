@@ -94,7 +94,7 @@ Teil 2 (umgesetzt, Schemaversion 7):
   nicht vernichtet: Über ein archiviertes Dokument lässt sich die Akte weiterhin öffnen und bei Bedarf
   wieder aufnehmen (Status ändern).
 - Scannen: Der Scan-Dialog sucht auch Netzwerkscanner (Bonjour/AirScan) und bietet „Digitale Bilder“ als Ausweg.
-  Zusätzlich überwacht die Anwendung den Ordner `~/Documents/DocuManager Scans`: Was die Scanner-Software dort
+  Zusätzlich überwacht die Anwendung den Ordner `~/DocuManager Scans`: Was die Scanner-Software dort
   ablegt, kommt nach wenigen Sekunden in den Posteingang und wird nach „Übernommen“ verschoben.
 - Fristen: Beim Zuordnen schlägt der Posteingang erkannte Fristen vor („bis zum 16.12.2026“, „spätestens am …“,
   „zahlbar bis …“, „innerhalb von 14 Tagen“ / „binnen eines Monats“ ab Dokumentdatum) mit Titel aus dem Satz
@@ -113,6 +113,11 @@ Teil 2 (umgesetzt, Schemaversion 7):
   Info-Knopf; „Dokument importieren“ nur in Posteingang und Archiv. Im Archiv wird direkt abgelegt; nach der
   Texterkennung werden Titel, Datum und Absender ergänzt (`ablage_nachtragen`). „Bisherige Ansicht“ entfällt im Menü
   (ChatGPT-Export-Import über Chat-Notizen).
+- Fehlerbehebung 0.8.2 (Schemaversion 9): „Zuordnen“ scheiterte mit „Speichern fehlgeschlagen“, wenn dieselbe Datei
+  schon einmal im Vorgang lag und im Papierkorb war. Ursache war die alte Regel UNIQUE(vorgang_id, sha256) in
+  `dokument`; `migrate_9` baut die Tabelle ohne sie neu (Zugehörigkeit regelt `dokument_vorgang`). Der Scan-Ordner
+  liegt jetzt unter `~/DocuManager Scans` (nicht in „Dokumente“, das macOS für Programme gesondert schützt).
+  Fehlermeldungen beim Speichern nennen die Ursache.
 - Fristen werden nur noch bei der Formulierung „bis zum <Datum>“ (auch „bis spätestens zum“) vorgeschlagen.
 - Datensicherung: immer nur eine Sicherungsdatei; Wiederherstellen in den Einstellungen (Datei laden oder aus der
   Liste) bei laufender Anwendung über die SQLite-Sicherungsschnittstelle (`wiederherstellen_laufend`), die bisherige
