@@ -10,7 +10,7 @@ Die Anwendung läuft auf dem Mac, wird im Browser bedient und braucht keinen Clo
 |---|---|
 | Vorgänge mit Bereich, Status und nächster Frist | produktiv in SQLite |
 | Dokumentimport (PDF, JPEG, PNG, TIFF bis 25 MB), Original unverändert, Dubletten per SHA-256 | produktiv |
-| Texterkennung mit PDFKit und Apple Vision, Titel aus Betreff oder Überschrift | produktiv, läuft als Warteschlange im Hintergrund |
+| Texterkennung mit PDFKit und Apple Vision, Titel aus Betreff oder Überschrift | produktiv, läuft als Warteschlange im Hintergrund; Bilderkennung am 23.11.2026 auf dem Mac bestätigt |
 | Nativer macOS-Scandialog | produktiv, Test mit echtem Scanner offen |
 | ChatGPT-Export importieren (Auswahl einzelner Unterhaltungen, wiederholbar) | produktiv |
 | Teilvorgänge, Chronik, Fristen mit Fundstelle, Adressbuch, Versand | Demo im Browser, folgt in Etappe 2 |

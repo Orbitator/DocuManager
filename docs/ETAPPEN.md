@@ -19,6 +19,10 @@ Keine neuen Fachfunktionen, nur Betriebssicherheit.
 | Helfer mit fester Mindestversion macOS 14 | Früher gebaute Helfer trugen die Mindestversion des Entwicklungsrechners. Sie werden beim nächsten Start automatisch neu gebaut. |
 | Erweiterter Selbsttest | Prüft Update eines Altbestands samt Sicherung, Warteschlange, Wiederanlauf, Fehlerübernahme, Protokoll und Parallelbetrieb. |
 
+**Geprüft auf dem Mac (23.11.2026):** Selbsttest erfolgreich, Bilderkennung mit Apple Vision erfolgreich
+(Testbild `Testdaten/OCR_Stellungnahme.png`). Der Pixelpuffer-Fehler aus der Übergabe trat nur in der
+eingeschränkten Entwicklungsumgebung auf.
+
 ## Etappe 2 · Datenmodell aus dem Prototyp
 
 - Teilvorgänge mit eigenem Status, Zuständigkeit und nächstem Schritt
