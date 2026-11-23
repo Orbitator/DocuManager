@@ -56,7 +56,9 @@ Die bisherigen Schnittstellen (`/api/cases`, Dokumente, Scan, Chat) bleiben unve
 | POST `/api/documents/{id}/verknuepfen` | `vorgang_id` |
 | POST `/api/posteingang/dokumente` | Rohe Datei, Header `X-Dateiname`; landet im Posteingang |
 | POST `/api/posteingang/scan` | Öffnet den Scan-Dialog; Scans landen im Posteingang |
-| POST `/api/posteingang/{id}/zuordnen` | `vorgang_id`, optional `teile`, `titel`, `datum`, `kontakt_id` oder `neuer_absender` (`name`, `anschrift`) |
+| POST `/api/posteingang/{id}/zuordnen` | `vorgang_id` oder `ablage: true` (ohne Vorgang ins Archiv), optional `teile`, `titel`, `datum`, `kontakt_id` oder `neuer_absender` (`name`, `anschrift`), `fristen: [{titel, faellig_am, seite, zitat, art}]` |
+| POST `/api/dokumente/{id}/verschieben` | `von_vorgang_id` und `vorgang_id` oder `ablage: true`; verschiebt Dokument, Chronik-Eintrag und Mail-Anlagen |
+| GET `/api/dokumente/{id}/fristen` | Im Text erkannte Fristen mit Datum, Titel, Seite und Zitat |
 | POST `/api/einstellungen` | `eigene_angaben` (eine Angabe pro Zeile) |
 | POST `/api/mail/abholen` | Holt bis zu 25 neue markierte E-Mails aus Apple Mail; `weitere` zeigt, ob noch mehr vorliegen. Bereits übernommene werden über Message-ID und Fingerabdruck der E-Mail erkannt und nicht erneut angelegt; Zeitpunkt und Ergebnis des Abrufs werden gespeichert |
 | POST `/api/akte/{id}/chatnotiz` | `titel`, `text`, `quelle`, `datum`; antwortet mit `fehlend` (im Text erwähnte Schreiben ohne Original) |

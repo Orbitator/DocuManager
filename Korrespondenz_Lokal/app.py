@@ -25,7 +25,7 @@ from pathlib import Path
 from threading import Event, Lock, Thread
 from urllib.parse import parse_qsl, unquote, urlsplit
 
-from akte import (Akte, ROUTES as AKTE_ROUTES, STATUSES, migrate_3, migrate_4, migrate_6, route_akte, test_absender,
+from akte import (Akte, fristen_erkennen, ROUTES as AKTE_ROUTES, STATUSES, migrate_3, migrate_4, migrate_6, route_akte, test_absender, test_fristen_ablage,
                   test_akte, test_archiv, test_chatnotiz, test_posteingang)
 from export import akte_zip, brief_html, sicherung_erstellen, sicherung_pruefen, test_export, wiederherstellen
 from chat_sync import ChatSync, MAX_EXPORT, test_chat_sync
@@ -33,7 +33,7 @@ from mail_import import MailImport, migrate_5, test_mail
 
 ROOT = Path(__file__).resolve().parent
 PORT = 8765
-APP_VERSION = "DocuManager 0.6 · Archiv für Erledigtes, Scan-Ordner, Netzwerkscanner"
+APP_VERSION = "DocuManager 0.7 · Fristen erkennen, Archiv ohne Vorgang, Vorgang ändern"
 MAX_UPLOAD = 25 * 1024 * 1024
 MIN_MACOS = "14.0"
 SCHEMA_VERSION = 8
@@ -1080,6 +1080,7 @@ def self_test(ocr=None, image=None):
         test_posteingang(store)
         test_absender(store)
         test_archiv(store)
+        test_fristen_ablage(store)
         test_mail(store)
         test_chatnotiz(store)
         test_export(store)

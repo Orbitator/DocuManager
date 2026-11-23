@@ -222,6 +222,70 @@ def daten_in(zeile):
     return gefunden
 
 
+# --- Fristen aus dem Text ------------------------------------------------------------------
+_DATUM_TEIL = r"(\d{1,2}\.\s?\d{1,2}\.\s?(?:\d{4}|\d{2})|\d{1,2}\.\s*(?:" + "|".join(MONATE) + r")\s+\d{4})"
+_FRIST_ABSOLUT = re.compile(
+    r"(?:\bbis\s+(?:spätestens\s+)?(?:zum\s+|am\s+)?|\bspätestens\s+(?:bis\s+)?(?:zum\s+|am\s+)?|"
+    r"\bfrist\w*\s+(?:\w+\s+){0,3}?(?:bis\s+)?(?:zum\s+|am\s+)?|\bfällig\w*\s+(?:am\s+|zum\s+|bis\s+)?|"
+    r"\bzahlbar\s+(?:bis\s+)?(?:zum\s+)?|\bnicht\s+später\s+als\s+(?:am\s+)?)" + _DATUM_TEIL, re.I)
+_ZAHLWORT = {"einem": 1, "einer": 1, "eines": 1, "ein": 1, "zwei": 2, "drei": 3, "vier": 4, "fünf": 5, "sechs": 6,
+             "sieben": 7, "acht": 8, "neun": 9, "zehn": 10, "zwölf": 12, "vierzehn": 14, "einundzwanzig": 21,
+             "dreißig": 30}
+_FRIST_RELATIV = re.compile(
+    r"\b(?:innerhalb|binnen)\s+(?:von\s+|der\s+nächsten\s+)?(\d{1,3}|" + "|".join(_ZAHLWORT) + r")\s+"
+    r"(tag\w*|woche\w*|monat\w*)", re.I)
+_FRIST_THEMA = (("Stellungnahme", r"stellungnahme|äußern|stellung\s+nehmen"),
+                ("Zahlung", r"zahl|überweis|begleich|betrag|ausgleich"),
+                ("Widerspruch", r"widerspruch|einspruch|klage|rechtsbehelf"),
+                ("Unterlagen einreichen", r"einreich|vorleg|nachreich|übersend|zusend|unterlagen|nachweis"),
+                ("Rückmeldung", r"rückmeld|antwort|mitteil|bestätig|melden"))
+
+
+def _plus(start, menge, einheit):
+    einheit = einheit.lower()
+    if einheit.startswith("tag"):
+        return start + timedelta(days=menge)
+    if einheit.startswith("woche"):
+        return start + timedelta(weeks=menge)
+    monat = start.month - 1 + menge
+    jahr, monat = start.year + monat // 12, monat % 12 + 1
+    for tag in (start.day, 30, 29, 28):
+        try:
+            return date(jahr, monat, tag)
+        except ValueError:
+            continue
+
+
+def fristen_erkennen(seiten, dokument_datum=None, heute=None):
+    """Erkennt Fristen im Text: „bis zum 16.12.2026“, „spätestens am …“, „zahlbar bis …“ sowie relative Angaben
+    („innerhalb von 14 Tagen“, „binnen eines Monats“, gerechnet ab Dokumentdatum). Liefert Vorschläge mit
+    Datum, Titel, Seite und Zitat. Vergangene Daten werden übergangen."""
+    basis = date.fromisoformat(dokument_datum) if dokument_datum else date.fromisoformat(heute or date.today().isoformat())
+    gefunden, gesehen = [], set()
+    for seite in seiten:
+        text = re.sub(r"\s+", " ", seite.get("text") or "")
+        treffer = [(m, daten_in(m.group(1))) for m in _FRIST_ABSOLUT.finditer(text)]
+        for m in _FRIST_RELATIV.finditer(text):
+            menge = int(m.group(1)) if m.group(1).isdigit() else _ZAHLWORT[m.group(1).lower()]
+            ziel = _plus(basis, menge, m.group(2))
+            treffer.append((m, [ziel.isoformat()] if ziel else []))
+        for m, daten in treffer:
+            if not daten or daten[0] < basis.isoformat() or daten[0] in gesehen:
+                continue
+            gesehen.add(daten[0])
+            punkt = text.rfind(". ", 0, m.start())
+            anfang = max(punkt + 2 if punkt >= 0 else 0, m.start() - 160)
+            ende = text.find(". ", m.end())
+            ende = min(ende + 1 if ende >= 0 else len(text), m.end() + 160)
+            zitat = text[anfang:ende].strip()
+            umfeld = text[max(0, m.start() - 160):m.end() + 60].lower()
+            titel = next((t for bereich in (zitat.lower(), umfeld) for t, muster in _FRIST_THEMA
+                          if re.search(muster, bereich)), "Frist")
+            gefunden.append({"faellig_am": daten[0], "titel": titel, "seite": seite.get("nummer") or 1,
+                             "zitat": zitat[:480], "relativ": m.re is _FRIST_RELATIV})
+    return sorted(gefunden, key=lambda f: f["faellig_am"])[:6]
+
+
 _PLZ_ORT = re.compile(r"\b\d{5}\s+[A-ZÄÖÜ][\wäöüß\-.]+")
 _TRENNER = re.compile(r"\s+[·•|–]\s+|\s+-\s+|\s{3,}|,\s+")
 _BEHOERDE = re.compile(
@@ -847,6 +911,7 @@ class Akte:
                     "SELECT nummer,methode,text FROM dokumentseite WHERE dokument_id=? ORDER BY nummer", (r["id"],))]
                 r["seiten"] = seiten
                 r["vorschlag"] = self._vorschlag(db, "\n".join(s["text"] for s in seiten))
+                r["vorschlag"]["fristen"] = fristen_erkennen(seiten, r["vorschlag"]["datum"], self.today())
             return rows
 
     def eigene_angaben(self):
@@ -917,16 +982,30 @@ class Akte:
 
     def zuordnen(self, dokument_id, data):
         """Ordnet ein Dokument aus dem Posteingang einem Vorgang zu und legt den Eingang in der Chronik an."""
-        vorgang_id = _id(data.get("vorgang_id"), "Vorgang")
-        if not vorgang_id:
+        ablage = bool(data.get("ablage"))  # direkt ins Archiv, ohne Vorgang
+        vorgang_id = None if ablage else _id(data.get("vorgang_id"), "Vorgang")
+        if not vorgang_id and not ablage:
             raise ValueError("Bitte einen Vorgang wählen.")
+        fristen = []
+        for f in data.get("fristen") or []:  # beim Zuordnen übernommene Fristen (erkannt oder von Hand)
+            if not isinstance(f, dict):
+                raise ValueError("Fristen: ungültige Angabe.")
+            fristen.append({"art": f.get("art") or "frist", "titel": _text(f.get("titel"), "Frist", 200, True),
+                            "faellig_am": _date(f.get("faellig_am"), "Frist"), "quelle_seite": f.get("seite"),
+                            "quelle_zitat": _text(f.get("zitat"), "Fundstelle", 500) or "Beim Zuordnen festgelegt"})
+        if ablage and fristen:
+            raise ValueError("Fristen lassen sich nur in einem Vorgang führen. Bitte einen Vorgang wählen.")
         with closing(self.connect()) as db, db:
             d = db.execute("""SELECT d.* FROM dokument d JOIN vorgang v ON v.id=d.vorgang_id AND v.system='posteingang'
                 WHERE d.id=? AND d.geloescht_am IS NULL""", (dokument_id,)).fetchone()
             if not d:
                 raise ValueError("Das Dokument liegt nicht im Posteingang.")
-            self._vorgang(db, vorgang_id)
-            teile = self._teile(db, vorgang_id, data.get("teile"))
+            if ablage:
+                vorgang_id = self._ablage(db)
+                teile = []
+            else:
+                self._vorgang(db, vorgang_id)
+                teile = self._teile(db, vorgang_id, data.get("teile"))
             titel = _text(data.get("titel"), "Titel", 160) or d["titel"]
             datum = _date(data.get("datum"), "Dokumentdatum", False)
             kontakt = _id(data.get("kontakt_id"), "Absender")
@@ -964,7 +1043,76 @@ class Akte:
                     bezug_id) VALUES(?,?,?,?,?,?,?,?)""", (vorgang_id, "eingang", a["titel"], datum or self.today(),
                                                          "von" if kontakt else None, kontakt, a["id"], eid)).lastrowid
                 db.executemany("INSERT INTO eintrag_teil VALUES(?,?)", ((aid, t) for t in teile))
-            return eid
+        for f in fristen:
+            self.frist_anlegen(vorgang_id, {**f, "quelle_dokument_id": dokument_id,
+                                            "teilvorgang_id": teile[0] if len(teile) == 1 else None})
+        return eid
+
+    def dokument_fristen(self, dokument_id):
+        """Im Text eines Dokuments erkannte Fristen, gerechnet ab Dokumentdatum."""
+        with closing(self.connect()) as db:
+            d = db.execute("SELECT dokument_datum FROM dokument WHERE id=?", (dokument_id,)).fetchone()
+            if not d:
+                raise ValueError("Dokument nicht gefunden.")
+            seiten = [dict(r) for r in db.execute("SELECT nummer,text FROM dokumentseite WHERE dokument_id=? ORDER BY nummer",
+                                                  (dokument_id,))]
+        datum = d["dokument_datum"] or dokumentdatum("\n".join(s["text"] for s in seiten))[0]
+        return fristen_erkennen(seiten, datum, self.today())
+
+    def _ablage(self, db):
+        """Interner, stets erledigter Vorgang für Dokumente, die ohne Vorgang ins Archiv gehen."""
+        row = db.execute("SELECT id FROM vorgang WHERE system='ablage'").fetchone()
+        if row:
+            return row[0]
+        vid = db.execute("""INSERT INTO vorgang(titel,bereich,beschreibung,status,system)
+            VALUES('Ohne Vorgang','Anderes','Direkt archivierte Dokumente','Erledigt','ablage')""").lastrowid
+        db.execute("DELETE FROM suche WHERE art='vorgang' AND ref_id=?", (vid,))
+        return vid
+
+    def dokument_verschieben(self, dokument_id, data):
+        """Hängt ein Dokument samt Chronik-Eintrag (und mitgekommenen Mail-Anlagen) in einen anderen Vorgang um.
+        Ziel ist ein bestehender Vorgang, auch ein erledigter, oder mit `ablage` das Archiv ohne Vorgang."""
+        von = _id(data.get("von_vorgang_id"), "Bisheriger Vorgang")
+        with closing(self.connect()) as db, db:
+            if data.get("ablage"):
+                nach = self._ablage(db)
+            else:
+                nach = _id(data.get("vorgang_id"), "Vorgang")
+                if not nach:
+                    raise ValueError("Bitte einen Vorgang wählen.")
+                self._vorgang(db, nach)
+            if not db.execute("SELECT 1 FROM dokument_vorgang WHERE dokument_id=? AND vorgang_id=?", (dokument_id, von)).fetchone():
+                raise ValueError("Das Dokument gehört nicht zu diesem Vorgang.")
+            if nach == von:
+                return {"vorgang_id": nach}
+            eintraege = [r[0] for r in db.execute(
+                "SELECT id FROM eintrag WHERE dokument_id=? AND vorgang_id=? AND geloescht_am IS NULL", (dokument_id, von))]
+            anlagen = [(r[0], r[1]) for r in db.execute(f"""SELECT id, dokument_id FROM eintrag WHERE vorgang_id=?
+                AND dokument_id IS NOT NULL AND geloescht_am IS NULL AND bezug_id IN ({",".join("?" * len(eintraege)) or "NULL"})""",
+                (von, *eintraege))]
+            dokumente = {dokument_id} | {d for _, d in anlagen}
+            bewegt = eintraege + [e for e, _ in anlagen]
+            for d in dokumente:
+                db.execute("DELETE FROM dokument_vorgang WHERE dokument_id=? AND vorgang_id=?", (d, von))
+                db.execute("INSERT OR IGNORE INTO dokument_vorgang(dokument_id,vorgang_id) VALUES(?,?)", (d, nach))
+                db.execute("UPDATE dokument SET vorgang_id=? WHERE id=? AND vorgang_id=?", (nach, d, von))
+            marken = ",".join("?" * len(bewegt)) or "NULL"
+            # Verweise zwischen bewegten und verbliebenen Einträgen lösen; Teilvorgänge gelten nur im alten Vorgang
+            db.execute(f"UPDATE eintrag SET bezug_id=NULL WHERE vorgang_id=? AND bezug_id IN ({marken})", (von, *bewegt))
+            db.execute(f"""UPDATE eintrag SET bezug_id=NULL WHERE id IN ({marken})
+                AND bezug_id NOT IN ({marken})""", (*bewegt, *bewegt))
+            db.execute(f"DELETE FROM eintrag_teil WHERE eintrag_id IN ({marken})", bewegt)
+            db.execute(f"UPDATE eintrag SET vorgang_id=? WHERE id IN ({marken})", (nach, *bewegt))
+            for (kontakt,) in db.execute(f"SELECT DISTINCT kontakt_id FROM eintrag WHERE id IN ({marken}) AND kontakt_id IS NOT NULL",
+                                         bewegt).fetchall():
+                if not db.execute("SELECT 1 FROM beteiligter WHERE vorgang_id=? AND kontakt_id=?", (nach, kontakt)).fetchone():
+                    db.execute("INSERT INTO beteiligter(vorgang_id,kontakt_id,rolle) VALUES(?,?,'')", (nach, kontakt))
+            if not eintraege:  # nur verknüpft, ohne eigenen Eintrag: im Ziel sichtbar machen
+                d = db.execute("SELECT titel, dokument_datum, angelegt_am FROM dokument WHERE id=?", (dokument_id,)).fetchone()
+                db.execute("INSERT INTO eintrag(vorgang_id,art,titel,ereignis_datum,dokument_id) VALUES(?,?,?,?,?)",
+                           (nach, "eingang", d["titel"], d["dokument_datum"] or d["angelegt_am"][:10], dokument_id))
+            ziel = db.execute("SELECT status, system FROM vorgang WHERE id=?", (nach,)).fetchone()
+            return {"vorgang_id": nach, "archiviert": ziel["status"] == "Erledigt", "ablage": ziel["system"] == "ablage"}
 
     def archiv(self):
         """Archivierte Dokumente mit Vorgang, Bereich, Absender und Daten – Grundlage der Archivansicht.
@@ -975,7 +1123,7 @@ class Akte:
         with closing(self.connect()) as db:
             rows = [dict(r) for r in db.execute("""
                 SELECT d.id, d.titel, d.dateiname, d.mime, d.dateipfad, d.ocr_status, d.angelegt_am, d.dokument_datum,
-                       dv.vorgang_id, v.titel AS vorgang, v.bereich, v.status AS vorgang_status,
+                       dv.vorgang_id, v.titel AS vorgang, v.system, (d.ansicht IS NOT NULL) AS gedreht, v.bereich, v.status AS vorgang_status,
                        (SELECT count(*) FROM dokumentseite s WHERE s.dokument_id=d.id) AS seiten,
                        (SELECT e.art FROM eintrag e WHERE e.dokument_id=d.id AND e.vorgang_id=dv.vorgang_id
                           AND e.geloescht_am IS NULL ORDER BY e.id LIMIT 1) AS art,
@@ -984,7 +1132,7 @@ class Akte:
                        (SELECT min(e.ereignis_datum) FROM eintrag e WHERE e.dokument_id=d.id AND e.geloescht_am IS NULL)
                           AS ereignis_datum
                 FROM dokument d JOIN dokument_vorgang dv ON dv.dokument_id=d.id JOIN vorgang v ON v.id=dv.vorgang_id
-                WHERE d.geloescht_am IS NULL AND v.geloescht_am IS NULL AND v.system IS NULL
+                WHERE d.geloescht_am IS NULL AND v.geloescht_am IS NULL AND (v.system IS NULL OR v.system='ablage')
                   AND (v.status='Erledigt' OR (
                     EXISTS (SELECT 1 FROM eintrag e JOIN eintrag_teil et ON et.eintrag_id=e.id
                             WHERE e.dokument_id=d.id AND e.vorgang_id=v.id AND e.geloescht_am IS NULL)
@@ -1111,6 +1259,8 @@ def _route_table():
         ("GET", r"/api/einstellungen", lambda a, m, d: {"eigene_angaben": a.eigene_angaben()}),
         ("POST", r"/api/einstellungen", lambda a, m, d: a.eigene_angaben_setzen(d.get("eigene_angaben"))),
         ("POST", r"/api/posteingang/(\d+)/zuordnen", lambda a, m, d: {"id": a.zuordnen(i(m[1]), d)}),
+        ("POST", r"/api/dokumente/(\d+)/verschieben", lambda a, m, d: a.dokument_verschieben(i(m[1]), d)),
+        ("GET", r"/api/dokumente/(\d+)/fristen", lambda a, m, d: {"fristen": a.dokument_fristen(i(m[1]))}),
         ("POST", r"/api/akte/(\d+)", lambda a, m, d: a.vorgang_aendern(i(m[1]), d)),
         ("POST", r"/api/akte/(\d+)/schlagwoerter", lambda a, m, d: {"schlagwoerter": a.schlagwoerter_setzen(i(m[1]), d.get("namen"))}),
         ("POST", r"/api/akte/(\d+)/teilvorgaenge", lambda a, m, d: {"id": a.teilvorgang_anlegen(i(m[1]), d)}),
@@ -1455,6 +1605,51 @@ def test_archiv(store):
     assert haus == [d2], haus
     akte.loeschen("dokument", doc)
     assert [r["vorgang"] for r in akte.archiv()] == ["Haus"]
+
+
+def test_fristen_ablage(store):  # noqa: C901
+    """Fristen aus dem Text, direkte Ablage ins Archiv, Dokument in anderen Vorgang verschieben."""
+    seiten = [{"nummer": 1, "text": "Ihr Schreiben vom 10.08.2026\nWir bitten um Ihre Stellungnahme bis zum 16.12.2026.\n"
+                                    "Der Betrag ist innerhalb von 14 Tagen zu überweisen. Frist zum 01.01.2020 ist abgelaufen."}]
+    f = fristen_erkennen(seiten, "2026-11-18")
+    assert [(x["faellig_am"], x["titel"]) for x in f] == [("2026-12-02", "Zahlung"), ("2026-12-16", "Stellungnahme")], f
+    assert "16.12.2026" in f[1]["zitat"] and f[1]["seite"] == 1
+    assert fristen_erkennen([{"nummer": 1, "text": "binnen eines Monats Widerspruch einlegen"}], "2026-01-31")[0]["faellig_am"] == "2026-02-28"
+    assert fristen_erkennen([{"nummer": 1, "text": "Ihr Schreiben vom 10.08.2026 und Rechnung vom 12.12.2026"}], "2026-08-01") == []
+
+    store = type(store)(store.data / "Ablagetest", store.ocr)
+    akte = Akte(store, today=lambda: "2026-11-23")
+    a = store.create_case("Kia-Schaden", "Versicherungen", "")
+    b = store.create_case("Steuer 2025", "Versicherungen", "")
+    # Direkt ins Archiv
+    d1, _ = store.import_document(None, "Werbung.pdf", b"%PDF-1.4\nAblage")
+    akte.zuordnen(d1, {"ablage": True, "titel": "Info-Schreiben"})
+    zeilen = akte.archiv()
+    assert [(r["id"], r["vorgang"], r["system"]) for r in zeilen] == [(d1, "Ohne Vorgang", "ablage")], zeilen
+    assert all(c["titel"] != "Ohne Vorgang" for c in store.list_cases())
+    try:
+        akte.zuordnen(store.import_document(None, "x.pdf", b"%PDF-1.4\nx")[0], {"ablage": True, "fristen": [
+            {"titel": "Frist", "faellig_am": "2026-12-01"}]})
+        raise AssertionError("Fristen ohne Vorgang dürfen nicht angelegt werden")
+    except ValueError:
+        pass
+    # Zuordnen mit erkannter und manueller Frist
+    d2, _ = store.import_document(None, "Brief.pdf", b"%PDF-1.4\nBrief")
+    akte.zuordnen(d2, {"vorgang_id": a, "fristen": [
+        {"titel": "Stellungnahme", "faellig_am": "2026-12-16", "seite": 1, "zitat": "Stellungnahme bis zum 16.12.2026"},
+        {"titel": "Selbst gesetzt", "faellig_am": "2026-12-01", "art": "wiedervorlage"}]})
+    fr = akte.akte(a)["fristen"]
+    assert sorted((x["titel"], x["quelle_dokument_id"]) for x in fr) == [("Selbst gesetzt", d2), ("Stellungnahme", d2)]
+    # Verschieben: Dokument samt Eintrag in einen anderen Vorgang, aus der Ablage in einen Vorgang
+    akte.dokument_verschieben(d2, {"von_vorgang_id": a, "vorgang_id": b})
+    assert [e["dokument_id"] for e in akte.akte(a)["eintraege"]] == [] and akte.akte(a)["dokumente"] == []
+    assert [e["dokument_id"] for e in akte.akte(b)["eintraege"]] == [d2]
+    ablage = zeilen[0]["vorgang_id"]
+    r = akte.dokument_verschieben(d1, {"von_vorgang_id": ablage, "vorgang_id": a})
+    assert r == {"vorgang_id": a, "archiviert": False, "ablage": False} and akte.archiv() == []
+    assert [d["id"] for d in akte.akte(a)["dokumente"]] == [d1]
+    r = akte.dokument_verschieben(d1, {"von_vorgang_id": a, "ablage": True})
+    assert r["ablage"] and [x["id"] for x in akte.archiv()] == [d1]
 
 
 def test_chatnotiz(store):

@@ -115,7 +115,17 @@ Erst wenn Schritt 2 bis 4 funktionieren. Die bisherige Anwendung vorher beenden.
 4. **Exportieren** in der Akte: Es wird eine ZIP mit Chronik.pdf heruntergeladen.
 5. **Einstellungen → Datensicherung → Sicherung erstellen**, danach **Prüfen**. Erwartet: „In Ordnung …“.
 
-## 9. Scanner
+## 9. Fristen, Archiv ohne Vorgang, Vorgang ändern
+
+1. Ein Schreiben mit Frist importieren (z. B. „… bis zum 16.12.2026“). In den Details im Posteingang steht unter
+   **Fristen** die erkannte Frist mit Datum und Zitat. **Frist von Hand** ergänzt eine weitere. Zuordnen.
+   Erwartet: Beide Fristen stehen in der Akte und unter **Fristen**.
+2. Ein zweites Dokument mit **Ohne Vorgang ins Archiv** ablegen. Erwartet: Es steht im **Archiv** unter „Ohne Vorgang“.
+3. In der Akte bei einem Dokument **Vorgang ändern** und einen anderen Vorgang wählen. Erwartet: Das Dokument
+   steht danach im gewählten Vorgang.
+4. Die Vorschau eines gescannten Bildes zeigt die ganze Seite, ohne zu scrollen.
+
+## 10. Scanner
 
 1. **Dokument importieren → Scannen …**. Erwartet: Nach einigen Sekunden steht Ihr Scanner in der Liste oben,
    auch wenn er nur im WLAN hängt.
@@ -124,7 +134,7 @@ Erst wenn Schritt 2 bis 4 funktionieren. Die bisherige Anwendung vorher beenden.
    im Posteingang. Den Ordner öffnet auch **Dokument importieren → Scan-Ordner öffnen**.
 3. Bitte mitteilen, ob Ihr Scanner in Schritt 1 erscheint, und den Inhalt von `Daten/Logs/scanner.log`.
 
-## 10. Automatische Drehung
+## 11. Automatische Drehung
 
 1. Einen Brief verkehrt herum (auf dem Kopf) scannen oder ein solches PDF importieren. Bereits vorhandene
    Scans werden nach dem ersten Start dieses Stands einmal automatisch neu geprüft (einige Minuten).

@@ -96,6 +96,17 @@ Teil 2 (umgesetzt, Schemaversion 7):
 - Scannen: Der Scan-Dialog sucht auch Netzwerkscanner (Bonjour/AirScan) und bietet „Digitale Bilder“ als Ausweg.
   Zusätzlich überwacht die Anwendung den Ordner `~/Documents/DocuManager Scans`: Was die Scanner-Software dort
   ablegt, kommt nach wenigen Sekunden in den Posteingang und wird nach „Übernommen“ verschoben.
+- Fristen: Beim Zuordnen schlägt der Posteingang erkannte Fristen vor („bis zum 16.12.2026“, „spätestens am …“,
+  „zahlbar bis …“, „innerhalb von 14 Tagen“ / „binnen eines Monats“ ab Dokumentdatum) mit Titel aus dem Satz
+  (Stellungnahme, Zahlung, Widerspruch, Unterlagen, Rückmeldung) und Zitat. Fristen lassen sich dort auch von Hand
+  ergänzen. Erkannte Fristen werden als verbindliche Frist mit Fundstelle eingetragen, von Hand gesetzte als
+  Wiedervorlage. In der Akte zeigt „Text & Fundstellen“ die erkannten Fristen mit „Als Frist übernehmen“;
+  „Frist“ im Kopf der Akte und „Neue Frist“ in der Fristenansicht legen Fristen von Hand an (`fristen_erkennen`).
+- Ohne Vorgang ins Archiv: Ein Dokument aus dem Posteingang kann direkt archiviert werden (interner, stets
+  erledigter Vorgang „Ohne Vorgang“, `system='ablage'`, in keiner Vorgangsliste).
+- Vorgang ändern: Ein Dokument samt Chronik-Eintrag (und Mail-Anlagen) lässt sich in jeden bestehenden Vorgang
+  verschieben, auch in einen erledigten oder zurück ins Archiv ohne Vorgang (`dokument_verschieben`).
+- Vorschau: Bilder werden vollständig ins Fenster eingepasst, PDFs als ganze Seite geöffnet.
 - Kacheln im Posteingang zeigen ein echtes Vorschaubild der ersten Seite, aufrecht gedreht (auf dem Mac mit `sips`,
   zwischengespeichert in `Daten/Vorschau/`).
 - Aktenexport als ZIP mit Chronik.pdf, akte.json und ausgewählten Originalen.
