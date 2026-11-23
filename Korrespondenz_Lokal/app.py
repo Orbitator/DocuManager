@@ -27,7 +27,7 @@ from pathlib import Path
 from threading import Event, Lock, Thread
 from urllib.parse import parse_qsl, unquote, urlsplit
 
-from akte import (Akte, fristen_erkennen, ROUTES as AKTE_ROUTES, STATUSES, migrate_3, migrate_4, migrate_6, route_akte, test_absender, test_fristen_ablage,
+from akte import (Akte, fristen_erkennen, empfaenger_erkennen, ROUTES as AKTE_ROUTES, STATUSES, migrate_3, migrate_4, migrate_6, route_akte, test_absender, test_fristen_ablage,
                   test_akte, test_archiv, test_chatnotiz, test_posteingang)
 from export import (akte_zip, brief_html, sicherung_erstellen, sicherung_pruefen, test_export, wiederherstellen,
                     wiederherstellen_laufend)
@@ -36,10 +36,10 @@ from mail_import import MailImport, migrate_5, test_mail
 
 ROOT = Path(__file__).resolve().parent
 PORT = 8765
-APP_VERSION = "DocuManager 0.10 · Word und E-Mail, Seitenansicht, eigene Eintragsarten"
+APP_VERSION = "DocuManager 0.11 · Archiv wie Posteingang, Empfänger, Dialogfarbe"
 MAX_UPLOAD = 25 * 1024 * 1024
 MIN_MACOS = "14.0"
-SCHEMA_VERSION = 11
+SCHEMA_VERSION = 12
 OCR_WAITING = "Wartet auf Texterkennung"
 # Scan-Ordner für Scanner-Software und „Digitale Bilder“: Dateien darin kommen automatisch in den Posteingang.
 # Bewusst nicht unter „Dokumente“: Diesen Ordner schützt macOS, ein über Launchpad gestartetes Programm bräuchte
@@ -333,8 +333,17 @@ def migrate_11(db):
         db.execute("UPDATE bereich SET reihenfolge=id")
 
 
+def migrate_12(db):
+    """Empfänger je Dokument (aus Anschriftenfeld oder E-Mail-Kopf erkannt, von Hand änderbar)."""
+    for spalte in ("empfaenger", "empfaenger_quelle"):
+        if spalte not in columns_of(db, "dokument"):
+            db.execute(f"ALTER TABLE dokument ADD COLUMN {spalte} TEXT")
+    for d in db.execute("SELECT dokument_id, text FROM dokumentseite WHERE nummer=1").fetchall():
+        db.execute("UPDATE dokument SET empfaenger=? WHERE id=? AND empfaenger IS NULL", (empfaenger_erkennen(d[1]), d[0]))
+
+
 MIGRATIONS = ((1, migrate_1), (2, migrate_2), (3, migrate_3), (4, migrate_4), (5, migrate_5), (6, migrate_6),
-              (7, migrate_7), (8, migrate_8), (9, migrate_9), (10, migrate_10), (11, migrate_11))
+              (7, migrate_7), (8, migrate_8), (9, migrate_9), (10, migrate_10), (11, migrate_11), (12, migrate_12))
 
 
 class Store:
@@ -627,6 +636,10 @@ class Store:
     def _set_ocr_result(self, doc_id, pages, status, error, ansicht=None):
         title, page, source = select_title(pages)
         with closing(self.connect()) as db, db:
+            if pages:  # Empfänger erkennen, sofern nicht von Hand gesetzt
+                liste = db.execute("SELECT wert FROM einstellung WHERE schluessel='empfaenger'").fetchone()
+                db.execute("""UPDATE dokument SET empfaenger=? WHERE id=? AND coalesce(empfaenger_quelle,'')<>'manuell'""",
+                           (empfaenger_erkennen(pages[0].get("text", ""), json.loads(liste[0]) if liste else []), doc_id))
             if not pages and db.execute("SELECT 1 FROM dokumentseite WHERE dokument_id=?", (doc_id,)).fetchone():
                 # Eine fehlgeschlagene erneute Erkennung darf vorhandenen Text nicht löschen.
                 db.execute("UPDATE dokument SET ocr_status=?, ocr_fehler=?, ocr_aktualisiert_am=CURRENT_TIMESTAMP WHERE id=?",
@@ -719,17 +732,18 @@ class Scanner:
     def __init__(self, store):
         self.store = store
         self.job = None
+        self.ins_archiv = None
         self.lock = Lock()  # Der Server bedient Anfragen parallel; ein Scanauftrag zur Zeit.
 
-    def start(self, case_id):
+    def start(self, case_id, archiv=False):
         with self.lock:
-            return self._start(case_id)
+            return self._start(case_id, archiv)
 
     def finish(self, job_id):
         with self.lock:
             return self._finish(job_id)
 
-    def _start(self, case_id):
+    def _start(self, case_id, archiv=False):
         if self.job and self.job["result"] is None:
             self._finish(self.job["id"])
             if self.job["result"] is None:
@@ -759,7 +773,7 @@ class Scanner:
             output.close()
             folder.rmdir()
             raise
-        self.job = {"id": secrets.token_hex(16), "case": case_id, "folder": folder,
+        self.job = {"id": secrets.token_hex(16), "case": case_id, "archiv": archiv, "folder": folder,
                     "process": process, "result": None, "output": output}
         log.info("Scandialog für Vorgang %s geöffnet (%s).", case_id, folder.name)
         return self.job["id"]
@@ -796,7 +810,9 @@ class Scanner:
                         raise ValueError("Scan-Datei fehlt.")
                     if file.stat().st_size > MAX_UPLOAD:
                         raise ValueError("Die Scan-Datei ist größer als 25 MB.")
-                    _, created = self.store.import_document(job["case"], name, file.read_bytes())
+                    doc_id, created = self.store.import_document(job["case"], name, file.read_bytes())
+                    if created and job.get("archiv") and self.ins_archiv:
+                        self.ins_archiv(doc_id)
                     if created:
                         imported += 1
                     else:
@@ -856,6 +872,11 @@ class Handler(BaseHTTPRequestHandler):
 
     def send_json(self, value, status=200):
         self.send_bytes(status, "application/json; charset=utf-8", json.dumps(value, ensure_ascii=False).encode())
+
+    def ins_archiv(self, doc_id):
+        if self.akte.posteingang_id_von(doc_id):
+            self.akte.zuordnen(doc_id, {"ablage": True})
+            self.akte.ablage_nachtragen(doc_id)
 
     def ablegen(self, vorgang):
         """Nimmt eine hochgeladene Datei an. E-Mails (.eml) laufen über den Mail-Import (mit Anlagen), alle anderen
@@ -1082,8 +1103,13 @@ class Handler(BaseHTTPRequestHandler):
                     self.akte.ablage_nachtragen(doc_id)
                 self.send_json({"id": doc_id, "created": created}, 201 if created else 200)
             elif path == "/api/mail/abholen":
+                ziel = json.loads(self.read_body(4000)).get("ziel") if self.headers.get("Content-Length", "0") != "0" else None
                 with self.mail_lock:  # ein Abruf zur Zeit
-                    self.send_json(self.mail.abholen())
+                    ergebnis = self.mail.abholen()
+                if ziel == "archiv":  # im Archiv geholt: E-Mails samt Anlagen direkt ablegen
+                    for doc_id in ergebnis.get("ids", []):
+                        self.ins_archiv(doc_id)
+                self.send_json(ergebnis)
             elif path == "/api/beenden":  # Anwendung ohne Terminal beenden
                 self.send_json({"ok": True})
                 if self.server_ref:
@@ -1100,6 +1126,8 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_json({"ok": True})
             elif path == "/api/posteingang/scan":
                 self.send_json({"id": self.scanner.start(None)}, 201)
+            elif path == "/api/archiv/scan":  # Scans direkt ins Archiv
+                self.send_json({"id": self.scanner.start(None, archiv=True)}, 201)
             elif match := re.fullmatch(r"/api/cases/(\d+)/scan", path):
                 self.send_json({"id": self.scanner.start(int(match[1]))}, 201)
             elif match := re.fullmatch(r"/api/scans/([0-9a-f]{32})/poll", path):
@@ -1572,6 +1600,7 @@ def main():
     Handler.chat = ChatSync(Handler.store)
     Handler.akte = Akte(Handler.store)
     Handler.store.nach_texterkennung = Handler.akte.ablage_nachtragen
+    Handler.scanner.ins_archiv = lambda doc_id: Handler.ins_archiv(Handler, doc_id)
     Handler.mail = MailImport(Handler.store)
     Handler.scanordner = ScanOrdner(Handler.store, SCAN_ORDNER)
     try:

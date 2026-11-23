@@ -1,6 +1,6 @@
 /* Oberfläche der Korrespondenzverwaltung. Gestaltung aus dem Klickprototyp (Etappe 3). */
 :root{
-  --bg:#f6f7fb; --surface:#ffffff; --side:#eef0f6; --fg:#171b2c; --muted:#5a6079; --line:#dde1ec; --line-strong:#c6ccdc;
+  --bg:#f6f7fb; --surface:#ffffff; --dialog:#eef1fa; --side:#eef0f6; --fg:#171b2c; --muted:#5a6079; --line:#dde1ec; --line-strong:#c6ccdc;
   --accent:#2340c4; --accent-fg:#ffffff; --accent-soft:#e5e9fb; --accent-line:#b7c3f2;
   --warn:#94540a; --warn-soft:#f8eddc; --crit:#b3232c; --crit-soft:#fbe6e7; --ok:#1d7a4a; --ok-soft:#e2f3e9;
   --frame:#e4e6ef; --paper:#ffffff; --ink:#1d1d22; --ink-muted:#62656f; --mark:#ffe58a; --mark-ui:#fff0b3;
@@ -9,13 +9,13 @@
   --f-doc:"Source Serif 4",Georgia,"Times New Roman",serif;
 }
 @media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
-  --bg:#10131c; --surface:#171b27; --side:#131724; --fg:#e6e9f3; --muted:#99a0b8; --line:#283044; --line-strong:#38415a;
+  --bg:#10131c; --surface:#171b27; --dialog:#232a3d; --side:#131724; --fg:#e6e9f3; --muted:#99a0b8; --line:#283044; --line-strong:#38415a;
   --accent:#8fa3ff; --accent-fg:#0e1430; --accent-soft:#212a4c; --accent-line:#3a4890;
   --warn:#f0b45a; --warn-soft:#3a2b16; --crit:#ff858c; --crit-soft:#3e1c22; --ok:#6fd39b; --ok-soft:#163323;
   --frame:#0c0f17; --paper:#ecebe6; --ink:#1d1d22; --ink-muted:#5d5f66; --mark:#f7d75e; --mark-ui:#5a4a12;
   --shadow:0 1px 2px rgba(0,0,0,.3),0 4px 16px rgba(0,0,0,.25); color-scheme:dark}}
 :root[data-theme="dark"]{
-  --bg:#10131c; --surface:#171b27; --side:#131724; --fg:#e6e9f3; --muted:#99a0b8; --line:#283044; --line-strong:#38415a;
+  --bg:#10131c; --surface:#171b27; --dialog:#232a3d; --side:#131724; --fg:#e6e9f3; --muted:#99a0b8; --line:#283044; --line-strong:#38415a;
   --accent:#8fa3ff; --accent-fg:#0e1430; --accent-soft:#212a4c; --accent-line:#3a4890;
   --warn:#f0b45a; --warn-soft:#3a2b16; --crit:#ff858c; --crit-soft:#3e1c22; --ok:#6fd39b; --ok-soft:#163323;
   --frame:#0c0f17; --paper:#ecebe6; --ink:#1d1d22; --ink-muted:#5d5f66; --mark:#f7d75e; --mark-ui:#5a4a12;
@@ -236,7 +236,7 @@ tbody tr:hover{background:var(--accent-soft)}
 .kpi.crit b{color:var(--crit)} .kpi.warn b{color:var(--warn)}
 
 .ovl{position:fixed;inset:0;z-index:80;background:rgba(10,14,30,.45);display:grid;place-items:center;padding:16px}
-.modal{background:var(--surface);border-radius:14px;box-shadow:var(--shadow);width:min(520px,100%);max-height:90vh;overflow:auto;padding:20px 22px;display:flex;flex-direction:column;gap:14px}
+.modal{background:var(--dialog,var(--surface));border:1px solid var(--line-strong);border-radius:14px;box-shadow:var(--shadow);width:min(520px,100%);max-height:90vh;overflow:auto;padding:20px 22px;display:flex;flex-direction:column;gap:14px}
 .modal label{display:flex;flex-direction:column;gap:5px;font-size:13px;color:var(--muted)}
 .modal label>input,.modal label>select,.modal label>textarea{color:var(--fg);padding:8px 10px;border:1px solid var(--line-strong);border-radius:8px;background:var(--bg)}
 .modal .two{display:grid;grid-template-columns:1fr 1fr;gap:12px}
@@ -434,3 +434,8 @@ button.heute:hover{background:var(--surface-2,rgba(127,127,127,.18))}
 .seiten.zwei canvas:nth-child(odd){justify-self:end}.seiten.zwei canvas:nth-child(even){justify-self:start}
 .seiten canvas{background:#fff;box-shadow:0 2px 12px rgba(0,0,0,.35)}
 #viewer .vbody > .seiten,#viewer .vbody > .pvrot,#viewer .vbody > .pvimgwrap{flex:1 1 auto;align-self:stretch;width:100%;min-height:0;height:auto;max-height:none}
+.modal .src{background:var(--surface)}
+.modal label>input,.modal label>select,.modal label>textarea,.modal .multi{background:var(--surface)}
+#modalroot .backdrop,#modalroot > div:first-child{backdrop-filter:blur(2px)}
+.iconbtn.lg{width:36px;height:36px}
+.iconbtn.lg svg{width:19px;height:19px}

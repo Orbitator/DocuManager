@@ -90,7 +90,7 @@ async function upload(path, file) {
 // ---------- Zustand ----------
 const S = {view: 'uebersicht', v: null, teil: 'all', entry: null, tab: 'chronik', ktype: 'alle', ibSel: null,
   vb: 'alle', vs: 'alle', vt: 'alle', sortV: {k: 'frist', d: 1}, sortD: {k: 'datum', d: -1}, sortA: {k: 'datum', d: -1},
-  fFilter: 'alle', aGroup: 'vorgang', aBereich: 'alle', aJahr: 'alle', aText: '', aErledigt: false, contact: null, abq: ''};
+  fFilter: 'alle', aGroup: 'vorgang', aBereich: 'alle', aJahr: 'alle', aText: '', contact: null, abq: ''};
 const D = {cases: [], statuses: [], groups: [], akte: null, inbox: [], fristen: [], archiv: [], kontakte: [], trash: [], eigene: ''};
 
 async function loadBase() {
@@ -99,6 +99,7 @@ async function loadBase() {
   D.inbox = (await api('posteingang')).dokumente;
   D.trash = (await api('papierkorb')).eintraege;
   D.arten = (await api('eintragsarten')).arten;
+  D.empfaenger = (await api('empfaenger')).empfaenger;
 }
 
 // ---------- Navigation ----------
@@ -187,6 +188,8 @@ const vorgangOptionen = (cur, ohne) => {
   return `<optgroup label="Laufende Vorgänge">${aktiv().filter(c => c.id !== ohne).sort((x, y) => cmp(x.titel, y.titel)).map(opt).join('')}</optgroup>`
     + (fertig.length ? `<optgroup label="Erledigte Vorgänge (Archiv)">${fertig.map(opt).join('')}</optgroup>` : '');
 };
+// Empfänger: erkannt oder von Hand; bei versendeten Schreiben der Kontakt
+const empfaengerVon = d => d.empfaenger || (['ausgang', 'entwurf', 'nachweis'].includes(d.art) ? d.absender : null);
 // Dateityp als kleines Symbol
 const WORD = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
 const TYP = m => m === 'application/pdf' ? ['pdf', 'PDF'] : m === 'message/rfc822' ? ['mail', 'MAIL'] : m === WORD ? ['word', 'WORD'] : /^image\//.test(m || '') ? ['bild', 'BILD'] : ['datei', 'DATEI'];
@@ -734,25 +737,24 @@ function vArchiv() {
   if (S.aTyp && S.aTyp !== 'alle' && !typen.includes(S.aTyp)) S.aTyp = 'alle';
   let list = D.archiv.filter(d => (S.aBereich === 'alle' || (d.bereiche || [d.bereich]).includes(S.aBereich)) && (S.aJahr === 'alle' || d.datum.startsWith(S.aJahr))
     && (!S.aTyp || S.aTyp === 'alle' || typName(d) === S.aTyp)
-    && (!S.aErledigt || d.vorgang_status === 'Erledigt') && (!q || [d.titel, d.dateiname, d.vorgang, d.absender].join(' ').toLowerCase().includes(q)));
+    && (!q || [d.titel, d.dateiname, d.vorgang, d.absender].join(' ').toLowerCase().includes(q)));
   const so = S.sortA, key = {titel: d => d.titel, datum: d => d.datum, absender: d => d.absender || '~', vorgang: d => d.vorgang, groesse: d => d.groesse || 0}[so.k];
   list.sort((x, y) => (so.k === 'groesse' ? key(x) - key(y) : cmp(key(x), key(y))) * so.d);
   // Bei mehreren Bereichen erscheint ein Dokument in jeder seiner Bereichsgruppen
-  const gkey = {vorgang: d => [d.vorgang], bereich: d => d.bereiche || [d.bereich], typ: d => [typName(d)], absender: d => [d.absender || 'Absender unbekannt'], jahr: d => [d.datum.slice(0, 4)], keine: () => ['']}[S.aGroup];
+  const gkey = {vorgang: d => [d.vorgang], bereich: d => d.bereiche || [d.bereich], typ: d => [typName(d)], absender: d => [d.absender || 'Absender unbekannt'], empfaenger: d => [empfaengerVon(d) || 'Empfänger unbekannt'], jahr: d => [d.datum.slice(0, 4)], keine: () => ['']}[S.aGroup];
   const groups = [];
   for (const d of list) for (const k of gkey(d)) { let g = groups.find(x => x.k === k); if (!g) groups.push(g = {k, items: []}); g.items.push(d); }
   if (S.aGroup === 'jahr') groups.sort((x, y) => cmp(y.k, x.k)); else if (S.aGroup !== 'keine') groups.sort((x, y) => cmp(x.k, y.k));
-  const row = d => `<tr data-act="arch-edit" data-doc="${d.id}" title="Klicken zum Bearbeiten"><td><div class="docname"><button class="docico" data-act="view" data-doc="${d.id}" title="${TYP_NAME[TYP(d.mime)[0]]} ansehen" aria-label="${esc(d.titel)} ansehen">${typIcon(d.mime)}</button><div style="min-width:0"><b>${esc(d.titel)}</b><div class="muted" style="font-size:12.5px">${esc(d.dateiname)}</div></div></div></td><td class="num">${dt(d.datum)}<div class="muted" style="font-size:12px">${esc(typName(d))}</div></td><td>${esc(d.absender || '–')}${(d.kontakte || []).length ? `<div class="muted" style="font-size:12.5px">+ ${esc(d.kontakte.map(k => k.name).join(', '))}</div>` : ''}</td><td>${esc(d.vorgang)}<div class="muted" style="font-size:12.5px">${esc((d.bereiche || [d.bereich]).join(', '))}</div></td><td class="num">${groesse(d.groesse)}</td>
-    <td style="white-space:nowrap"><button class="iconbtn sm" data-act="arch-move" data-doc="${d.id}" data-v="${d.vorgang_id}" data-t="${esc(d.titel)}" title="In anderen Vorgang verschieben" aria-label="${esc(d.titel)} verschieben">${I('move')}</button><button class="iconbtn sm" data-act="arch-del" data-doc="${d.id}" data-v="${d.vorgang_id}" data-t="${esc(d.titel)}" title="Löschen" aria-label="${esc(d.titel)} löschen">${I('trash')}</button></td></tr>`;
+  const row = d => `<tr data-act="arch-edit" data-doc="${d.id}" title="Klicken zum Bearbeiten"><td><div class="docname"><button class="docico" data-act="view" data-doc="${d.id}" title="${TYP_NAME[TYP(d.mime)[0]]} ansehen" aria-label="${esc(d.titel)} ansehen">${typIcon(d.mime)}</button><div style="min-width:0"><b>${esc(d.titel)}</b><div class="muted" style="font-size:12.5px">${esc(d.dateiname)}</div></div></div></td><td class="num">${dt(d.datum)}<div class="muted" style="font-size:12px">${esc(typName(d))}</div></td><td>${esc(d.absender || '–')}${empfaengerVon(d) ? `<div class="muted" style="font-size:12.5px">an ${esc(empfaengerVon(d))}</div>` : ''}${(d.kontakte || []).length ? `<div class="muted" style="font-size:12.5px">+ ${esc(d.kontakte.map(k => k.name).join(', '))}</div>` : ''}</td><td>${esc(d.vorgang)}<div class="muted" style="font-size:12.5px">${esc((d.bereiche || [d.bereich]).join(', '))}</div></td><td class="num">${groesse(d.groesse)}</td>
+    <td style="white-space:nowrap"><button class="iconbtn lg" data-act="arch-move" data-doc="${d.id}" data-v="${d.vorgang_id}" data-t="${esc(d.titel)}" title="Einem Vorgang zuordnen" aria-label="${esc(d.titel)} einem Vorgang zuordnen">${I('move')}</button><button class="iconbtn lg" data-act="arch-del" data-doc="${d.id}" data-v="${d.vorgang_id}" data-t="${esc(d.titel)}" title="Löschen" aria-label="${esc(d.titel)} löschen">${I('trash')}</button></td></tr>`;
   const thead = `<thead><tr>${sortTh('A','titel','Dokument')}${sortTh('A','datum','Datum')}${sortTh('A','absender','Absender')}${sortTh('A','vorgang','Vorgang')}${sortTh('A','groesse','Größe')}<th><span class="sr">Aktionen</span></th></tr></thead>`;
   return `<h1>Archiv</h1><p class="muted" style="margin:6px 0 0">${D.archiv.length} archivierte Dokumente. Wird ein Vorgang erledigt, verschwindet er aus „Vorgänge“; seine Dokumente stehen hier. ${list.length !== D.archiv.length ? `${list.length} passen zu den Filtern.` : ''}</p>
 
-  <div class="filters"><span class="lbl">Gruppieren</span>${[['vorgang','Vorgang'],['bereich','Bereich'],['typ','Typ'],['absender','Absender'],['jahr','Jahr'],['keine','Keine']].map(([k, l]) => `<button class="fchip ${S.aGroup === k ? 'on' : ''}" data-act="agroup" data-id="${k}">${l}</button>`).join('')}
+  <div class="filters"><span class="lbl">Gruppieren</span>${[['vorgang','Vorgang'],['bereich','Bereich'],['typ','Typ'],['absender','Absender'],['empfaenger','Empfänger'],['jahr','Jahr'],['keine','Keine']].map(([k, l]) => `<button class="fchip ${S.aGroup === k ? 'on' : ''}" data-act="agroup" data-id="${k}">${l}</button>`).join('')}
    <span class="trenner"></span><span class="lbl">Bereich</span>${['alle', ...bereiche].map(b => `<button class="fchip ${S.aBereich === b ? 'on' : ''}" data-act="abereich" data-id="${esc(b)}">${b === 'alle' ? 'Alle' : esc(b)}</button>`).join('')}</div>
   <div class="filters" style="margin-top:-6px"><span class="lbl">Typ</span>${['alle', ...typen].map(t => `<button class="fchip ${(S.aTyp || 'alle') === t ? 'on' : ''}" data-act="atyp" data-id="${esc(t)}">${t === 'alle' ? 'Alle' : esc(t)}</button>`).join('')}
    <span class="trenner"></span><span class="lbl">Jahr</span>${['alle', ...jahre].map(j => `<button class="fchip ${S.aJahr === j ? 'on' : ''}" data-act="ajahr" data-id="${j}">${j === 'alle' ? 'Alle' : j}</button>`).join('')}
-   <span style="flex:1"></span><input class="inp" id="atext" type="search" placeholder="Im Archiv filtern" value="${esc(S.aText)}" style="max-width:220px" aria-label="Im Archiv filtern">
-   <label class="chk" style="margin-left:8px"><input type="checkbox" id="aerl" ${S.aErledigt ? 'checked' : ''}>nur erledigte Vorgänge</label></div>
+   <span style="flex:1"></span><input class="inp" id="atext" type="search" placeholder="Im Archiv filtern" value="${esc(S.aText)}" style="max-width:220px" aria-label="Im Archiv filtern"></div>
   ${groups.length ? groups.map(g => `${S.aGroup !== 'keine' ? `<div class="agrp"><h3>${esc(g.k)}</h3><span class="muted num">${g.items.length}</span></div>` : ''}<div class="tbl-wrap" style="margin-bottom:16px"><table>${thead}<tbody>${g.items.map(row).join('')}</tbody></table></div>`).join('') : '<div class="panel muted">Keine Dokumente für diese Filter.</div>'}`;
 }
 
@@ -784,6 +786,8 @@ function vSettings() {
    <div class="panel stack"><div class="chron-h"><h2>Eintragsarten</h2><button class="btn sm" data-act="art-neu">${I('plus')}Art</button></div>
     <p style="margin:0" class="muted">Eigene Arten für die Chronik, z. B. Besprechung oder Ortstermin. Die eingebauten Arten (Eingang, Versendet, Telefonat, Notiz …) bleiben immer.</p>
     <ul class="mini">${(D.arten || []).map(t => `<li><span>${esc(t)}</span><button class="btn sm ghost" data-act="art-del" data-name="${esc(t)}">Entfernen</button></li>`).join('') || '<li class="muted">Noch keine eigenen Arten.</li>'}</ul></div>
+   <div class="panel stack"><h2>Zulässige Empfänger</h2><p style="margin:0">Für wen Post ankommt, z. B. Ihre Firma und Sie persönlich, ein Name pro Zeile. Die Erkennung ordnet jedes Schreiben dem Empfänger zu, der im Anschriftenfeld steht; im Archiv lässt sich danach gruppieren.</p>
+    <textarea id="empflist" class="inp" rows="3" placeholder="Orbit Cross media e.K.&#10;Sven Muster">${esc((D.empfaenger || []).join('\n'))}</textarea><div><button class="btn" data-act="empf-save">Speichern</button></div></div>
    <div class="panel stack"><h2>Eigene Angaben</h2><p style="margin:0">Ihr Name und Ihre Anschrift, eine Angabe pro Zeile. Die Absendererkennung schlägt diese Angaben nie als Absender vor.</p>
     <textarea id="eigene" class="inp" rows="4">${esc(D.eigene)}</textarea><div><button class="btn" data-act="eigene-save">Speichern</button></div></div>
    <div class="panel stack"><h2>Apple Mail</h2><p style="margin:0">„Aus Mail holen“ übernimmt alle E-Mails mit dieser Markierung samt Anlagen in den Posteingang. Die Markierung in Mail bleibt; jede E-Mail wird nur einmal übernommen, auch wenn sie in mehreren Postfächern liegt.</p>
@@ -908,10 +912,12 @@ function archivBearbeiten(docId) {
     <label>Absender<select id="m-ak"><option value="">– unbekannt –</option>${kontakte.map(k => `<option value="${k.id}" ${k.id === d.kontakt_id ? 'selected' : ''}>${esc(k.kurzname || k.name)}</option>`).join('')}</select></label></div>
    <label>Bereiche <small class="muted">· leer = Bereiche des Vorgangs${d.system === 'ablage' ? '' : ` (${esc((d.bereiche || []).join(', '))})`}</small></label>${mehrfach('m-abs', D.groups.map(b => [b, b]), d.eigene_bereiche || [], 'Bereich')}
    <label>Weitere Kontakte</label>${mehrfach('m-aks', kontaktOpt(), (d.kontakte || []).map(k => k.id), 'Kontakt')}
-   <p class="muted" style="margin:0;font-size:13px">Vorgang: ${d.system === 'ablage' ? 'ohne Vorgang' : `${esc(d.vorgang)} · <button class="linkbtn" data-act="arch-akte" data-v="${d.vorgang_id}" data-doc="${d.id}">Akte öffnen</button>`} · <button class="linkbtn" data-act="view" data-doc="${d.id}">Dokument ansehen</button></p>
+   <label>Empfänger <small class="muted">· zulässige Empfänger pflegen Sie in den Einstellungen</small><input id="m-aemp" list="m-aempl" maxlength="160" value="${esc(d.empfaenger || '')}"><datalist id="m-aempl">${(D.empfaenger || []).map(e => `<option value="${esc(e)}">`).join('')}</datalist></label>
+   <div class="src" style="display:flex;align-items:center;gap:10px;flex-wrap:wrap"><span style="flex:1;min-width:0">Vorgang: <b>${d.system === 'ablage' ? 'ohne Vorgang' : esc(d.vorgang)}</b>${d.system === 'ablage' ? '' : ` · <button class="linkbtn" data-act="arch-akte" data-v="${d.vorgang_id}" data-doc="${d.id}">Akte öffnen</button>`}</span>
+    <button class="btn sm pri" data-act="arch-zuordnen" data-doc="${d.id}" data-v="${d.vorgang_id}" data-t="${esc(d.titel)}">${I('move')}Einem Vorgang zuordnen …</button><button class="btn sm" data-act="view" data-doc="${d.id}">Ansehen</button></div>
    <p class="muted" style="margin:0;font-size:12.5px">Die Originaldatei bleibt unverändert; der Dateiname gilt für Anzeige und Export.</p>`, async () => {
     const titel = val('m-at').trim(); if (!titel) { $('#m-at').focus(); return false; }
-    try { await api(`dokumente/${docId}/aendern`, {titel, dateiname: val('m-an').trim(), datum: val('m-ad') || null, kontakt_id: val('m-ak') ? +val('m-ak') : null, bereiche: multiWert('m-abs'), kontakte: multiWert('m-aks').map(Number)}); closeModal(); toast('Gespeichert.'); await render(); }
+    try { await api(`dokumente/${docId}/aendern`, {titel, dateiname: val('m-an').trim(), datum: val('m-ad') || null, empfaenger: val('m-aemp').trim(), kontakt_id: val('m-ak') ? +val('m-ak') : null, bereiche: multiWert('m-abs'), kontakte: multiWert('m-aks').map(Number)}); closeModal(); toast('Gespeichert.'); await render(); }
     catch (e) { toast(e.message); }
     return false;
   }, 'Speichern');
@@ -971,11 +977,11 @@ document.addEventListener('click', async ev => {
   if (!el) return;
   const a = el.dataset.act, id = el.dataset.id ? (isNaN(+el.dataset.id) ? el.dataset.id : +el.dataset.id) : null;
   switch (a) {
-  case 'import': if (S.view === 'archiv') { $('#fileinp').dataset.ziel = 'archiv'; $('#fileinp').click(); break; } { const m = $('#impmenu'); m.hidden = !m.hidden; el.setAttribute('aria-expanded', String(!m.hidden)); break; }
-  case 'imp-file': $('#impmenu').hidden = true; $('#fileinp').dataset.ziel = ''; $('#fileinp').click(); break;
+  case 'import': { const m = $('#impmenu'); m.hidden = !m.hidden; el.setAttribute('aria-expanded', String(!m.hidden)); break; }
+  case 'imp-file': $('#impmenu').hidden = true; $('#fileinp').dataset.ziel = S.view === 'archiv' ? 'archiv' : ''; $('#fileinp').click(); break;
   case 'arch-import': $('#fileinp').dataset.ziel = 'archiv'; $('#fileinp').click(); break;
   case 'doc-add': $('#fileinp').dataset.ziel = String(D.akte.id); $('#fileinp').click(); break;
-  case 'imp-scan': $('#impmenu').hidden = true; scan(); break;
+  case 'imp-scan': $('#impmenu').hidden = true; scan(S.view === 'archiv'); break;
   case 'scan-folder': $('#impmenu').hidden = true; try { const r = await api('scanordner/oeffnen', {}); toast(`Ordner „${r.pfad.split('/').pop()}“ (in Ihrem Benutzerordner) geöffnet. Was Sie dort hineinscannen oder ablegen, kommt automatisch in den Posteingang.`); } catch (e) { toast(e.message); } break;
   case 'ib-open': S.ibSel = S.ibSel === id ? null : id; $('#view').innerHTML = vInbox(); if (S.ibSel) $('#it-' + S.ibSel)?.scrollIntoView({behavior: 'smooth', block: 'nearest'}); break;
   case 'ib-close': S.ibSel = null; $('#view').innerHTML = vInbox(); break;
@@ -985,6 +991,8 @@ document.addEventListener('click', async ev => {
   case 'ib-fadd': { const d = draft[id]; d.fristen.push({titel: '', faellig_am: plusTage(isoHeute(), 14), an: true}); await render(); const f = document.querySelectorAll(`[data-fr=titel][data-id="${id}"]`); f[f.length - 1]?.focus(); break; }
   case 'doc-move': ev.stopPropagation(); dokVerschieben(+el.dataset.doc, D.akte.id, D.akte.dokumente.find(x => x.id === +el.dataset.doc)?.titel); break;
   case 'doc-remove': ev.stopPropagation(); dokEntfernen(+el.dataset.doc, D.akte.id, D.akte.dokumente.find(x => x.id === +el.dataset.doc)?.titel); break;
+  case 'arch-zuordnen': closeModal(); dokVerschieben(+el.dataset.doc, +el.dataset.v, el.dataset.t); break;
+  case 'empf-save': await act(() => api('empfaenger', {empfaenger: val('empflist').split('\n').map(x => x.trim()).filter(Boolean)}), 'Gespeichert. Die Empfänger der Dokumente wurden neu zugeordnet.'); break;
   case 'arch-del': dokEntfernen(+el.dataset.doc, +el.dataset.v, el.dataset.t); break;
   case 'beenden': modal('DocuManager beenden?', '<p style="margin:0">Die Anwendung wird beendet. Starten Sie sie wieder über das Programm „DocuManager“.</p>', async () => {
       closeModal(); try { await api('beenden', {}); } catch (e) { /* Server bereits weg */ }
@@ -1097,7 +1105,7 @@ document.addEventListener('click', async ev => {
   case 'b-ren': modal('Bereich umbenennen', `<label>Name<input id="m-bn" value="${esc(el.dataset.b)}"></label>`, async () => {
       closeModal(); await act(() => api('bereiche/umbenennen', {alt: el.dataset.b, neu: val('m-bn')}), 'Umbenannt.'); return false; }); break;
   case 'b-del': await act(() => api('bereiche/entfernen', {name: el.dataset.b}), 'Bereich entfernt.'); break;
-  case 'mail-get': $('#impmenu').hidden = true; await mailHolen(); break;
+  case 'mail-get': $('#impmenu').hidden = true; await mailHolen(S.view === 'archiv' && !el.closest('.view')); break;
   case 'compose': compose(el.dataset.bezug ? +el.dataset.bezug : null, el.dataset.edit ? +el.dataset.edit : null); break;
   case 'pv-mode': S.pvMode = el.dataset.id; paintAkte(); break;
   case 'take': uebernehmen(el.dataset.k, {text: el.dataset.t, doc: +el.dataset.doc, seite: +el.dataset.s, entry: +el.dataset.entry, datum: el.dataset.datum, titel: el.dataset.titel}); break;
@@ -1124,7 +1132,6 @@ document.addEventListener('change', async ev => {
   if (el.dataset.change === 'v-status') await statusSetzen(null, el.value, render);
   if (el.dataset.change === 't-status') await statusSetzen(+el.dataset.id, el.value, render);
   if (el.id === 'mailflag') await act(() => api('mail/markierung', {markierung: +el.value}), 'Markierung gespeichert.');
-  if (el.id === 'aerl') { S.aErledigt = el.checked; $('#view').innerHTML = vArchiv(); }
   if (el.id === 'fileinp') { const files = [...el.files]; el.value = ''; await importFiles(files, el.dataset.ziel === 'archiv' ? 'archiv' : el.dataset.ziel ? +el.dataset.ziel : null); }
   if (el.id === 'm-ea' && el.value === '__neu') { const name = prompt('Name der neuen Eintragsart (z. B. Besprechung, Ortstermin):'); el.value = 'notiz';
     if (name && name.trim()) { try { const r = await api('eintragsarten', {name: name.trim()}); D.arten = [...(D.arten || []), r.name]; el.insertAdjacentHTML('beforeend', `<option value="${esc('typ:' + r.name)}">${esc(r.name)}</option>`); el.value = 'typ:' + r.name; toast(`Art „${r.name}“ angelegt.`); } catch (e) { toast(e.message); } } }
@@ -1192,22 +1199,23 @@ async function importFiles(files, vorgangId) {
   toast(`${neu} abgelegt${vorhanden ? ` · ${vorhanden} bereits vorhanden` : ''}${fehler.length ? ' · ' + fehler.join(' · ') : ''}`);
   if (!vorgangId && location.hash !== '#posteingang') location.hash = 'posteingang'; else await render();
 }
-async function mailHolen() {
+async function mailHolen(insArchiv) {
   toast('E-Mails werden aus Apple Mail geholt …');
   try {
     let gesamt = 0, r;
-    do { r = await api('mail/abholen', {}); gesamt += r.neu; } while (r.weitere && r.neu);
+    do { r = await api('mail/abholen', insArchiv ? {ziel: 'archiv'} : {}); gesamt += r.neu; } while (r.weitere && r.neu);
+    if (insArchiv) { toast(gesamt ? `${gesamt} E-Mail${gesamt === 1 ? '' : 's'} samt Anlagen im Archiv abgelegt.` : 'Keine neuen markierten E-Mails.'); await render(); return; }
     toast(gesamt ? `${gesamt} neue E-Mail${gesamt === 1 ? '' : 's'} übernommen${r.fehler.length ? ' · ' + r.fehler.join(' · ') : ''}` : 'Keine neuen markierten E-Mails. Bereits übernommene werden nicht erneut geholt.');
     if (location.hash !== '#posteingang') location.hash = 'posteingang'; else await render();
   } catch (e) { toast(e.message); }
 }
-async function scan() {
+async function scan(insArchiv) {
   try {
-    const job = await api('posteingang/scan', {});
+    const job = await api(insArchiv ? 'archiv/scan' : 'posteingang/scan', {});
     toast('Scannen Sie im macOS-Dialog und wählen Sie dort „Scans übernehmen“.');
     let r; do { await new Promise(res => setTimeout(res, 1200)); r = await api(`scans/${job.id}/poll`, {}); } while (r.state === 'open');
-    toast(r.state === 'done' ? `${r.imported} Scan(s) im Posteingang${r.errors.length ? ' · ' + r.errors.join(' · ') : ''}` : 'Scan abgebrochen.');
-    location.hash = 'posteingang'; await render();
+    toast(r.state === 'done' ? `${r.imported} Scan(s) ${insArchiv ? 'im Archiv abgelegt' : 'im Posteingang'}${r.errors.length ? ' · ' + r.errors.join(' · ') : ''}` : 'Scan abgebrochen.');
+    if (!insArchiv) location.hash = 'posteingang'; await render();
   } catch (e) { toast(e.message); }
 }
 addEventListener('dragover', e => { if ([...(e.dataTransfer?.types || [])].includes('Files')) { e.preventDefault(); document.body.classList.add('dragging'); } });

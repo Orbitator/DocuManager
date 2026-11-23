@@ -13,6 +13,7 @@ import html
 import json
 import os
 import re
+import sqlite3
 import subprocess
 import tempfile
 from contextlib import closing
@@ -165,21 +166,24 @@ class MailImport:
         with closing(self.store.connect()) as db:
             known = {r[0] for r in db.execute("SELECT message_id FROM mail_import")}
         ergebnis = self.runner(known, self.markierung(), MAX_JE_ABRUF)
-        neu, bekannt, fehler = 0, 0, []
+        neu, bekannt, fehler, ids = 0, 0, [], []
         for m in ergebnis.get("messages", []):
             try:
-                if self.uebernehmen(m["source"].encode("utf-8", "surrogateescape") if isinstance(m["source"], str)
-                                    else m["source"], m["id"], m.get("mailbox")):
+                doc_id = self.uebernehmen(m["source"].encode("utf-8", "surrogateescape") if isinstance(m["source"], str)
+                                          else m["source"], m["id"], m.get("mailbox"))
+                if doc_id:
                     neu += 1
+                    ids.append(doc_id)
                 else:
                     bekannt += 1
             except (ValueError, OSError) as error:
                 fehler.append(str(error))
         self._abruf_merken(neu, bekannt)
-        return {"neu": neu, "weitere": bool(ergebnis.get("more")), "fehler": fehler, "bereits_vorhanden": bekannt}
+        return {"neu": neu, "weitere": bool(ergebnis.get("more")), "fehler": fehler, "bereits_vorhanden": bekannt, "ids": ids}
 
     def uebernehmen(self, raw, message_id=None, postfach=None):
-        """Legt eine E-Mail mit ihren Anlagen im Posteingang ab. False, wenn sie schon übernommen ist."""
+        """Legt eine E-Mail mit ihren Anlagen im Posteingang ab. Gibt die Nummer des Dokuments zurück,
+        False, wenn sie schon übernommen ist."""
         if len(raw) > MAX_MAIL:
             raise ValueError("Die E-Mail ist größer als 40 MB.")
         daten = mail_lesen(raw)
@@ -223,11 +227,17 @@ class MailImport:
                  "E-Mail-Text übernommen", daten["datum"])).lastrowid
             db.execute("INSERT INTO dokumentseite(dokument_id,nummer,methode,text) VALUES(?,?,?,?)",
                        (doc_id, 1, "mail", seite))
+            try:  # Empfänger aus dem Mailkopf (bzw. einer der zulässigen Empfänger)
+                from akte import empfaenger_erkennen
+                liste = db.execute("SELECT wert FROM einstellung WHERE schluessel='empfaenger'").fetchone()
+                db.execute("UPDATE dokument SET empfaenger=? WHERE id=?", (empfaenger_erkennen(seite, json.loads(liste[0]) if liste else []), doc_id))
+            except sqlite3.OperationalError:
+                pass  # ältere Datenbank ohne Spalte
             db.execute("INSERT INTO mail_import(message_id,dokument_id,betreff,absender,postfach) VALUES(?,?,?,?,?)",
                        (message_id, doc_id, daten["betreff"], daten["adresse"] or daten["name"], postfach))
             db.executemany("INSERT OR IGNORE INTO mail_anlage(message_id,dokument_id) VALUES(?,?)",
                            ((message_id, a) for a, _ in anlagen))
-        return True
+        return doc_id
 
 
 def test_mail(store):
@@ -252,9 +262,10 @@ def test_mail(store):
                                                              {"messages": [] if "abc123@unitask.example" in known else
                                                               [{"id": "abc123@unitask.example", "mailbox": "INBOX",
                                                                 "source": raw.decode("utf-8")}], "more": False})[1])
-    assert mi.abholen() == {"neu": 1, "weitere": False, "fehler": [], "bereits_vorhanden": 0}
+    erstes = mi.abholen()
+    assert {k: v for k, v in erstes.items() if k != "ids"} == {"neu": 1, "weitere": False, "fehler": [], "bereits_vorhanden": 0} and len(erstes["ids"]) == 1
     assert mi.status()["letzter_abruf"]["neu"] == 1
-    assert mi.abholen() == {"neu": 0, "weitere": False, "fehler": [], "bereits_vorhanden": 0}
+    assert mi.abholen() == {"neu": 0, "weitere": False, "fehler": [], "bereits_vorhanden": 0, "ids": []}
     abruf = mi.status()["letzter_abruf"]
     assert abruf["neu"] == 0 and len(abruf["zeit"]) == 19, abruf
     # Dieselbe E-Mail unter anderer Kennung (zweites Postfach) wird nicht doppelt übernommen
@@ -262,10 +273,12 @@ def test_mail(store):
     zweit = MailImport(store, runner=lambda known, flag, limit: {"messages": [
         {"id": "abc123@unitask.example", "mailbox": "INBOX", "source": raw.decode("utf-8")},
         {"id": "dritte-kennung", "mailbox": "Gesendet", "source": raw.decode("utf-8")}], "more": False})
-    assert zweit.abholen() == {"neu": 0, "weitere": False, "fehler": [], "bereits_vorhanden": 2}
+    assert zweit.abholen() == {"neu": 0, "weitere": False, "fehler": [], "bereits_vorhanden": 2, "ids": []}
     assert abgeholt[0][1] == 6 and "abc123@unitask.example" in abgeholt[1][0]
     eingang = akte.posteingang()
     mail = [d for d in eingang if d["mime"] == "message/rfc822"][0]
+    with closing(store.connect()) as db:
+        assert db.execute("SELECT empfaenger FROM dokument WHERE id=?", (mail["id"],)).fetchone()[0] == "a.mustermann@mail.example"
     assert mail["titel"] == "Korrigierte Rechnung R-2026-11873" and mail["ocr_status"] == "E-Mail-Text übernommen"
     assert mail["vorschlag"]["datum"] == "2026-11-22", mail["vorschlag"]
     assert mail["vorschlag"]["absender"]["name"] == "Unitask Buchhaltung", mail["vorschlag"]

@@ -293,6 +293,38 @@ _ORGANISATION = re.compile(
 _GRUSS = re.compile(r"^(mit freundlichen grüßen|freundliche grüße|mit besten grüßen|hochachtungsvoll|viele grüße)", re.I)
 
 
+_ANREDE_ZEILE = re.compile(r"^(firma|herrn?|frau|an|eheleute|familie)\.?$", re.I)
+_STRASSE = re.compile(r"^\d|\b(str(aße|asse|\.)|weg|platz|allee|ring|gasse|damm|ufer|chaussee)\b|\s\d+\s?[a-z]?$", re.I)
+
+
+def empfaenger_erkennen(text, zulaessig=()):
+    """Empfänger eines Schreibens. Zuerst die in den Einstellungen hinterlegten zulässigen Empfänger (wer zuerst im
+    Kopf des Schreibens steht), sonst der Name im Anschriftenfeld über „PLZ Ort“, bei E-Mails die Zeile „An:“."""
+    zeilen = [re.sub(r"\s+", " ", z).strip() for z in (text or "").splitlines() if z.strip()][:40]
+    kopf = flach("\n".join(zeilen))
+    treffer = sorted((kopf.find(flach(z)), z) for z in zulaessig if len(flach(z)) >= 4 and flach(z) in kopf)
+    if treffer:
+        return treffer[0][1]
+    m = re.search(r"^An:\s*(.+)$", text or "", re.M)
+    if m:
+        name = re.sub(r"\s*<[^>]+>", "", m[1]).split(",")[0].strip().strip('"')
+        return (name or m[1].strip())[:160]
+    for i, z in enumerate(zeilen):
+        if not re.match(r"^\d{5}\s+[A-ZÄÖÜ]", z) or re.search(r"[,·|]", z):
+            continue
+        block = []
+        for j in range(i - 1, max(-1, i - 7), -1):
+            vor = zeilen[j]
+            if re.search(r"[·|]|,\s*\d{5}", vor) or _DATUM.search(vor):
+                break  # Absenderzeile oder Datum beendet das Anschriftenfeld
+            block.insert(0, vor)
+        namen = [b for b in block if not _STRASSE.search(b) and not _ANREDE_ZEILE.match(b)
+                 and not b.lower().startswith(("z.h", "z. h", "zh.", "zu händen", "postfach"))]
+        if namen:
+            return re.sub(r"^(Herrn?|Frau|Firma)\s+", "", namen[0])[:160]
+    return None
+
+
 def absender_erkennen(text, eigene=()):
     """Sucht den Absender dort, wo er in einem Schreiben steht: Absenderzeile über der Anschrift,
     Behörde oder Gericht im Briefkopf, Organisation in der ersten Zeile, Name unter der Grußformel.
@@ -1032,6 +1064,28 @@ class Akte:
                 r["vorschlag"]["fristen"] = fristen_erkennen(seiten, r["vorschlag"]["datum"], self.today())
             return rows
 
+    def empfaenger_liste(self):
+        with closing(self.connect()) as db:
+            row = db.execute("SELECT wert FROM einstellung WHERE schluessel='empfaenger'").fetchone()
+        return json.loads(row[0]) if row else []
+
+    def empfaenger_setzen(self, namen):
+        if not isinstance(namen, list):
+            raise ValueError("Empfänger: ungültige Liste.")
+        liste = []
+        for n in namen:
+            n = _text(n, "Empfänger", 160)
+            if n and n not in liste:
+                liste.append(n)
+        with closing(self.connect()) as db, db:
+            db.execute("INSERT OR REPLACE INTO einstellung(schluessel,wert) VALUES('empfaenger',?)", (json.dumps(liste, ensure_ascii=False),))
+            # Dokumente ohne bisher passenden Empfänger neu zuordnen (von Hand gesetzte bleiben)
+            for d in db.execute("""SELECT d.id, group_concat(s.text, char(10)) AS text FROM dokument d
+                JOIN dokumentseite s ON s.dokument_id=d.id AND s.nummer=1 WHERE coalesce(d.empfaenger_quelle,'')<>'manuell'
+                GROUP BY d.id""").fetchall():
+                db.execute("UPDATE dokument SET empfaenger=? WHERE id=?", (empfaenger_erkennen(d["text"], liste), d["id"]))
+        return {"empfaenger": liste}
+
     def eigene_angaben(self):
         with closing(self.connect()) as db:
             row = db.execute("SELECT wert FROM einstellung WHERE schluessel='eigene_angaben'").fetchone()
@@ -1241,6 +1295,9 @@ class Akte:
                 db.execute("UPDATE dokument SET dokument_datum=? WHERE id=?", (datum, dokument_id))
                 if datum:
                     db.execute("UPDATE eintrag SET ereignis_datum=? WHERE dokument_id=? AND art='eingang'", (datum, dokument_id))
+            if "empfaenger" in data:
+                db.execute("UPDATE dokument SET empfaenger=?, empfaenger_quelle='manuell' WHERE id=?",
+                           (_text(data.get("empfaenger"), "Empfänger", 160), dokument_id))
             if "bereiche" in data:  # leer = Bereiche des Vorgangs gelten
                 bereiche = self._bereiche(data["bereiche"], False)
                 db.execute("DELETE FROM dokument_bereich WHERE dokument_id=?", (dokument_id,))
@@ -1343,7 +1400,7 @@ class Akte:
         with closing(self.connect()) as db:
             rows = [dict(r) for r in db.execute("""
                 SELECT d.id, d.titel, d.dateiname, d.mime, d.dateipfad, d.ocr_status, d.angelegt_am, d.dokument_datum,
-                       dv.vorgang_id, v.titel AS vorgang, v.system, (d.ansicht IS NOT NULL) AS gedreht, d.drehung_manuell, v.bereich, v.status AS vorgang_status,
+                       dv.vorgang_id, v.titel AS vorgang, v.system, (d.ansicht IS NOT NULL) AS gedreht, d.drehung_manuell, d.empfaenger, v.bereich, v.status AS vorgang_status,
                        (SELECT count(*) FROM dokumentseite s WHERE s.dokument_id=d.id) AS seiten,
                        (SELECT e.art FROM eintrag e WHERE e.dokument_id=d.id AND e.vorgang_id=dv.vorgang_id
                           AND e.geloescht_am IS NULL ORDER BY e.id LIMIT 1) AS art,
@@ -1483,6 +1540,7 @@ def _route_table():
         ("GET", r"/api/akte/(\d+)/offen", lambda a, m, d: a.offene_punkte(i(m[1]), i(d["teil"]) if str(d.get("teil", "")).isdigit() else None)),
         ("GET", r"/api/bereiche", lambda a, m, d: {"bereiche": a.bereiche()}),
         ("GET", r"/api/eintragsarten", lambda a, m, d: {"arten": a.eintragsarten()}),
+        ("GET", r"/api/empfaenger", lambda a, m, d: {"empfaenger": a.empfaenger_liste()}),
         ("GET", r"/api/kontakte", lambda a, m, d: {"kontakte": a.kontakte()}),
         ("GET", r"/api/kontakte/dubletten", lambda a, m, d: {"dubletten": a.moegliche_dubletten(d.get("name"))}),
         ("GET", r"/api/papierkorb", lambda a, m, d: {"eintraege": a.papierkorb()}),
@@ -1519,6 +1577,7 @@ def _route_table():
         ("POST", r"/api/bereiche/entfernen", lambda a, m, d: a.bereich_entfernen(d.get("name"))),
         ("POST", r"/api/bereiche/reihenfolge", lambda a, m, d: a.bereiche_sortieren(d.get("namen"))),
         ("POST", r"/api/eintragsarten", lambda a, m, d: {"name": a.eintragsart_anlegen(d.get("name"))}),
+        ("POST", r"/api/empfaenger", lambda a, m, d: a.empfaenger_setzen(d.get("empfaenger"))),
         ("POST", r"/api/eintragsarten/entfernen", lambda a, m, d: a.eintragsart_entfernen(d.get("name"))),
         ("POST", r"/api/kontakte", lambda a, m, d: {"id": a.kontakt_anlegen(d)}),
         ("POST", r"/api/kontakte/(\d+)/abteilungen", lambda a, m, d: {"id": a.abteilung_anlegen(i(m[1]), d)}),
@@ -1925,6 +1984,18 @@ def test_fristen_ablage(store):  # noqa: C901
         raise AssertionError("Fremdes Dokument darf nicht zugewiesen werden")
     except ValueError:
         pass
+    # Empfänger: Anschriftenfeld, E-Mail-Kopf, zulässige Empfänger aus den Einstellungen
+    brief = ("Amt Rostocker Heide, Eichenallee 20 a, 18182 Gelbensande\nFirma\nOrbit Cross media e.K.\n"
+             "z.H. Herr Sven Muster\nZum Süderholz 7\n18182 Bentwisch\nIhr Schreiben vom 10.08.2026")
+    assert empfaenger_erkennen(brief) == "Orbit Cross media e.K.", empfaenger_erkennen(brief)
+    assert empfaenger_erkennen("Von: Bank\nAn: Max Muster <max@x.example>\nBetreff: Auszug") == "Max Muster"
+    assert empfaenger_erkennen(brief, ["Sven Muster", "Orbit Cross media e.K."]) == "Orbit Cross media e.K."
+    assert empfaenger_erkennen("Herrn\nSven Muster\nWeg 1\n18182 Bentwisch", ["Orbit Cross media e.K.", "Sven Muster"]) == "Sven Muster"
+    assert akte.empfaenger_setzen(["Orbit Cross media e.K.", "", "Orbit Cross media e.K."]) == {"empfaenger": ["Orbit Cross media e.K."]}
+    akte.dokument_aendern(d1, {"empfaenger": "Privat"})
+    assert [x for x in akte.archiv() if x["id"] == d1][0]["empfaenger"] == "Privat"
+    akte.empfaenger_setzen([])
+    assert [x for x in akte.archiv() if x["id"] == d1][0]["empfaenger"] == "Privat"  # von Hand gesetzt bleibt
     # Eigene Eintragsart
     assert akte.eintragsart_anlegen("Ortstermin") == "Ortstermin"
     try:

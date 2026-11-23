@@ -118,6 +118,12 @@ Teil 2 (umgesetzt, Schemaversion 7):
   `dokument`; `migrate_9` baut die Tabelle ohne sie neu (Zugehörigkeit regelt `dokument_vorgang`). Der Scan-Ordner
   liegt jetzt unter `~/DocuManager Scans` (nicht in „Dokumente“, das macOS für Programme gesondert schützt).
   Fehlermeldungen beim Speichern nennen die Ursache.
+- 0.11 (Schemaversion 12): Archiv mit vollem Import-Menü (Datei, Scan, Apple Mail landen direkt im Archiv;
+  Scan-Ordner weiter über den Posteingang). Ankreuzfeld „nur erledigte Vorgänge“ entfernt. „Einem Vorgang
+  zuordnen …“ im Archiv-Dialog holt Dokumente in laufende Vorgänge zurück. Empfänger je Dokument
+  (`empfaenger_erkennen`: zulässige Empfänger aus den Einstellungen, sonst Anschriftenfeld über „PLZ Ort“, bei
+  E-Mails „An:“; von Hand änderbar, `dokument.empfaenger_quelle='manuell'` bleibt erhalten); Gruppieren nach
+  Empfänger. Dialoge mit eigener Hintergrundfarbe (`--dialog`), größere Zeilenknöpfe im Archiv.
 - 0.10 (Schemaversion 11):
   - Dateitypen Word (.docx, Text direkt aus der Datei, Ansicht als HTML über macOS-textutil oder eigenen Umsetzer)
     und E-Mail (.eml, über den Mail-Import mit Anlagen); Dateityp-Symbole (PDF, BILD, MAIL, WORD) in Vorgangsliste,

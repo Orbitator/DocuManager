@@ -76,6 +76,9 @@ Die bisherigen Schnittstellen (`/api/cases`, Dokumente, Scan, Chat) bleiben unve
 | POST `/api/eintraege/{id}` | zusätzlich `art`, `typ`, `dokument_id`, `kontakt_id` |
 | GET `/api/documents/{id}/html` | Word-Dokument als lesbare HTML-Seite |
 | POST `/api/chat/preview`, `/api/chat/import` | ChatGPT-Export lesen (Körper: Datei) und ausgewählte Unterhaltungen übernehmen |
+| GET/POST `/api/empfaenger` | zulässige Empfänger lesen / `empfaenger` (Liste) setzen; ordnet nicht von Hand gesetzte Empfänger neu zu |
+| POST `/api/archiv/scan` | Scan-Dialog; Scans landen direkt im Archiv |
+| POST `/api/mail/abholen` mit `{"ziel": "archiv"}` | E-Mails samt Anlagen direkt im Archiv ablegen |
 | POST `/api/beenden` | Beendet die Anwendung |
 | POST `/api/sicherungen/{name}/pruefen` | Prüft Vollständigkeit, Prüfsummen und Datenbank, ohne etwas zu ändern |
 | POST `/api/mail/markierung` | `markierung` 0–6 (Rot, Orange, Gelb, Grün, Blau, Violett, Grau) |
