@@ -63,16 +63,21 @@ const FKC = {frist:'crit', wiedervorlage:'warn', aufgabe:''};
 const VERSAND = ['Post','Einschreiben','E-Mail','Fax','Persönlich','Online-Portal'];
 
 // ---------- Schnittstelle ----------
+// Ist der Dienst im Hintergrund nicht erreichbar, meldet der Browser nur „Load failed“ bzw. „Failed to fetch“.
+const OFFLINE = 'DocuManager läuft nicht mehr. Bitte das Programm „DocuManager“ (Launchpad oder Spotlight) starten; danach diese Seite neu laden.';
+async function holen(url, opt) {
+  try { return await fetch(url, opt); } catch (e) { throw new Error(OFFLINE); }
+}
 async function api(path, body, method) {
   const opt = body === undefined && !method ? {} : {method: method || 'POST',
     headers: {'Content-Type': 'application/json', 'X-Korrespondenz': 'lokal'}, body: JSON.stringify(body || {})};
-  const res = await fetch('/api/' + path, opt);
+  const res = await holen('/api/' + path, opt);
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(data.error || 'Anfrage fehlgeschlagen.');
   return data;
 }
 async function upload(path, file) {
-  const res = await fetch('/api/' + path, {method: 'POST', body: file,
+  const res = await holen('/api/' + path, {method: 'POST', body: file,
     headers: {'X-Korrespondenz': 'lokal', 'X-Dateiname': encodeURIComponent(file.name)}});
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(data.error || 'Import fehlgeschlagen.');
@@ -774,7 +779,7 @@ function wiederherstellenFrage(name, datei) {
     closeModal(); toast('Sicherung wird geprüft und wiederhergestellt …');
     try {
       let r;
-      if (datei) { const res = await fetch('/api/sicherungen/wiederherstellen', {method: 'POST', body: datei, headers: {'X-Korrespondenz': 'lokal'}}); r = await res.json(); if (!res.ok) throw new Error(r.error || 'Wiederherstellen fehlgeschlagen.'); }
+      if (datei) { const res = await holen('/api/sicherungen/wiederherstellen', {method: 'POST', body: datei, headers: {'X-Korrespondenz': 'lokal'}}); r = await res.json(); if (!res.ok) throw new Error(r.error || 'Wiederherstellen fehlgeschlagen.'); }
       else r = await api(`sicherungen/${name}/wiederherstellen`, {});
       toast(`Wiederhergestellt: ${r.anzahl.vorgang} Vorgänge, ${r.anzahl.dokument} Dokumente.`); setTimeout(() => location.reload(), 1200);
     } catch (e) { toast(e.message); }

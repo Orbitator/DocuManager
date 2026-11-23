@@ -58,17 +58,29 @@ cat > "$app/Contents/Info.plist" <<PLIST
   <key>NSAppleEventsUsageDescription</key><string>DocuManager holt markierte E-Mails aus Apple Mail.</string>
 </dict></plist>
 PLIST
-cat > "$app/Contents/MacOS/DocuManager" <<LAUNCHER
+cat > "$app/Contents/MacOS/DocuManager" <<'LAUNCHER'
 #!/bin/zsh
-# Startet DocuManager im Hintergrund und öffnet die Oberfläche im Browser. Läuft er schon, nur öffnen.
-cd "$ziel" || exit 1
+# Startet DocuManager und öffnet die Oberfläche im Browser. Läuft er schon, nur öffnen.
+# Das Programm bleibt aktiv (im Dock sichtbar), solange DocuManager läuft. Scheitert der Start, erscheint ein Hinweis.
+ziel="$HOME/DocuManager"
+cd "$ziel" 2>/dev/null || { /usr/bin/osascript -e 'display alert "DocuManager" message "Der Ordner ~/DocuManager fehlt. Bitte DocuManager_Installieren.command erneut ausführen."'; exit 1; }
 if /usr/bin/curl -s -m 2 -o /dev/null "http://127.0.0.1:8765/api/cases"; then
   /usr/bin/open "http://127.0.0.1:8765"
   exit 0
 fi
+/usr/sbin/lsof -ti tcp:8765 | xargs kill 2>/dev/null
 mkdir -p Daten/Logs
-/usr/bin/nohup python3 ./app.py --open >> Daten/Logs/start.log 2>&1 < /dev/null &
-disown
+print "--- Start $(date '+%Y-%m-%d %H:%M:%S')" >> Daten/Logs/start.log
+/usr/bin/python3 ./app.py --open >> Daten/Logs/start.log 2>&1 < /dev/null &
+dienst=$!
+trap 'kill $dienst 2>/dev/null' TERM INT HUP
+wait $dienst
+ergebnis=$?
+if (( ergebnis != 0 && ergebnis != 143 )); then
+  grund="$(tail -n 6 Daten/Logs/start.log | tr '"' "'")"
+  /usr/bin/osascript -e "display alert \"DocuManager konnte nicht starten\" message \"$grund\n\nProtokoll: ~/DocuManager/Daten/Logs/start.log\""
+fi
+exit 0
 LAUNCHER
 chmod +x "$app/Contents/MacOS/DocuManager"
 
