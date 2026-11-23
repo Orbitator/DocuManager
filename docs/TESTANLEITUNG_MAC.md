@@ -92,6 +92,15 @@ Erst wenn Schritt 2 bis 4 funktionieren. Die bisherige Anwendung vorher beenden.
    in der Chronik und dem Original rechts.
 5. **Archiv** öffnen und zwischen den Gruppierungen wechseln.
 
+## 7. Apple Mail
+
+1. In Mail zwei E-Mails mit der Markierung „Erfasster Beleg“ (grau) versehen, eine davon mit PDF-Anlage.
+2. In der Anwendung im **Posteingang** auf **„Aus Mail holen“** klicken.
+3. Beim ersten Mal fragt macOS, ob Terminal bzw. Python „Mail“ steuern darf: **OK**.
+   Falls die Frage nicht kommt oder abgelehnt wurde: Systemeinstellungen → Datenschutz & Sicherheit → Automation.
+4. Erwartet: Die E-Mails erscheinen als Kacheln mit Betreff als Titel, Absender und Datum. Die PDF-Anlage
+   erscheint als eigene Kachel. Ein zweiter Klick auf „Aus Mail holen“ holt nichts doppelt.
+
 ## Rückmeldung
 
 Bitte mitteilen:

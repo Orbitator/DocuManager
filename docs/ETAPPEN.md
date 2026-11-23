@@ -73,6 +73,12 @@ Absendererkennung: Absenderzeile über der Anschrift, Behörde oder Gericht im K
 Briefkopf, Grußformel. Eigene Angaben werden nie vorgeschlagen. Unbekannte Absender werden beim
 Zuordnen als Kontakt mit Anschrift angelegt.
 
+Apple Mail (Schemaversion 5, `mail_import.py`): „Aus Mail holen“ übernimmt alle E-Mails mit der eingestellten
+Markierung (Vorgabe Grau, beim Anwender „Erfasster Beleg“) über die macOS-Automatisierung in den Posteingang:
+die E-Mail als Dokument mit Kopf und Text, PDF- und Bildanlagen als eigene Dokumente. Absender, Datum und
+Betreff kommen aus dem Mailkopf. Beim Zuordnen wandern die Anlagen mit. Die Message-ID verhindert Doppelungen,
+die Markierung in Mail bleibt unverändert. Beim ersten Abruf fragt macOS nach der Erlaubnis, Mail zu steuern.
+
 Offen für Teil 2: Briefvorlagen mit Vorschau, Markieren von Text in der Vorschau, Chat-Notizen in der
 neuen Oberfläche, Abschlussprüfung beim Status „Erledigt“, Aktenexport.
 

@@ -41,6 +41,7 @@ const P = {
   para:'<path d="M14 4v16M18 4v16M18 4h-7a4 4 0 0 0 0 8h3"/>',
   link:'<path d="M10 14a4 4 0 0 0 6 0l3-3a4 4 0 0 0-6-6l-1 1"/><path d="M14 10a4 4 0 0 0-6 0l-3 3a4 4 0 0 0 6 6l1-1"/>',
   photo:'<rect x="3" y="5" width="18" height="14" rx="2"/><circle cx="9" cy="10" r="2"/><path d="m21 16-5-5-8 8"/>',
+  mail:'<rect x="3" y="5" width="18" height="14" rx="2"/><path d="m3 7 9 6 9-6"/>',
   gear:'<circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9 7 7M17 17l2.1 2.1M4.9 19.1 7 17M17 7l2.1-2.1"/>'
 };
 const I = (n, cls = '') => `<svg class="i ${cls}" viewBox="0 0 24 24">${P[n]}</svg>`;
@@ -113,7 +114,7 @@ async function render() {
     if (S.view === 'fristen' || S.view === 'uebersicht') D.fristen = (await api('fristen')).fristen;
     if (S.view === 'archiv') D.archiv = (await api('archiv')).dokumente;
     if (S.view === 'adressbuch' || S.view === 'akte' || S.view === 'posteingang') D.kontakte = (await api('kontakte')).kontakte;
-    if (S.view === 'einstellungen') D.eigene = (await api('einstellungen')).eigene_angaben;
+    if (S.view === 'einstellungen') { D.eigene = (await api('einstellungen')).eigene_angaben; D.mail = await api('mail'); }
   } catch (e) {
     if (token !== renderToken) return;
     $('#view').innerHTML = `<div class="notice crit">${I('alert')}<p>${esc(e.message)}</p></div>`;
@@ -124,6 +125,7 @@ async function render() {
   nav();
   $('#view').innerHTML = ({uebersicht: vHome, posteingang: vInbox, vorgaenge: vList, akte: vAkte, fristen: vFristen,
     archiv: vArchiv, adressbuch: vAb, papierkorb: vTrash, einstellungen: vSettings})[S.view]();
+  mailTexte();
   followInbox();
 }
 
@@ -185,7 +187,7 @@ function detailHtml(p) {
 function vInbox() {
   if (S.ibSel && !D.inbox.some(p => p.id === S.ibSel)) S.ibSel = null;
   const sel = D.inbox.find(p => p.id === S.ibSel);
-  return `<h1>Posteingang</h1><p class="muted" style="margin:6px 0 16px">${D.inbox.length ? `${D.inbox.length} ${D.inbox.length === 1 ? 'Dokument wartet' : 'Dokumente warten'} auf Zuordnung. Ein Klick auf ein Dokument öffnet die Details.` : 'Alles einsortiert.'} Dateien können Sie auch auf das Fenster ziehen.</p>
+  return `<div class="head" style="justify-content:space-between"><h1>Posteingang</h1><button class="btn" data-act="mail-get">${I('mail')}Aus Mail holen</button></div><p class="muted" style="margin:6px 0 16px">${D.inbox.length ? `${D.inbox.length} ${D.inbox.length === 1 ? 'Dokument wartet' : 'Dokumente warten'} auf Zuordnung. Ein Klick auf ein Dokument öffnet die Details.` : 'Alles einsortiert.'} Dateien können Sie auch auf das Fenster ziehen.</p>
   <div class="ibgrid ${sel ? 'has-sel' : ''}" role="list">${D.inbox.map(p => tileHtml(p) + (p === sel ? `<section class="ibdetail" id="ibdetail" aria-label="Details">${detailHtml(p)}</section>` : '')).join('')}</div>`;
 }
 let followTimer = null;
@@ -232,6 +234,7 @@ function vList() {
 }
 
 // ---------- Vorgangsakte ----------
+function paintAkte() { $('#view').innerHTML = vAkte(); mailTexte(); }
 const teilName = id => D.akte.teilvorgaenge.find(t => t.id === id)?.name || '';
 const kontaktName = id => { const k = D.kontakte.find(x => x.id === id); return k ? (k.kurzname || k.name) : ''; };
 function visibleEntries() {
@@ -320,7 +323,7 @@ function preview() {
     <div><dt>Text</dt><dd>${esc(d.ocr_status || '')}</dd></div><div><dt>Vorgänge</dt><dd>${d.vorgaenge || 1}</dd></div></dl></details>
    <div class="frame" style="margin-top:12px"><div class="tool"><span class="muted" style="font-size:13px">${esc(d.dateiname || '')}</span><span class="sp"></span>
     <button class="btn sm" data-act="doc-text" data-doc="${d.id}">Text</button><button class="btn sm" data-act="ocr-retry" data-doc="${d.id}">Text erneut erkennen</button><button class="btn sm" data-act="view" data-doc="${d.id}">${I('expand')}Original öffnen</button></div>
-    <iframe class="pvframe" src="/api/documents/${d.id}/original" title="Original ${esc(d.titel)}"></iframe></div>` + text;
+    ${d.mime === 'message/rfc822' ? `<div class="notecard mailtext" data-mail="${d.id}" style="border:0;border-radius:0;max-height:68vh;overflow:auto;white-space:pre-wrap">Wird geladen …</div>` : `<iframe class="pvframe" src="/api/documents/${d.id}/original" title="Original ${esc(d.titel)}"></iframe>`}</div>` + text;
 }
 function docTable() {
   const a = D.akte, so = S.sortD;
@@ -412,6 +415,10 @@ function vSettings() {
     <ul class="mini">${D.groups.map(b => { const n = D.cases.filter(c => c.bereich === b).length; return `<li><span>${esc(b)} <span class="muted">· ${n} ${n === 1 ? 'Vorgang' : 'Vorgänge'}</span></span><span style="display:flex;gap:6px"><button class="btn sm ghost" data-act="b-ren" data-b="${esc(b)}">Umbenennen</button>${n ? '' : `<button class="btn sm ghost" data-act="b-del" data-b="${esc(b)}">Entfernen</button>`}</span></li>`; }).join('')}</ul></div>
    <div class="panel stack"><h2>Eigene Angaben</h2><p style="margin:0">Ihr Name und Ihre Anschrift, eine Angabe pro Zeile. Die Absendererkennung schlägt diese Angaben nie als Absender vor.</p>
     <textarea id="eigene" class="inp" rows="4">${esc(D.eigene)}</textarea><div><button class="btn" data-act="eigene-save">Speichern</button></div></div>
+   <div class="panel stack"><h2>Apple Mail</h2><p style="margin:0">„Aus Mail holen“ übernimmt alle E-Mails mit dieser Markierung samt Anlagen in den Posteingang. Die Markierung in Mail bleibt; jede E-Mail wird nur einmal übernommen.</p>
+    <label class="chk" style="flex-direction:column;align-items:flex-start;gap:4px">Markierung<select id="mailflag" class="inp" style="max-width:240px">${Object.entries(D.mail.farben).map(([k, l]) => `<option value="${k}" ${+k === D.mail.markierung ? 'selected' : ''}>${esc(l)}${+k === 6 ? ' (bei Ihnen „Erfasster Beleg“)' : ''}</option>`).join('')}</select></label>
+    <p class="muted" style="margin:0;font-size:12.5px">${D.mail.uebernommen} E-Mails übernommen${D.mail.zuletzt ? ', zuletzt am ' + dt(D.mail.zuletzt) : ''}.${D.mail.verfuegbar ? '' : ' Nur auf dem Mac verfügbar.'} Beim ersten Abruf fragt macOS, ob die Anwendung Mail steuern darf.</p>
+    <div><button class="btn" data-act="mail-get">${I('mail')}Jetzt aus Mail holen</button></div></div>
    <div class="panel stack"><h2>Bisherige Ansicht</h2><p style="margin:0">Chat-Import und die Archivliste „Rechtsberatung“ liegen vorerst noch in der bisherigen Oberfläche.</p><div><a class="btn" href="/alt">Bisherige Ansicht öffnen</a></div></div></div>`;
 }
 
@@ -424,7 +431,15 @@ function modal(title, html, onSave, saveLabel = 'Speichern', cls = '') {
 const closeModal = () => { $('#modalroot').innerHTML = ''; modalSave = null; };
 let toastTimer;
 function toast(m) { const t = $('#toast'); t.textContent = m; t.hidden = false; clearTimeout(toastTimer); toastTimer = setTimeout(() => t.hidden = true, 3800); }
+const istMail = id => [...D.inbox, ...(D.akte?.dokumente || []), ...D.archiv].some(d => d.id === +id && d.mime === 'message/rfc822');
+async function mailTexte() {  // E-Mails zeigen ihren Text statt der Rohdatei
+  for (const box of document.querySelectorAll('.mailtext[data-mail]')) {
+    const id = box.dataset.mail; box.removeAttribute('data-mail');
+    try { const r = await api(`documents/${id}/pages`); box.textContent = r.pages.map(p => p.text).join('\n\n'); } catch (e) { box.textContent = e.message; }
+  }
+}
 function openViewer(docId, title) {
+  if (istMail(docId)) { modal(title || 'E-Mail', `<div class="notecard mailtext" data-mail="${docId}" style="white-space:pre-wrap;max-height:65vh;overflow:auto">Wird geladen …</div><div><a class="btn sm" href="/api/documents/${docId}/original" download>Original (.eml) speichern</a></div>`, null, '', 'wide'); mailTexte(); return; }
   const w = $('#viewer');
   w.innerHTML = `<div class="vbar"><b>${esc(title || 'Original')}</b><a class="btn sm" href="/api/documents/${docId}/original" target="_blank" rel="noopener">In neuem Fenster</a><button class="btn sm" data-act="vw-close">Schließen</button></div>
    <div class="vbody" style="padding:0"><iframe src="/api/documents/${docId}/original" title="Original" style="width:100%;height:100%;border:0;background:#fff"></iframe></div>`;
@@ -519,9 +534,9 @@ document.addEventListener('click', async ev => {
       <div class="two"><label>Zuständig<input id="m-vz" value="${esc(v.zustaendig || '')}"></label><label>Nächster Schritt<input id="m-vn" value="${esc(v.naechster_schritt || '')}"></label></div><label>Beschreibung<textarea id="m-vd" rows="3">${esc(v.beschreibung)}</textarea></label>`, async () => {
       closeModal(); await act(() => api('akte/' + v.id, {titel: val('m-vt'), bereich: val('m-vb'), zustaendig: val('m-vz'), naechster_schritt: val('m-vn'), beschreibung: val('m-vd')}), 'Vorgang gespeichert.'); return false; }); break; }
   case 'tab': S.tab = el.dataset.id; await render(); break;
-  case 'teil': S.teil = el.dataset.id === 'all' ? 'all' : +el.dataset.id; S.entry = null; $('#view').innerHTML = vAkte(); break;
-  case 'ktype': S.ktype = el.dataset.id; S.entry = null; $('#view').innerHTML = vAkte(); break;
-  case 'entry': if (S.entry !== id) { S.entry = id; $('#view').innerHTML = vAkte(); if (innerWidth <= 1100) document.querySelector('.akte .r')?.scrollIntoView({behavior: 'smooth'}); } break;
+  case 'teil': S.teil = el.dataset.id === 'all' ? 'all' : +el.dataset.id; S.entry = null; paintAkte(); break;
+  case 'ktype': S.ktype = el.dataset.id; S.entry = null; paintAkte(); break;
+  case 'entry': if (S.entry !== id) { S.entry = id; paintAkte(); if (innerWidth <= 1100) document.querySelector('.akte .r')?.scrollIntoView({behavior: 'smooth'}); } break;
   case 'teil-add': modal('Teilvorgang hinzufügen', `<label>Name<input id="m-tn" maxlength="120" placeholder="z. B. Heckschaden"></label><div class="two"><label>Status<select id="m-ts">${statusOptions('Offen')}</select></label><label>Zuständig<input id="m-tz" value="Ich"></label></div><label>Nächster Schritt<input id="m-tx"></label>`, async () => {
       if (!val('m-tn').trim()) { $('#m-tn').focus(); return false; }
       closeModal(); await act(async () => { const r = await api(`akte/${D.akte.id}/teilvorgaenge`, {name: val('m-tn'), status: val('m-ts'), zustaendig: val('m-tz'), naechster_schritt: val('m-tx')}); S.teil = r.id; }, 'Teilvorgang angelegt.'); return false; }, 'Anlegen'); break;
@@ -571,7 +586,7 @@ document.addEventListener('click', async ev => {
   case 'abereich': S.aBereich = el.dataset.id; $('#view').innerHTML = vArchiv(); break;
   case 'ajahr': S.aJahr = el.dataset.id; $('#view').innerHTML = vArchiv(); break;
   case 'arch-open': if (ev.target.closest('[data-act=view]')) break; S.v = +el.dataset.v; S.tab = 'chronik'; S.teil = 'all'; S.ktype = 'alle';
-    S.entry = null; location.hash = 'akte-' + el.dataset.v; setTimeout(() => { const e = D.akte?.eintraege.find(x => x.dokument_id === +el.dataset.doc); if (e) { S.entry = e.id; $('#view').innerHTML = vAkte(); } }, 400); break;
+    S.entry = null; location.hash = 'akte-' + el.dataset.v; setTimeout(() => { const e = D.akte?.eintraege.find(x => x.dokument_id === +el.dataset.doc); if (e) { S.entry = e.id; paintAkte(); } }, 400); break;
   case 'contact': S.contact = id; S.abq = ''; if (location.hash !== '#adressbuch') location.hash = 'adressbuch'; else await render(); break;
   case 'k-new': modal('Neuer Kontakt', `<label>Name der Organisation oder Person<input id="m-kn" maxlength="160"></label><div id="m-kd"></div><div class="two"><label>Kurzname<input id="m-kk"></label><label>Art<input id="m-kt" placeholder="z. B. Versicherung, Behörde"></label></div>
       <div class="two"><label>Abteilung<input id="m-ka"></label><label>Ansprechpartner<input id="m-kp"></label></div><div class="two"><label>E-Mail<input id="m-km" type="email"></label><label>Telefon<input id="m-kf"></label></div><label>Anschrift (eine Zeile pro Zeile)<textarea id="m-kr" rows="4"></textarea></label>`, async () => {
@@ -587,9 +602,10 @@ document.addEventListener('click', async ev => {
   case 'b-ren': modal('Bereich umbenennen', `<label>Name<input id="m-bn" value="${esc(el.dataset.b)}"></label>`, async () => {
       closeModal(); await act(() => api('bereiche/umbenennen', {alt: el.dataset.b, neu: val('m-bn')}), 'Umbenannt.'); return false; }); break;
   case 'b-del': await act(() => api('bereiche/entfernen', {name: el.dataset.b}), 'Bereich entfernt.'); break;
+  case 'mail-get': $('#impmenu').hidden = true; await mailHolen(); break;
   case 'eigene-save': await act(() => api('einstellungen', {eigene_angaben: val('eigene')}), 'Gespeichert.'); break;
   case 'hit': $('#results').hidden = true; S.v = +el.dataset.v; S.tab = 'chronik'; S.teil = 'all'; S.ktype = 'alle'; S.entry = null; location.hash = 'akte-' + el.dataset.v;
-    if (el.dataset.e) setTimeout(() => { S.entry = +el.dataset.e; if (D.akte) $('#view').innerHTML = vAkte(); }, 400); break;
+    if (el.dataset.e) setTimeout(() => { S.entry = +el.dataset.e; if (D.akte) paintAkte(); }, 400); break;
   case 'm-close': closeModal(); break;
   case 'm-bg': if (ev.target === el) closeModal(); break;
   case 'm-save': if (modalSave) {
@@ -601,6 +617,7 @@ document.addEventListener('change', async ev => {
   const el = ev.target;
   if (el.dataset.change === 'v-status') await act(() => api('akte/' + D.akte.id, {status: el.value}), 'Status geändert.');
   if (el.dataset.change === 't-status') await act(() => api('teilvorgaenge/' + el.dataset.id, {status: el.value}), 'Status geändert.');
+  if (el.id === 'mailflag') await act(() => api('mail/markierung', {markierung: +el.value}), 'Markierung gespeichert.');
   if (el.id === 'aerl') { S.aErledigt = el.checked; $('#view').innerHTML = vArchiv(); }
   if (el.id === 'fileinp') { const files = [...el.files]; el.value = ''; await importFiles(files, el.dataset.ziel ? +el.dataset.ziel : null); }
   if (el.dataset.ib) { const d = draft[+el.dataset.id]; if (d) d[el.dataset.ib] = el.value; }
@@ -645,6 +662,15 @@ async function importFiles(files, vorgangId) {
   }
   toast(`${neu} abgelegt${vorhanden ? ` · ${vorhanden} bereits vorhanden` : ''}${fehler.length ? ' · ' + fehler.join(' · ') : ''}`);
   if (!vorgangId && location.hash !== '#posteingang') location.hash = 'posteingang'; else await render();
+}
+async function mailHolen() {
+  toast('E-Mails werden aus Apple Mail geholt …');
+  try {
+    let gesamt = 0, r;
+    do { r = await api('mail/abholen', {}); gesamt += r.neu; } while (r.weitere && r.neu);
+    toast(gesamt ? `${gesamt} E-Mail${gesamt === 1 ? '' : 's'} übernommen${r.fehler.length ? ' · ' + r.fehler.join(' · ') : ''}` : 'Keine neuen markierten E-Mails.');
+    if (location.hash !== '#posteingang') location.hash = 'posteingang'; else await render();
+  } catch (e) { toast(e.message); }
 }
 async function scan() {
   try {

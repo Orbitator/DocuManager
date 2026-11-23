@@ -28,12 +28,13 @@ from urllib.parse import parse_qsl, unquote, urlsplit
 from akte import (Akte, ROUTES as AKTE_ROUTES, STATUSES, migrate_3, migrate_4, route_akte, test_absender, test_akte,
                   test_archiv, test_posteingang)
 from chat_sync import ChatSync, MAX_EXPORT, test_chat_sync
+from mail_import import MailImport, migrate_5, test_mail
 
 ROOT = Path(__file__).resolve().parent
 PORT = 8765
 MAX_UPLOAD = 25 * 1024 * 1024
 MIN_MACOS = "14.0"
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 5
 OCR_WAITING = "Wartet auf Texterkennung"
 OCR_RUNNING = "Texterkennung läuft"
 log = logging.getLogger("korrespondenz")
@@ -184,7 +185,7 @@ def migrate_2(db):
         db.execute("ALTER TABLE dokument ADD COLUMN ocr_aktualisiert_am TEXT")
 
 
-MIGRATIONS = ((1, migrate_1), (2, migrate_2), (3, migrate_3), (4, migrate_4))
+MIGRATIONS = ((1, migrate_1), (2, migrate_2), (3, migrate_3), (4, migrate_4), (5, migrate_5))
 
 
 class Store:
@@ -397,6 +398,9 @@ class Store:
                               WHERE id=? AND titel_quelle='Dateiname'""", (title, page, source, doc_id))
 
     def retry_ocr(self, doc_id):
+        row = self.document(doc_id)
+        if row and row["mime"] == "message/rfc822":
+            raise ValueError("Bei einer E-Mail liegt der Text bereits vor.")
         with closing(self.connect()) as db, db:
             if not db.execute("UPDATE dokument SET ocr_status=?, ocr_fehler=NULL WHERE id=?",
                               (OCR_WAITING, doc_id)).rowcount:
@@ -567,6 +571,8 @@ class Scanner:
 class Handler(BaseHTTPRequestHandler):
     store = None
     akte = None
+    mail = None
+    mail_lock = Lock()
     scanner = None
     chat = None
     host = f"127.0.0.1:{PORT}"
@@ -624,6 +630,8 @@ class Handler(BaseHTTPRequestHandler):
             self.send_json({"cases": self.store.list_cases(), "statuses": CASE_STATUSES, "groups": self.store.groups(),
                             "ocr": bool(self.store.ocr and self.store.ocr.is_file()),
                             "ocr_loading": not self.store.ocr_ready.is_set()})
+        elif path == "/api/mail":
+            self.send_json(self.mail.status())
         elif path == "/api/chat/threads":
             self.send_json({"threads": self.chat.threads()})
         elif match := re.fullmatch(r"/api/chat/threads/([A-Za-z0-9_-]{1,160})", path):
@@ -697,6 +705,12 @@ class Handler(BaseHTTPRequestHandler):
                 name = unquote(self.headers.get("X-Dateiname", ""), errors="strict")
                 doc_id, created = self.store.import_document(None, name, self.read_body(MAX_UPLOAD))
                 self.send_json({"id": doc_id, "created": created}, 201 if created else 200)
+            elif path == "/api/mail/abholen":
+                with self.mail_lock:  # ein Abruf zur Zeit
+                    self.send_json(self.mail.abholen())
+            elif path == "/api/mail/markierung":
+                self.mail.markierung_setzen(int(json.loads(self.read_body(4000))["markierung"]))
+                self.send_json({"ok": True})
             elif path == "/api/posteingang/scan":
                 self.send_json({"id": self.scanner.start(None)}, 201)
             elif match := re.fullmatch(r"/api/cases/(\d+)/scan", path):
@@ -861,6 +875,7 @@ def self_test(ocr=None, image=None):
         test_posteingang(store)
         test_absender(store)
         test_archiv(store)
+        test_mail(store)
         with closing(store.connect()) as db:
             assert db.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
             assert not db.execute("PRAGMA foreign_key_check").fetchall()
@@ -998,6 +1013,7 @@ def main():
     Handler.scanner = Scanner(Handler.store)
     Handler.chat = ChatSync(Handler.store)
     Handler.akte = Akte(Handler.store)
+    Handler.mail = MailImport(Handler.store)
     try:
         server = LocalServer(("127.0.0.1", PORT), Handler)
     except OSError as error:

@@ -19,6 +19,7 @@ Die bisherigen Schnittstellen (`/api/cases`, Dokumente, Scan, Chat) bleiben unve
 | GET `/api/archiv` | Alle abgelegten Dokumente mit Vorgang, Bereich, Absender, Datum und Größe |
 | GET `/api/fristen` | Alle Fristen, Wiedervorlagen und Aufgaben |
 | GET `/api/einstellungen` | Eigene Angaben für die Absendererkennung |
+| GET `/api/mail` | Markierungsfarbe, Anzahl übernommener E-Mails, letzter Abruf |
 
 ## Ändern
 
@@ -49,6 +50,8 @@ Die bisherigen Schnittstellen (`/api/cases`, Dokumente, Scan, Chat) bleiben unve
 | POST `/api/posteingang/scan` | Öffnet den Scan-Dialog; Scans landen im Posteingang |
 | POST `/api/posteingang/{id}/zuordnen` | `vorgang_id`, optional `teile`, `titel`, `datum`, `kontakt_id` oder `neuer_absender` (`name`, `anschrift`) |
 | POST `/api/einstellungen` | `eigene_angaben` (eine Angabe pro Zeile) |
+| POST `/api/mail/abholen` | Holt bis zu 25 neue markierte E-Mails aus Apple Mail; `weitere` zeigt, ob noch mehr vorliegen |
+| POST `/api/mail/markierung` | `markierung` 0–6 (Rot, Orange, Gelb, Grün, Blau, Violett, Grau) |
 | POST `/api/{typ}/{id}/loeschen` | Papierkorb; `typ` = vorgang, dokument, eintrag, frist, kontakt |
 | POST `/api/{typ}/{id}/wiederherstellen` | aus dem Papierkorb zurück |
 | POST `/api/{eintrag,frist}/{id}/endgueltig` | endgültig entfernen (nur aus dem Papierkorb) |

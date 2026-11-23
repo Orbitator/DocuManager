@@ -1,7 +1,7 @@
--- SQLite-Schema der Korrespondenzverwaltung, Schemaversion 4 (PRAGMA user_version).
+-- SQLite-Schema der Korrespondenzverwaltung, Schemaversion 5 (PRAGMA user_version).
 -- Erzeugt aus einer frischen Installation. Ausschließlich Struktur, keine Daten.
--- Maßgeblich sind die Migrationen in Korrespondenz_Lokal/app.py (MIGRATIONS), akte.py (migrate_3, migrate_4)
--- und ChatSync.__init__. Fremdschlüssel müssen pro Verbindung aktiviert werden.
+-- Maßgeblich sind die Migrationen in app.py (MIGRATIONS), akte.py (migrate_3, migrate_4), mail_import.py
+-- (migrate_5) und ChatSync.__init__. Fremdschlüssel müssen pro Verbindung aktiviert werden.
 PRAGMA foreign_keys = ON;
 
 CREATE TABLE vorgang(
@@ -127,6 +127,16 @@ CREATE VIRTUAL TABLE suche USING fts5(
 
 CREATE TABLE einstellung(schluessel TEXT PRIMARY KEY, wert TEXT NOT NULL);
 
+CREATE TABLE mail_import(
+    message_id TEXT PRIMARY KEY, dokument_id INTEGER NOT NULL REFERENCES dokument(id),
+    betreff TEXT, absender TEXT, postfach TEXT, importiert_am TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE mail_anlage(
+    message_id TEXT NOT NULL REFERENCES mail_import(message_id), dokument_id INTEGER NOT NULL REFERENCES dokument(id),
+    PRIMARY KEY(message_id, dokument_id)
+);
+
 CREATE TABLE chat_thread(
                     id TEXT PRIMARY KEY, titel TEXT NOT NULL, stand REAL, importiert_am TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
                 );
@@ -188,4 +198,4 @@ CREATE TRIGGER suche_dokument_au AFTER UPDATE OF titel ON dokument BEGIN
   DELETE FROM suche WHERE art='dokument' AND ref_id=OLD.id;
   INSERT INTO suche(art,ref_id,seite,text) VALUES('dokument',NEW.id,NULL,NEW.titel||' '||NEW.dateiname); END;
 
-PRAGMA user_version = 4;
+PRAGMA user_version = 5;

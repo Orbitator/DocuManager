@@ -221,6 +221,10 @@ def absender_erkennen(text, eigene=()):
     zeilen = [re.sub(r"\s+", " ", z).strip() for z in (text or "").splitlines() if z.strip()]
     eigen = [flach(e) for e in eigene if len(flach(e)) >= 4]
     ist_eigen = lambda z: any(e in flach(z) for e in eigen)
+    if zeilen and (m := re.match(r"^Von:\s*(.+?)(?:\s*<([^>]+)>)?$", zeilen[0])):  # übernommene E-Mail
+        if not ist_eigen(zeilen[0]):
+            return {"name": m[1].strip(), "anschrift": None, "quelle": "E-Mail-Absender", "email": m[2] or
+                    (m[1] if "@" in m[1] else None)}
     for z in zeilen[:15]:  # DIN-5008-Absenderzeile: „Firma · Straße 1 · 12345 Ort“
         if _PLZ_ORT.search(z) and _TRENNER.search(z) and len(z) <= 160 and not ist_eigen(z):
             teile = [t.strip() for t in _TRENNER.split(z) if t.strip()]
@@ -837,9 +841,13 @@ class Akte:
             # Ein erkannter Absender entscheidet. Bekannte Kontakte werden über den Namen zugeordnet.
             name = flach(absender["name"])
             absender["kontakt"] = None
+            domain = (absender.get("email") or "").split("@")[-1].lower() if absender.get("email") else ""
             for k in db.execute("SELECT id,name,kurzname FROM kontakt WHERE geloescht_am IS NULL"):
                 namen = [flach(k["name"]), flach(k["kurzname"] or "")]
-                if any(len(n) >= 4 and (n in name or name in n) for n in namen):
+                mails = [r[0].lower() for r in db.execute(
+                    "SELECT email FROM kontakt_abteilung WHERE kontakt_id=? AND email LIKE '%@%'", (k["id"],))]
+                if any(len(n) >= 4 and (n in name or name in n) for n in namen) or \
+                        (domain and any(m.endswith("@" + domain) for m in mails)):
                     absender["kontakt"] = dict(k)
                     break
             return self._vorschlag_mit(db, text, datum, datum_quelle, absender["kontakt"], absender)
@@ -916,6 +924,20 @@ class Akte:
                 VALUES(?,?,?,?,?,?,?)""", (vorgang_id, "eingang", titel, datum or self.today(),
                                            "von" if kontakt else None, kontakt, dokument_id)).lastrowid
             db.executemany("INSERT INTO eintrag_teil VALUES(?,?)", ((eid, t) for t in teile))
+            try:  # Anlagen einer übernommenen E-Mail wandern mit, sofern sie noch im Posteingang liegen
+                anlagen = db.execute("""SELECT d.id, d.titel FROM mail_anlage ma
+                    JOIN mail_import mi ON mi.message_id=ma.message_id JOIN dokument d ON d.id=ma.dokument_id
+                    JOIN vorgang v ON v.id=d.vorgang_id AND v.system='posteingang'
+                    WHERE mi.dokument_id=? AND d.geloescht_am IS NULL""", (dokument_id,)).fetchall()
+            except sqlite3.OperationalError:
+                anlagen = []
+            for a in anlagen:
+                db.execute("UPDATE dokument SET vorgang_id=? WHERE id=?", (vorgang_id, a["id"]))
+                db.execute("INSERT OR IGNORE INTO dokument_vorgang(dokument_id,vorgang_id) VALUES(?,?)", (a["id"], vorgang_id))
+                aid = db.execute("""INSERT INTO eintrag(vorgang_id,art,titel,ereignis_datum,richtung,kontakt_id,dokument_id,
+                    bezug_id) VALUES(?,?,?,?,?,?,?,?)""", (vorgang_id, "eingang", a["titel"], datum or self.today(),
+                                                         "von" if kontakt else None, kontakt, a["id"], eid)).lastrowid
+                db.executemany("INSERT INTO eintrag_teil VALUES(?,?)", ((aid, t) for t in teile))
             return eid
 
     def archiv(self):
