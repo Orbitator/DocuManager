@@ -27,7 +27,7 @@ from pathlib import Path
 from threading import Event, Lock, Thread
 from urllib.parse import parse_qsl, unquote, urlsplit
 
-from akte import (Akte, fristen_erkennen, empfaenger_erkennen, ROUTES as AKTE_ROUTES, STATUSES, migrate_3, migrate_4, migrate_6, route_akte, test_absender, test_fristen_ablage,
+from akte import (Akte, status_liste, fristen_erkennen, empfaenger_erkennen, ROUTES as AKTE_ROUTES, STATUSES, migrate_3, migrate_4, migrate_6, route_akte, test_absender, test_fristen_ablage,
                   test_akte, test_archiv, test_chatnotiz, test_posteingang)
 from export import (akte_zip, brief_html, sicherung_erstellen, sicherung_pruefen, test_export, wiederherstellen,
                     wiederherstellen_laufend)
@@ -38,7 +38,7 @@ from mail_import import MailImport, migrate_5, test_mail
 
 ROOT = Path(__file__).resolve().parent
 PORT = 8765
-APP_VERSION = "DocuManager 0.20.1 · Oberer Rand ab Seite 2"
+APP_VERSION = "DocuManager 0.21.0 · Eigene Status, Einschätzungen Dritter, neueste Vorgänge oben"
 MAX_UPLOAD = 25 * 1024 * 1024
 MIN_MACOS = "14.0"
 SCHEMA_VERSION = 15
@@ -444,7 +444,8 @@ class Store:
     def list_cases(self):
         with closing(self.connect()) as db:
             faelle = [dict(row) for row in db.execute("""SELECT v.*, (SELECT count(*) FROM dokument_vorgang dv
-                JOIN dokument d ON d.id=dv.dokument_id WHERE dv.vorgang_id=v.id AND d.geloescht_am IS NULL) AS dokumente
+                JOIN dokument d ON d.id=dv.dokument_id WHERE dv.vorgang_id=v.id AND d.geloescht_am IS NULL) AS dokumente,
+                (SELECT max(e.erfasst_am) FROM eintrag e WHERE e.vorgang_id=v.id AND e.geloescht_am IS NULL) AS zuletzt
                 FROM vorgang v WHERE v.geloescht_am IS NULL AND v.system IS NULL ORDER BY v.id DESC""")]
             try:
                 weitere = {}
@@ -481,15 +482,17 @@ class Store:
             raise ValueError("Prüfe Titel und Beschreibung.")
         if group not in self.groups():
             raise ValueError("Wähle einen Bereich aus der Liste.")
-        if status not in CASE_STATUSES:
-            raise ValueError("Wähle einen Status aus der Liste.")
+        with closing(self.connect()) as db:
+            if status not in status_liste(db):
+                raise ValueError("Wähle einen Status aus der Liste.")
         with closing(self.connect()) as db, db:
             return db.execute("INSERT INTO vorgang(titel,bereich,beschreibung,status,naechste_frist) VALUES(?,?,?,?,?)",
                               (title, group, description.strip(), status, case_due_date(due))).lastrowid
 
     def change_case_status(self, case_id, status):
-        if status not in CASE_STATUSES:
-            raise ValueError("Wähle einen Status aus der Liste.")
+        with closing(self.connect()) as db:
+            if status not in status_liste(db):
+                raise ValueError("Wähle einen Status aus der Liste.")
         with closing(self.connect()) as db, db:
             if not db.execute("UPDATE vorgang SET status=? WHERE id=?", (status, case_id)).rowcount:
                 raise ValueError("Vorgang nicht gefunden.")
@@ -991,7 +994,7 @@ class Handler(BaseHTTPRequestHandler):
             name, mime = static[path]
             self.send_bytes(200, mime, (ROOT / name).read_bytes())
         elif path == "/api/cases":
-            self.send_json({"cases": self.store.list_cases(), "statuses": CASE_STATUSES, "groups": self.store.groups(),
+            self.send_json({"cases": self.store.list_cases(), "statuses": self.akte.statusliste(), "groups": self.store.groups(),
                             "ocr": bool(self.store.ocr and self.store.ocr.is_file()),
                             "ocr_loading": not self.store.ocr_ready.is_set(), "version": APP_VERSION})
         elif path == "/api/claude":

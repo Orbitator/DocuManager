@@ -178,6 +178,14 @@ Teil 2 (umgesetzt, Schemaversion 7):
 - 0.20.1: Mehrseitige Briefe wurden ab Seite 2 oben abgeschnitten (`@page :first` wird nicht überall beachtet). Jetzt hat
   jede Druckseite 15 mm oberen und 18 mm unteren Rand; die Angaben der ersten Seite werden im Druck um 15 mm versetzt
   (`--oben`), sodass die Anschrift weiterhin bei 55 mm steht (im PDF gemessen: 55,1 mm).
+- 0.21.0: **Eigene Statuswerte** unter Einstellungen → Status: anlegen, umbenennen (samt aller Vorgänge), entfernen
+  (nur unbenutzte), sortieren; die Reihenfolge gilt für Auswahl, Sortierung und Gruppierung. Fest (`STATUS_FEST`):
+  Offen, Schreiben verfassen, Schreiben abgeschickt, Erledigt. Ablage in `einstellung.statusliste`.
+  **Vorgangsliste** sortiert standardmäßig nach letzter Aktivität (neuester Chronik-Eintrag, sonst Anlage), neueste oben.
+  **Einschätzung einbeziehen** im Briefdialog: Text einer Einschätzung von dritter Seite (Anwalt, Beratungsstelle, andere
+  KI) einfügen oder ein Dokument des Vorgangs wählen; gespeichert als Chronik-Eintrag mit Typ `Einschätzung (extern)`
+  und für Claude als „EINSCHÄTZUNG VON DRITTER SEITE“ gekennzeichnet, mit der Anweisung, sie zu prüfen und Abweichungen
+  zu begründen.
 - 0.16: Scannen ohne Dialog. „Scannen“ scannt sofort mit dem zuletzt benutzten Scanner (`Daten/scanner.json`):
   Einzug wenn vorhanden, sonst Glas; beidseitig, wenn möglich; 300 dpi Farbe. Die Seiten werden mit PDFKit zu einem
   komprimierten PDF zusammengefügt (leere Rückseiten fallen weg) und landen im Posteingang bzw. Archiv. Nur ein kleines

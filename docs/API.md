@@ -50,6 +50,7 @@ Die bisherigen Schnittstellen (`/api/cases`, Dokumente, Scan, Chat) bleiben unve
 | POST `/api/claude/zitate` | `text` → `pruefungen` [{`vorschrift`, `ergebnis`, `begruendung`}], `vorschriften`, `kosten_usd` |
 | POST `/api/claude/verlauf` | `vorgang_id`, optional `dokument_id`, `aufgabe` → `ergebnisse` (neueste zuerst; `frage`, `antwort`, `daten`, `kontext`, `zitate`, `erstellt_am`) |
 | POST `/api/claude/ergebnisse/{id}/loeschen` | gespeichertes Ergebnis entfernen |
+| GET/POST `/api/statusliste` | `statuses` (Reihenfolge), optional `umbenennen` {alt: neu}; feste Werte bleiben |
 | POST `/api/claude/stufe` | `stufe` (gruendlich, ausgewogen, sparsam) |
 | POST `/api/claude/schluessel` | `schluessel` (leer = entfernen); Ablage in `Daten/claude_schluessel` |
 | POST `/api/claude/fragen` | `vorgang_id`, `dokument_id` (optional), `verlauf` [{`rolle`: user/assistant, `text`}], `aufgabe` (frage, zusammenfassen, fristen, pruefen, bewerten, antwort, schreiben, ueberarbeiten), optional `anweisung`, `entwurf`, `empfaenger`, `bewertung` (Text), `option`; bei `bewerten` zusätzlich `bewertung` (zusammenfassung, rechtliche_bewertung, fristen, risiken, fehlende_angaben, optionen) → `text`, `kontext` (`eintraege`, `eigene_schreiben`, `dokumente`, `ohne_text`, `gekuerzt`); bei `antwort` zusätzlich `betreff`, `brieftext`, `hinweise` |

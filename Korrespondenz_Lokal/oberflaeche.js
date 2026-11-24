@@ -58,8 +58,9 @@ const I = (n, cls = '') => `<svg class="i ${cls}" viewBox="0 0 24 24">${P[n]}</s
 const ST_LABEL = {'Schreiben verfassen':'Verfassen'};
 const ST_KEY = {'Offen':'offen','Recherchieren':'recherche','Schreiben verfassen':'verfassen','Schreiben abgeschickt':'abgeschickt','Wartet auf Antwort':'wartet','Erledigt':'erledigt'};
 const ST_PILL = {'Offen':'grey','Schreiben abgeschickt':'ok','Wartet auf Antwort':'warn','Erledigt':'ok'};
-const ST_ORDER = ['Offen','Recherchieren','Schreiben verfassen','Schreiben abgeschickt','Wartet auf Antwort','Erledigt'];
+let ST_ORDER = ['Offen','Recherchieren','Schreiben verfassen','Schreiben abgeschickt','Wartet auf Antwort','Erledigt'];
 const stLabel = s => ST_LABEL[s] || s;
+const zuletzt = c => [c.zuletzt || '', c.angelegt_am || ''].map(x => x.replace(' ', 'T')).sort().pop();  // letzte Aktivität
 const statusPill = s => `<span class="pill ${ST_PILL[s] || ''}">${esc(stLabel(s))}</span>`;
 const statusOptions = cur => ST_ORDER.map(s => `<option value="${esc(s)}" ${s === cur ? 'selected' : ''}>${esc(stLabel(s))}</option>`).join('');
 const KIND = {eingang:['Eingang','in'],ausgang:['Versendet','out'],entwurf:['Entwurf','draft'],nachweis:['Versandnachweis','receipt'],telefonat:['Telefonat','phone'],notiz:['Notiz','note'],entscheidung:['Entscheidung','check'],chat:['Chat-Notiz','chat'],fehlt:['Original fehlt','doc']};
@@ -92,13 +93,14 @@ async function upload(path, file) {
 
 // ---------- Zustand ----------
 const S = {view: 'uebersicht', v: null, teil: 'all', entry: null, tab: 'chronik', ktype: 'alle', ibSel: null,
-  vb: 'alle', vs: 'alle', vt: 'alle', sortV: {k: 'frist', d: 1}, sortD: {k: 'datum', d: -1}, sortA: {k: 'datum', d: -1},
+  vb: 'alle', vs: 'alle', vt: 'alle', sortV: {k: 'akt', d: -1}, sortD: {k: 'datum', d: -1}, sortA: {k: 'datum', d: -1},
   fFilter: 'alle', aGroup: 'vorgang', aBereich: 'alle', aJahr: 'alle', aText: '', contact: null, abq: ''};
 const D = {cases: [], statuses: [], groups: [], akte: null, inbox: [], fristen: [], archiv: [], kontakte: [], trash: [], eigene: ''};
 
 async function loadBase() {
   const c = await api('cases');
   Object.assign(D, {cases: c.cases, statuses: c.statuses, groups: c.groups, ocr: c.ocr, version: c.version});
+  if (c.statuses && c.statuses.length) ST_ORDER = c.statuses;
   D.inbox = (await api('posteingang')).dokumente;
   D.trash = (await api('papierkorb')).eintraege;
   D.arten = (await api('eintragsarten')).arten;
@@ -389,7 +391,7 @@ function vList() {
   const bs = ['alle', ...new Set([...D.groups, ...aktiv().map(c => c.bereich)])];
   const erledigt = D.cases.length - aktiv().length;
   let list = aktiv().filter(c => (S.vb === 'alle' || (c.bereiche || [c.bereich]).includes(S.vb)) && (S.vs === 'alle' || c.status === S.vs));
-  const key = {titel: c => c.titel, bereich: c => c.bereich, prio: c => -(PRIO[c.prioritaet || 'keine'] || [0])[0], status: c => ST_ORDER.indexOf(c.status), frist: c => c.naechste_frist || '9999', akt: c => c.angelegt_am}[S.sortV.k] || (c => c.titel);
+  const key = {titel: c => c.titel, bereich: c => c.bereich, prio: c => -(PRIO[c.prioritaet || 'keine'] || [0])[0], status: c => ST_ORDER.indexOf(c.status), frist: c => c.naechste_frist || '9999', akt: zuletzt}[S.sortV.k] || (c => c.titel);
   list.sort((a, b) => (typeof key(a) === 'number' ? key(a) - key(b) : cmp(key(a), key(b))) * S.sortV.d || cmp(a.titel, b.titel));
   // Gruppieren: ein Vorgang mit mehreren Bereichen bzw. Empfängern erscheint in jeder seiner Gruppen
   const gkey = {keine: () => [''], bereich: c => c.bereiche || [c.bereich], status: c => [stLabel(c.status)],
@@ -399,11 +401,11 @@ function vList() {
   if (S.vGroup === 'prio') groups.sort((x, y) => ['Sehr hoch', 'Hoch', 'Keine Priorität'].indexOf(x.k) - ['Sehr hoch', 'Hoch', 'Keine Priorität'].indexOf(y.k));
   else if (S.vGroup === 'status') groups.sort((x, y) => ST_ORDER.map(stLabel).indexOf(x.k) - ST_ORDER.map(stLabel).indexOf(y.k));
   else if (S.vGroup && S.vGroup !== 'keine') groups.sort((x, y) => cmp(x.k, y.k));
-  const thead = `<thead><tr>${sortTh('V','titel','Vorgang')}${sortTh('V','prio','Priorität')}${sortTh('V','bereich','Bereich')}${sortTh('V','status','Status')}${sortTh('V','frist','Nächste Frist')}${sortTh('V','akt','Angelegt')}<th><span class="sr">Aktionen</span></th></tr></thead>`;
+  const thead = `<thead><tr>${sortTh('V','titel','Vorgang')}${sortTh('V','prio','Priorität')}${sortTh('V','bereich','Bereich')}${sortTh('V','status','Status')}${sortTh('V','frist','Nächste Frist')}${sortTh('V','akt','Zuletzt')}<th><span class="sr">Aktionen</span></th></tr></thead>`;
   const row = c => `<tr data-act="open-v" data-id="${c.id}"><td><b>${esc(c.titel)}</b><div class="muted" style="font-size:12.5px">${c.dokumente} Dokument${c.dokumente === 1 ? '' : 'e'}${c.dokumente ? ' · ' : ''}${typBadges(c.typen)}${(c.empfaenger || []).length ? ` · an ${esc(c.empfaenger.join(', '))}` : ''}</div></td>
    <td>${prioPill(c.prioritaet)}</td><td>${esc((c.bereiche || [c.bereich]).join(', '))}</td>
    <td><span class="st-${ST_KEY[c.status] || 'offen'}" style="display:flex;align-items:center;gap:6px;font-size:13px"><span class="dot"></span><span style="color:var(--fg)">${esc(stLabel(c.status))}</span></span></td>
-   <td class="num">${c.naechste_frist ? `<span style="color:${tage(c.naechste_frist) < 0 ? 'var(--crit)' : tage(c.naechste_frist) <= 7 ? 'var(--warn)' : 'inherit'}">${dt(c.naechste_frist)}</span>` : '–'}</td><td class="num">${dt(c.angelegt_am)}</td>
+   <td class="num">${c.naechste_frist ? `<span style="color:${tage(c.naechste_frist) < 0 ? 'var(--crit)' : tage(c.naechste_frist) <= 7 ? 'var(--warn)' : 'inherit'}">${dt(c.naechste_frist)}</span>` : '–'}</td><td class="num" title="Angelegt am ${dt((c.angelegt_am || '').slice(0, 10))}">${dt(zuletzt(c).slice(0, 10))}</td>
    <td style="white-space:nowrap"><button class="iconbtn" data-act="v-edit" data-id="${c.id}" title="Vorgang bearbeiten" aria-label="${esc(c.titel)} bearbeiten">${I('draft')}</button><button class="iconbtn" data-act="v-del" data-id="${c.id}" title="Vorgang löschen" aria-label="${esc(c.titel)} löschen">${I('trash')}</button></td></tr>`;
   const tabelle = items => `<div class="tbl-wrap" style="margin-bottom:16px"><table>${thead}<tbody>${items.map(row).join('')}</tbody></table></div>`;
   return `<div class="head" style="justify-content:space-between"><h1>Vorgänge</h1><button class="btn pri" data-act="new-vorgang">${I('plus')}Neuer Vorgang</button></div>
@@ -653,11 +655,20 @@ async function compose(bezugId, editId, vorschlag) {
     <div class="cz-zeile"><label class="cz-schmal">Ihr Zeichen<input id="m-zeichen" value="${esc(b.zeichen || (ref ? ref.wert : ''))}"></label>
      <label>Betreff<input id="m-subj" value="${esc(b.betreff || '')}"></label></div>
     <div class="ck-brief"><span class="ck-brief-t">${I('ki')}Claude</span>
+     <button type="button" class="btn sm ghost" data-kiext title="Einschätzung eines Anwalts, einer Beratungsstelle oder einer anderen KI als Grundlage für Analyse und Brief">＋ Einschätzung einbeziehen</button>
      <button type="button" class="btn sm" data-kib="bewerten">1 · Analysieren &amp; bewerten</button>
      <button type="button" class="btn sm" data-kib="${bezug ? 'antwort' : 'schreiben'}" data-stufe2 disabled title="Zuerst analysieren und eine Option wählen">2 · ${bezug ? 'Antwort' : 'Schreiben'} entwerfen</button>
      <button type="button" class="btn sm ghost" data-kib="ueberarbeiten">Text überarbeiten</button>
      <input id="m-kianw" placeholder="Vorgabe (optional), z. B. „Ton freundlicher“ oder „Ratenzahlung über 3 Monate anbieten“">
      <select id="m-kialt" hidden title="Gespeicherte Entwürfe von Claude zu diesem Schreiben"></select></div>
+    <div id="m-kiext" class="kiext" hidden>
+     <p style="margin:0"><b>Einschätzung von anderer Stelle</b> – wird in der Chronik gespeichert und bei jeder Analyse und jedem Entwurf zu diesem Vorgang berücksichtigt.</p>
+     <div class="cz-zeile"><label>Von wem?<input id="m-exq" maxlength="80" placeholder="z. B. Rechtsanwalt Müller, Verbraucherzentrale, ChatGPT"></label>
+      <label class="cz-schmal">Datum<input id="m-exd" type="date" value="${isoHeute()}"></label></div>
+     <label>Text der Einschätzung (einfügen)<textarea id="m-ext" rows="6" placeholder="Einschätzung hier hineinkopieren …"></textarea></label>
+     ${a.dokumente.length ? `<label>oder ein Dokument dieses Vorgangs<select id="m-exdok"><option value="">– kein Dokument –</option>${a.dokumente.map(d => `<option value="${d.id}">${esc(d.titel)}</option>`).join('')}</select></label>` : ''}
+     <div style="display:flex;gap:6px"><button type="button" class="btn sm pri" data-kiexsave>Einbeziehen</button><button type="button" class="btn sm ghost" data-kiext>Abbrechen</button></div></div>
+    <div id="m-kiexliste" class="ck-datum" style="text-align:left"></div>
     <div id="m-kibew" class="kibew" hidden></div>
     <label>Brieftext<textarea id="m-body" class="cz-body">${esc(edit ? edit.text || '' : '')}</textarea></label>
     ${anl.length ? `<label>Anlagen</label><div class="stack" style="gap:4px">${anl.map(e => `<label class="chk"><input type="checkbox" class="m-att" value="${esc(e.titel)}" ${(b.anlagen || []).includes(e.titel) ? 'checked' : ''}>${esc(e.titel)} vom ${dt(e.ereignis_datum)}</label>`).join('')}</div>` : ''}
@@ -745,6 +756,11 @@ async function compose(bezugId, editId, vorschlag) {
       <button type="button" class="btn sm ghost" data-kizit title="Zitierte Paragrafen am amtlichen Wortlaut prüfen (ca. 1 Cent)">Zitate prüfen</button></div><div class="ck-zit" ${r.zitate ? '' : 'hidden'}>${r.zitate ? zitatErgebnis(r.zitate) : ''}</div>`;
     box.querySelector('[data-stufe2]').disabled = false; box.querySelector('[data-stufe2]').title = '';
   };
+  const einschaetzungen = () => {  // bereits einbezogene Einschätzungen dieses Vorgangs anzeigen
+    const liste = a.eintraege.filter(e => e.typ === 'Einschätzung (extern)');
+    $('#m-kiexliste').innerHTML = liste.length ? `${I('check')} Berücksichtigt: ${liste.map(e => `${esc(e.titel.replace(/^Einschätzung: /, ''))} (${dt(e.ereignis_datum)})`).join(', ')}` : '';
+  };
+  einschaetzungen();
   const ausAblage = g => ({id: g.id, text: g.antwort, bewertung: g.daten && g.daten.bewertung, kontext: g.kontext, zitate: g.zitate, erstellt_am: g.erstellt_am});
   const entwuerfe = [];
   (async () => {  // gespeicherte Bewertung und frühere Entwürfe von Claude zu diesem Schreiben laden
@@ -766,6 +782,21 @@ async function compose(bezugId, editId, vorschlag) {
   pvZoom(S.pvZoom || 1);
   box.addEventListener('click', async ev => {
     const zb = ev.target.closest('[data-pvz]'); if (zb) { pvZoom((S.pvZoom || 1) + 0.1 * +zb.dataset.pvz); return; }
+    if (ev.target.closest('[data-kiext]')) { const p = $('#m-kiext'); p.hidden = !p.hidden; if (!p.hidden) $('#m-exq').focus(); return; }
+    if (ev.target.closest('[data-kiexsave]')) {
+      const quelle = val('m-exq').trim(), text = val('m-ext').trim(), dok = $('#m-exdok') ? val('m-exdok') : '';
+      if (!quelle) { toast('Bitte angeben, von wem die Einschätzung stammt.'); $('#m-exq').focus(); return; }
+      if (!text && !dok) { toast('Bitte den Text einfügen oder ein Dokument wählen.'); return; }
+      try {
+        await api(`akte/${a.id}/eintraege`, {art: 'notiz', typ: 'Einschätzung (extern)', titel: 'Einschätzung: ' + quelle, text,
+          datum: val('m-exd') || isoHeute(), dokument_id: dok ? +dok : null, bezug_id: bezug ? bezug.id : null, teile: bezug ? bezug.teile : []});
+        D.akte = await api('akte/' + a.id); a.eintraege = D.akte.eintraege;
+        $('#m-kiext').hidden = true; $('#m-ext').value = ''; $('#m-exq').value = ''; einschaetzungen();
+        if (S.kiBewertung[bewKey]) toast('Einschätzung gespeichert. Für eine Bewertung, die sie berücksichtigt, „1 · Analysieren“ erneut ausführen.');
+        else toast('Einschätzung gespeichert. Sie fließt in Analyse und Entwurf ein.');
+      } catch (err) { toast(err.message); }
+      return;
+    }
     if (ev.target.closest('[data-kizit]')) { await zitatePruefen(S.kiBewertung[bewKey].text, $('#m-kibew .ck-zit'), ev.target.closest('[data-kizit]'), S.kiBewertung[bewKey].id); return; }
     if (ev.target.closest('[data-kinotiz]')) {
       const r = S.kiBewertung[bewKey], knopf = ev.target.closest('[data-kinotiz]');
@@ -1065,6 +1096,10 @@ function vSettings() {
   return `<h1>Einstellungen</h1><div class="grid2" style="margin-top:16px">
    <div class="panel stack"><div class="chron-h"><h2>Bereiche</h2><button class="btn sm" data-act="b-add">${I('plus')}Bereich</button></div>
     <ul class="mini">${D.groups.map(b => { const n = D.cases.filter(c => c.bereich === b).length; return `<li><span>${esc(b)} <span class="muted">· ${n} ${n === 1 ? 'Vorgang' : 'Vorgänge'}</span></span><span style="display:flex;gap:6px"><button class="iconbtn sm" data-act="b-hoch" data-b="${esc(b)}" title="Nach oben" aria-label="${esc(b)} nach oben">↑</button><button class="iconbtn sm" data-act="b-runter" data-b="${esc(b)}" title="Nach unten" aria-label="${esc(b)} nach unten">↓</button><button class="btn sm ghost" data-act="b-ren" data-b="${esc(b)}">Umbenennen</button>${n ? '' : `<button class="btn sm ghost" data-act="b-del" data-b="${esc(b)}">Entfernen</button>`}</span></li>`; }).join('')}</ul></div>
+   <div class="panel stack"><div class="chron-h"><h2>Status</h2><button class="btn sm" data-act="st-neu">${I('plus')}Status</button></div>
+    <p style="margin:0" class="muted">Eigene Statusmitteilungen für Vorgänge und Teilvorgänge, z. B. „Klage eingereicht“ oder „Termin vereinbart“. Die Reihenfolge gilt für Auswahllisten, Sortierung und Gruppierung. Mit 🔒 markierte Werte nutzt die Anwendung selbst (Brief, Versand, Archiv); sie lassen sich nur verschieben.</p>
+    <ul class="mini">${ST_ORDER.map(s => { const n = D.cases.filter(c => c.status === s).length, fest = ['Offen', 'Schreiben verfassen', 'Schreiben abgeschickt', 'Erledigt'].includes(s);
+      return `<li><span>${fest ? '🔒 ' : ''}${esc(stLabel(s))} <span class="muted">· ${n} ${n === 1 ? 'Vorgang' : 'Vorgänge'}</span></span><span style="display:flex;gap:6px"><button class="iconbtn sm" data-act="st-hoch" data-s="${esc(s)}" title="Nach oben" aria-label="${esc(s)} nach oben">↑</button><button class="iconbtn sm" data-act="st-runter" data-s="${esc(s)}" title="Nach unten" aria-label="${esc(s)} nach unten">↓</button>${fest ? '' : `<button class="btn sm ghost" data-act="st-ren" data-s="${esc(s)}">Umbenennen</button>${n ? '' : `<button class="btn sm ghost" data-act="st-del" data-s="${esc(s)}">Entfernen</button>`}`}</span></li>`; }).join('')}</ul></div>
    <div class="panel stack"><div class="chron-h"><h2>Eintragsarten</h2><button class="btn sm" data-act="art-neu">${I('plus')}Art</button></div>
     <p style="margin:0" class="muted">Eigene Arten für die Chronik, z. B. Besprechung oder Ortstermin. Die eingebauten Arten (Eingang, Versendet, Telefonat, Notiz …) bleiben immer.</p>
     <ul class="mini">${(D.arten || []).map(t => `<li><span>${esc(t)}</span><button class="btn sm ghost" data-act="art-del" data-name="${esc(t)}">Entfernen</button></li>`).join('') || '<li class="muted">Noch keine eigenen Arten.</li>'}</ul></div>
@@ -1451,6 +1486,15 @@ document.addEventListener('click', async ev => {
       if (!val('m-kn').trim()) { $('#m-kn').focus(); return false; }
       closeModal(); await act(() => api('kontakte/' + k.id, {name: val('m-kn'), kurzname: val('m-kk'), typ: val('m-kt'), notiz: val('m-kno')}), 'Kontakt gespeichert.'); return false; }); break; }
   case 'chat-export': $('#chatinp').click(); break;
+  case 'st-hoch': case 'st-runter': { const n = [...ST_ORDER], i = n.indexOf(el.dataset.s), j = i + (el.dataset.act === 'st-hoch' ? -1 : 1);
+      if (j < 0 || j >= n.length) break; [n[i], n[j]] = [n[j], n[i]]; await act(() => api('statusliste', {statuses: n})); break; }
+  case 'st-neu': modal('Status hinzufügen', '<label>Bezeichnung<input id="m-stn" maxlength="40" placeholder="z. B. Klage eingereicht"></label>', async () => {
+      const name = val('m-stn').trim(); if (!name) return false; const n = [...ST_ORDER], e = n.indexOf('Erledigt');
+      n.splice(e < 0 ? n.length : e, 0, name); closeModal(); await act(() => api('statusliste', {statuses: n}), 'Status angelegt.'); return false; }); break;
+  case 'st-ren': modal('Status umbenennen', `<label>Bezeichnung<input id="m-stn" maxlength="40" value="${esc(el.dataset.s)}"></label><p class="muted" style="margin:0;font-size:12.5px">Alle Vorgänge mit diesem Status werden mit umbenannt.</p>`, async () => {
+      const neu = val('m-stn').trim(), alt = el.dataset.s; if (!neu || neu === alt) { closeModal(); return false; }
+      closeModal(); await act(() => api('statusliste', {statuses: ST_ORDER.map(s => s === alt ? neu : s), umbenennen: {[alt]: neu}}), 'Umbenannt.'); return false; }); break;
+  case 'st-del': await act(() => api('statusliste', {statuses: ST_ORDER.filter(s => s !== el.dataset.s)}), 'Status entfernt.'); break;
   case 'b-hoch': case 'b-runter': { const n = [...D.groups], i = n.indexOf(el.dataset.b), j = i + (el.dataset.act === 'b-hoch' ? -1 : 1);
       if (j < 0 || j >= n.length) break; [n[i], n[j]] = [n[j], n[i]]; await act(() => api('bereiche/reihenfolge', {namen: n})); break; }
   case 'art-del': await act(() => api('eintragsarten/entfernen', {name: el.dataset.name}), 'Art entfernt. Bestehende Einträge behalten ihre Bezeichnung.'); break;

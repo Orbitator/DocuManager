@@ -14,6 +14,8 @@ import urllib.request
 from contextlib import closing
 from pathlib import Path
 
+from akte import EINSCHAETZUNG
+
 API = "https://api.anthropic.com/v1/messages"
 MODELL = "claude-opus-5-5"  # gründlichste Stufe
 # Stufen: Modell, Preise in $ je Million Token (Eingabe, Ausgabe, Cache lesen, Cache schreiben 5 Min.)
@@ -35,7 +37,9 @@ KURZFASSUNG = 3000  # so viel bleibt von einem älteren fremden Dokument, wenn g
 
 SYSTEM = """Du unterstützt eine Privatperson bzw. einen Kleinunternehmer in Deutschland bei der Bearbeitung von
 Korrespondenz (Behörden, Gerichte, Versicherungen, Vermieter, Firmen). Antworte auf Deutsch, sachlich und knapp.
-Grundlage ist die mitgelieferte, vollständige Akte des Vorgangs in zeitlicher Reihenfolge – eingegangene Schreiben,
+Einschätzungen von dritter Seite (Anwalt, Beratungsstelle, Behörde, andere KI) sind in der Chronik als
+„EINSCHÄTZUNG VON DRITTER SEITE“ gekennzeichnet: Beziehe sie ausdrücklich ein, prüfe sie am Sachverhalt und begründe,
+wo du abweichst. Grundlage ist die mitgelieferte, vollständige Akte des Vorgangs in zeitlicher Reihenfolge – eingegangene Schreiben,
 meine eigenen versendeten Schreiben und Entwürfe, Notizen und Telefonate. Lies sie ganz, bevor du antwortest, und
 beziehe den bisherigen Verlauf immer ein. Eigene Schreiben sind verbindlich: Was ich dort erklärt, zugesagt oder
 bestritten habe, gilt fort, außer ich sage etwas anderes. Nenne Fundstellen (Eintrag, Datum) und kennzeichne Annahmen.
@@ -290,8 +294,10 @@ class ClaudeKI:
             art = {"eingang": "EINGANG", "ausgang": "MEIN SCHREIBEN (versendet)", "entwurf": "MEIN ENTWURF (nicht versendet)",
                    "telefonat": "TELEFONAT", "notiz": "NOTIZ", "entscheidung": "ENTSCHEIDUNG", "chat": "CHAT-NOTIZ",
                    "nachweis": "NACHWEIS", "fehlt": "ORIGINAL FEHLT"}.get(e["art"], e["art"].upper())
+            if e.get("typ") == EINSCHAETZUNG:
+                art = "EINSCHÄTZUNG VON DRITTER SEITE"
             eigene_schreiben += e["art"] in ("ausgang", "entwurf")
-            kopf = f"{e['ereignis_datum']} · {art}{' · ' + e['typ'] if e.get('typ') else ''} · {e['titel']}"
+            kopf = f"{e['ereignis_datum']} · {art}{' · ' + e['typ'] if e.get('typ') and e['typ'] != EINSCHAETZUNG else ''} · {e['titel']}"
             if e.get("kontakt_id"):
                 kopf += f" · {e.get('richtung') or ''} {namen.get(e['kontakt_id']) or self._kontakt(e['kontakt_id'])}".rstrip()
             v = e.get("versand")
@@ -635,6 +641,27 @@ def test_claude(store):
     akte_text = gesendet[-1][0]["system"][1]["text"] + gesendet[-1][0]["system"][2]["text"]
     assert "SCHLUSSKLAUSEL-ALT" not in akte_text.split("FAKTENREGISTER")[0] and "ENDE-MEINES-BRIEFS" in akte_text and "180,98 € bis zum 15.12" in akte_text
     assert len(r["kontext"]["gekuerzt"]) == 1 and r["kontext"]["fakten"] >= 2
+    # Einschätzung von dritter Seite: als solche gekennzeichnet in der Chronik
+    akte.eintrag_anlegen(v, {"art": "notiz", "typ": EINSCHAETZUNG, "titel": "Einschätzung: RA Müller", "datum": "2026-11-20",
+                             "text": "Forderung verjährt, Einrede erheben."})
+    ki.fragen(v, d, [], "zusammenfassen")
+    assert "EINSCHÄTZUNG VON DRITTER SEITE · Einschätzung: RA Müller" in gesendet[-1][0]["system"][2]["text"]
+    assert "Forderung verjährt" in gesendet[-1][0]["system"][2]["text"]
+    # Statusliste: eigene Werte, Reihenfolge, feste Werte bleiben, verwendete nicht entfernbar, Umbenennen
+    liste = akte.statusliste()
+    assert liste[0] == "Offen" and "Erledigt" in liste
+    neu = ["Erledigt", "Offen", "Klage eingereicht", "Schreiben verfassen", "Schreiben abgeschickt"]
+    assert akte.statusliste_setzen(neu)["statuses"] == neu and akte.statusliste() == neu
+    akte.vorgang_aendern(v, {"status": "Klage eingereicht"})
+    for falsch_liste in (["Offen", "Schreiben verfassen", "Schreiben abgeschickt"], ["Erledigt", "Offen", "Schreiben verfassen", "Schreiben abgeschickt"]):
+        try:
+            akte.statusliste_setzen(falsch_liste)
+            raise AssertionError("fester oder verwendeter Status darf nicht verschwinden")
+        except ValueError:
+            pass
+    akte.statusliste_setzen(["Offen", "Verhandlung", "Schreiben verfassen", "Schreiben abgeschickt", "Erledigt"],
+                            {"Klage eingereicht": "Verhandlung"})
+    assert akte.akte(v)["status"] == "Verhandlung"
     # Zitate prüfen: nur Text und Wortlaut gehen hinaus, nicht die Akte
     from gesetze import Gesetze
     seite = ('<span class="jnenbez">&#167; 362</span><span class="jnentitel">Erl&ouml;schen durch Leistung</span>'

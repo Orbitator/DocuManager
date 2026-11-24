@@ -13,6 +13,22 @@ from datetime import date, timedelta
 
 STATUSES = ("Schreiben verfassen", "Recherchieren", "Schreiben abgeschickt",
             "Offen", "Wartet auf Antwort", "Erledigt")
+# Diese Statuswerte nutzt die Anwendung selbst (Briefe, Versand, Archiv) – sie lassen sich sortieren, nicht entfernen
+STATUS_FEST = ("Offen", "Schreiben verfassen", "Schreiben abgeschickt", "Erledigt")
+STATUS_STANDARD = ("Offen", "Recherchieren", "Schreiben verfassen", "Schreiben abgeschickt", "Wartet auf Antwort", "Erledigt")
+EINSCHAETZUNG = "Einschätzung (extern)"  # fester Eintragstyp: Einschätzung von dritter Seite als Wissensgrundlage für Claude
+
+
+def status_liste(db):
+    """Statuswerte in der gewählten Reihenfolge (Einstellungen), feste Werte immer enthalten."""
+    row = db.execute("SELECT wert FROM einstellung WHERE schluessel='statusliste'").fetchone()
+    liste = json.loads(row[0]) if row else list(STATUS_STANDARD)
+    for s in STATUS_FEST:
+        if s not in liste:
+            liste.insert(len(liste) - (liste[-1:] == ["Erledigt"]), s)
+    return liste
+
+
 DEFAULT_GROUPS = ("Rechtliche Angelegenheiten", "Finanzamt und Steuern", "Versicherungen", "Anderes")
 DIREKT_ABGELEGT = "Direkt im Vorgang abgelegt"  # Kennzeichen: Eintrag automatisch angelegt, wird nach der Texterkennung ergänzt
 EINTRAG_ARTEN = ("eingang", "ausgang", "entwurf", "nachweis", "telefonat", "notiz", "entscheidung", "chat", "fehlt")
@@ -442,6 +458,41 @@ class Akte:
             db.executemany("UPDATE bereich SET reihenfolge=? WHERE name=?", ((i, n) for i, n in enumerate(namen, 1)))
         return {"ok": True}
 
+    def statusliste(self):
+        with closing(self.connect()) as db:
+            return status_liste(db)
+
+    def statusliste_setzen(self, liste, umbenennen=None):
+        """Neue Liste der Statuswerte in der gewünschten Reihenfolge. `umbenennen` {alt: neu} ändert den Namen eines
+        eigenen Status samt aller Vorgänge und Teilvorgänge, die ihn tragen."""
+        umbenennen = umbenennen or {}
+        if not isinstance(liste, list) or not isinstance(umbenennen, dict):
+            raise ValueError("Ungültige Statusliste.")
+        liste = [_text(s, "Status", 40, True) for s in liste]
+        if len({s.lower() for s in liste}) != len(liste):
+            raise ValueError("Jeden Status bitte nur einmal.")
+        fehlend = [s for s in STATUS_FEST if s not in liste]
+        if fehlend:
+            raise ValueError("Diese Status werden von der Anwendung gebraucht und bleiben: " + ", ".join(fehlend))
+        for alt, neu in umbenennen.items():
+            if alt in STATUS_FEST:
+                raise ValueError(f"„{alt}“ lässt sich nicht umbenennen.")
+            if neu not in liste:
+                raise ValueError("Umbenennung passt nicht zur Liste.")
+        with closing(self.connect()) as db, db:
+            for alt, neu in umbenennen.items():
+                db.execute("UPDATE vorgang SET status=? WHERE status=?", (neu, alt))
+                db.execute("UPDATE teilvorgang SET status=? WHERE status=?", (neu, alt))
+            weg = [s for s in status_liste(db) if s not in liste and s not in umbenennen]
+            for s in weg:
+                n = db.execute("SELECT (SELECT count(*) FROM vorgang WHERE status=? AND geloescht_am IS NULL)"
+                               " + (SELECT count(*) FROM teilvorgang WHERE status=?)", (s, s)).fetchone()[0]
+                if n:
+                    raise ValueError(f"„{s}“ wird noch {n}-mal verwendet. Bitte die Vorgänge zuerst umstellen.")
+            db.execute("INSERT OR REPLACE INTO einstellung(schluessel,wert) VALUES('statusliste',?)",
+                       (json.dumps(liste, ensure_ascii=False),))
+        return {"statuses": liste}
+
     def bereich_namen(self):
         return [b["name"] for b in self.bereiche()]
 
@@ -513,7 +564,7 @@ class Akte:
                 raise ValueError("Wähle einen Bereich aus der Liste.")
             felder["bereich"] = data["bereich"]
         if "status" in data:
-            felder["status"] = _choice(data["status"], STATUSES, "Status")
+            felder["status"] = _choice(data["status"], self.statusliste(), "Status")
         if "prioritaet" in data:
             felder["prioritaet"] = _choice(data["prioritaet"] or "keine", ("keine", "hoch", "sehr hoch"), "Priorität")
         bereiche = self._bereiche(data["bereiche"], True) if "bereiche" in data else None
@@ -610,7 +661,7 @@ class Akte:
     # --- Teilvorgänge --------------------------------------------------------------------
     def teilvorgang_anlegen(self, vorgang_id, data):
         name = _text(data.get("name"), "Name", 120, True)
-        status = _choice(data.get("status", "Offen"), STATUSES, "Status")
+        status = _choice(data.get("status", "Offen"), self.statusliste(), "Status")
         with closing(self.connect()) as db, db:
             self._vorgang(db, vorgang_id)
             nr = db.execute("SELECT ifnull(max(reihenfolge),0)+1 FROM teilvorgang WHERE vorgang_id=?",
@@ -624,7 +675,7 @@ class Akte:
         if "name" in data:
             felder["name"] = _text(data["name"], "Name", 120, True)
         if "status" in data:
-            felder["status"] = _choice(data["status"], STATUSES, "Status")
+            felder["status"] = _choice(data["status"], self.statusliste(), "Status")
         if "zustaendig" in data:
             felder["zustaendig"] = _text(data["zustaendig"], "Zuständig", 80)
         if "naechster_schritt" in data:
@@ -800,7 +851,7 @@ class Akte:
     def _typ(self, wert):
         if not wert:
             return None
-        if wert not in self.eintragsarten():
+        if wert not in self.eintragsarten() and wert != EINSCHAETZUNG:
             raise ValueError("Unbekannte Eintragsart.")
         return wert
 
@@ -1601,6 +1652,8 @@ def _route_table():
         ("GET", r"/api/akte/(\d+)", lambda a, m, d: a.akte(i(m[1]))),
         ("GET", r"/api/akte/(\d+)/offen", lambda a, m, d: a.offene_punkte(i(m[1]), i(d["teil"]) if str(d.get("teil", "")).isdigit() else None)),
         ("GET", r"/api/bereiche", lambda a, m, d: {"bereiche": a.bereiche()}),
+        ("GET", r"/api/statusliste", lambda a, m, d: {"statuses": a.statusliste(), "fest": list(STATUS_FEST)}),
+        ("POST", r"/api/statusliste", lambda a, m, d: a.statusliste_setzen(d.get("statuses"), d.get("umbenennen"))),
         ("GET", r"/api/eintragsarten", lambda a, m, d: {"arten": a.eintragsarten()}),
         ("GET", r"/api/empfaenger", lambda a, m, d: {"empfaenger": a.empfaenger_liste()}),
         ("GET", r"/api/oberflaeche", lambda a, m, d: a.oberflaeche()),
