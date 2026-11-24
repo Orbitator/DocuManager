@@ -181,9 +181,9 @@ def brief_html(e, eigene, drucken=False):
 body{{margin:0;background:#eceef3;font-family:Arial,"Helvetica Neue",Helvetica,sans-serif;color:#000;
   -webkit-print-color-adjust:exact;print-color-adjust:exact}}
 .blatt{{width:210mm;min-height:297mm;margin:12px auto;background:#fff;position:relative;
-  padding:{m['betreff']}mm {m['rand_rechts']}mm 20mm {m['rand_links']}mm;font-size:11pt;line-height:1.35;box-shadow:0 2px 12px rgba(0,0,0,.15)}}
+  padding:{m['betreff']}mm {m['rand_rechts']}mm 20mm {m['rand_links']}mm;font-size:10.5pt;line-height:1.35;box-shadow:0 2px 12px rgba(0,0,0,.15)}}
 .kopf{{position:absolute;top:15mm;right:{m['rand_rechts']}mm;text-align:right;font-size:9pt;line-height:1.4}}
-.kopf b{{font-size:11pt}}
+.kopf b{{font-size:10.5pt}}
 .ruecksende{{position:absolute;top:{m['ruecksende']}mm;left:{m['rand_links']}mm;width:85mm;font-size:7pt;line-height:1.2;
   white-space:nowrap;overflow:hidden;text-overflow:ellipsis;border-bottom:.25pt solid #000;padding-bottom:.5mm}}
 .anschrift{{position:absolute;top:{m['empfaenger']}mm;left:{m['rand_links']}mm;width:85mm;

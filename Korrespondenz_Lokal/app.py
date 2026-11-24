@@ -38,10 +38,10 @@ from mail_import import MailImport, migrate_5, test_mail
 
 ROOT = Path(__file__).resolve().parent
 PORT = 8765
-APP_VERSION = "DocuManager 0.19.0 · Gesetzestexte und Zitatprüfung"
+APP_VERSION = "DocuManager 0.19.1 · Claude-Ergebnisse bleiben gespeichert"
 MAX_UPLOAD = 25 * 1024 * 1024
 MIN_MACOS = "14.0"
-SCHEMA_VERSION = 14
+SCHEMA_VERSION = 15
 OCR_WAITING = "Wartet auf Texterkennung"
 # Scan-Ordner für Scanner-Software und „Digitale Bilder“: Dateien darin kommen automatisch in den Posteingang.
 # Bewusst nicht unter „Dokumente“: Diesen Ordner schützt macOS, ein über Launchpad gestartetes Programm bräuchte
@@ -367,9 +367,20 @@ def migrate_14(db):
                    (vorgang_id, "eingang", titel, erkannt or datum, dokument_id, DIREKT_ABGELEGT))
 
 
+def migrate_15(db):
+    """Analysen, Bewertungen und Entwürfe von Claude werden dauerhaft gespeichert (vorher nur im Browserfenster)."""
+    db.execute("""CREATE TABLE ki_ergebnis(
+    id INTEGER PRIMARY KEY, vorgang_id INTEGER NOT NULL REFERENCES vorgang(id), dokument_id INTEGER REFERENCES dokument(id),
+    gespraech TEXT, aufgabe TEXT NOT NULL, frage TEXT NOT NULL DEFAULT '', antwort TEXT NOT NULL,
+    daten TEXT, kontext TEXT, zitate TEXT, stufe TEXT, kosten_usd REAL,
+    erstellt_am TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%S','now','localtime'))
+)""")
+    db.execute("CREATE INDEX ki_ergebnis_vorgang ON ki_ergebnis(vorgang_id, dokument_id, erstellt_am)")
+
+
 MIGRATIONS = ((1, migrate_1), (2, migrate_2), (3, migrate_3), (4, migrate_4), (5, migrate_5), (6, migrate_6),
               (7, migrate_7), (8, migrate_8), (9, migrate_9), (10, migrate_10), (11, migrate_11), (12, migrate_12),
-              (13, migrate_13), (14, migrate_14))
+              (13, migrate_13), (14, migrate_14), (15, migrate_15))
 
 
 class Store:
@@ -1168,8 +1179,13 @@ class Handler(BaseHTTPRequestHandler):
                 text = str(json.loads(self.read_body(200_000)).get("text") or "")
                 self.send_json({"vorschriften": self.gesetze.fuer_text(text)})
             elif path == "/api/claude/zitate":  # Gegenprüfung der Zitate am amtlichen Wortlaut
-                text = str(json.loads(self.read_body(200_000)).get("text") or "")
-                self.send_json(self.claude.zitate_pruefen(text, self.gesetze))
+                daten = json.loads(self.read_body(200_000))
+                self.send_json(self.claude.zitate_pruefen(str(daten.get("text") or ""), self.gesetze, daten.get("ergebnis_id")))
+            elif path == "/api/claude/verlauf":  # gespeicherte Analysen und Entwürfe eines Vorgangs
+                daten = json.loads(self.read_body(4000))
+                self.send_json({"ergebnisse": self.claude.verlauf(int(daten["vorgang_id"]), daten.get("dokument_id"), daten.get("aufgabe"))})
+            elif match := re.fullmatch(r"/api/claude/ergebnisse/(\d+)/loeschen", path):
+                self.send_json(self.claude.ergebnis_loeschen(int(match[1])))
             elif path == "/api/claude/stufe":
                 self.send_json(self.claude.stufe_setzen(json.loads(self.read_body(4000)).get("stufe")))
             elif path == "/api/claude/schluessel":
@@ -1179,7 +1195,8 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_json(self.claude.fragen(int(daten["vorgang_id"]), int(daten["dokument_id"]) if daten.get("dokument_id") else None,
                                                   daten.get("verlauf") or [], daten.get("aufgabe") or "frage",
                                                   daten.get("anweisung") or "", daten.get("entwurf") or "", daten.get("empfaenger") or "",
-                                                  daten.get("bewertung") or "", daten.get("option") or ""))
+                                                  daten.get("bewertung") or "", daten.get("option") or "",
+                                                  daten.get("gespraech") or None, daten.get("frage") or ""))
             elif path == "/api/beenden":  # Anwendung ohne Terminal beenden
                 self.send_json({"ok": True})
                 if self.server_ref:

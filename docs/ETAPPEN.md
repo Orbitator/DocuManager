@@ -162,6 +162,11 @@ Teil 2 (umgesetzt, Schemaversion 7):
   in `Daten/Gesetze/` und werden nach 30 Tagen erneuert; ohne Netz gilt der gespeicherte Stand. **Zitate prüfen**
   schickt nur den Text und den Wortlaut der zitierten Vorschriften (nicht die Akte) an Claude und meldet je Vorschrift
   passt / teilweise / passt nicht / unklar mit Begründung (ca. 1 Cent). Rechtsprechung und Landesrecht sind nicht enthalten.
+- 0.19.1 (Schemaversion 15): Jede Antwort von Claude (Analysen, Bewertungen, Entwürfe, Fragen, Zitatprüfungen) wird in
+  der Tabelle `ki_ergebnis` gespeichert (`migrate_15`) und ist damit Teil der Datenbank, der Datensicherung und bleibt bei
+  Updates erhalten. Der Claude-Dialog zeigt den gespeicherten Verlauf mit Datum, Folgefragen knüpfen daran an; der
+  Briefdialog lädt die letzte Bewertung und bietet frühere Entwürfe zur Übernahme an. Briefschrift 10,5 pt (Druck und
+  Vorschau).
 - 0.16: Scannen ohne Dialog. „Scannen“ scannt sofort mit dem zuletzt benutzten Scanner (`Daten/scanner.json`):
   Einzug wenn vorhanden, sonst Glas; beidseitig, wenn möglich; 300 dpi Farbe. Die Seiten werden mit PDFKit zu einem
   komprimierten PDF zusammengefügt (leere Rückseiten fallen weg) und landen im Posteingang bzw. Archiv. Nur ein kleines

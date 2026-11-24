@@ -267,7 +267,7 @@ class ClaudeKI:
 
     # --- Anfrage ------------------------------------------------------------------------
     def fragen(self, vorgang_id, dokument_id, verlauf, aufgabe="frage", anweisung="", entwurf="", empfaenger="",
-               bewertung="", option=""):
+               bewertung="", option="", gespraech=None, frage=""):
         """verlauf: Liste von {rolle: "user"|"assistant", text}. Die letzte Nachricht ist die neue Frage
         (bei aufgabe != "frage" wird sie aus AUFGABEN ergänzt)."""
         schluessel = self.schluessel()
@@ -350,9 +350,42 @@ class ClaudeKI:
                 ergebnis.update(bewertung=b, text=bewertung_als_text(b))
             except (json.JSONDecodeError, TypeError, AttributeError):
                 pass
+        ergebnis["id"] = self._speichern(vorgang_id, dokument_id, gespraech, aufgabe,
+                                         frage or (verlauf[-1]["text"] if aufgabe == "frage" and verlauf else ""), ergebnis, stufe["name"])
         return ergebnis
 
-    def zitate_pruefen(self, text, gesetze):
+    # --- Ablage: jede Antwort bleibt erhalten (Datenbank, damit auch in Sicherung und nach Updates) ----------------
+    def _speichern(self, vorgang_id, dokument_id, gespraech, aufgabe, frage, ergebnis, stufe):
+        daten = {k: ergebnis[k] for k in ("betreff", "brieftext", "hinweise", "bewertung") if k in ergebnis}
+        with closing(self.store.connect()) as db, db:
+            return db.execute("""INSERT INTO ki_ergebnis(vorgang_id,dokument_id,gespraech,aufgabe,frage,antwort,daten,kontext,
+                stufe,kosten_usd) VALUES(?,?,?,?,?,?,?,?,?,?)""",
+                (vorgang_id, dokument_id, (str(gespraech)[:64] if gespraech else None), aufgabe, str(frage)[:4000],
+                 ergebnis["text"], json.dumps(daten, ensure_ascii=False) if daten else None,
+                 json.dumps(ergebnis.get("kontext") or {}, ensure_ascii=False), stufe,
+                 (ergebnis.get("kontext") or {}).get("kosten_usd"))).lastrowid
+
+    def verlauf(self, vorgang_id, dokument_id=None, aufgabe=None):
+        sql, werte = "SELECT * FROM ki_ergebnis WHERE vorgang_id=?", [vorgang_id]
+        if dokument_id:
+            sql += " AND dokument_id=?"
+            werte.append(int(dokument_id))
+        if aufgabe:
+            sql += " AND aufgabe=?"
+            werte.append(str(aufgabe))
+        with closing(self.store.connect()) as db:
+            zeilen = [dict(r) for r in db.execute(sql + " ORDER BY erstellt_am DESC, id DESC LIMIT 200", werte)]
+        for z in zeilen:
+            for feld in ("daten", "kontext", "zitate"):
+                z[feld] = json.loads(z[feld]) if z[feld] else None
+        return zeilen
+
+    def ergebnis_loeschen(self, ergebnis_id):
+        with closing(self.store.connect()) as db, db:
+            db.execute("DELETE FROM ki_ergebnis WHERE id=?", (ergebnis_id,))
+        return {"ok": True}
+
+    def zitate_pruefen(self, text, gesetze, ergebnis_id=None):
         """Gegenprüfung: Stimmen die zitierten Vorschriften mit ihrem amtlichen Wortlaut überein? Geschickt wird nur
         der geprüfte Text und der Wortlaut der zitierten Vorschriften, nicht die Akte – daher günstig."""
         schluessel = self.schluessel()
@@ -392,7 +425,11 @@ class ClaudeKI:
         ein, aus, lesen, schreiben = stufe["preise"]
         kosten = (nutzung.get("input_tokens", 0) * ein + nutzung.get("output_tokens", 0) * aus
                   + nutzung.get("cache_read_input_tokens", 0) * lesen + nutzung.get("cache_creation_input_tokens", 0) * schreiben) / 1e6
-        return {"vorschriften": normen, "pruefungen": pruefungen, "kosten_usd": round(kosten, 4)}
+        ergebnis = {"vorschriften": normen, "pruefungen": pruefungen, "kosten_usd": round(kosten, 4)}
+        if ergebnis_id:
+            with closing(self.store.connect()) as db, db:
+                db.execute("UPDATE ki_ergebnis SET zitate=? WHERE id=?", (json.dumps(ergebnis, ensure_ascii=False), int(ergebnis_id)))
+        return ergebnis
 
     def _http(self, anfrage, schluessel):
         daten = json.dumps(anfrage).encode("utf-8")
@@ -475,7 +512,10 @@ def test_claude(store):
     letzte = gesendet[-1][0]["messages"][-1]["content"]
     assert "<mein_entwurf>" in letzte and "kürzer" in letzte and "Amtsgericht Rostock" in letzte
     assert gesendet[-1][0]["output_config"]["format"]["type"] == "json_schema"
-    r = ki.fragen(v, d, [], "bewerten")
+    r = ki.fragen(v, d, [], "bewerten", gespraech="g1")
+    gespeichert = ki.verlauf(v, d, "bewerten")[0]
+    assert gespeichert["id"] == r["id"] and gespeichert["daten"]["bewertung"]["optionen"][1]["titel"] == "Widersprechen"
+    assert gespeichert["gespraech"] == "g1" and gespeichert["antwort"].startswith("ZUSAMMENFASSUNG")
     assert gesendet[-1][0]["output_config"]["format"]["schema"] is BEWERTUNG_SCHEMA
     assert r["bewertung"]["optionen"][1]["empfohlen"] and "OPTION 2 (empfohlen): Widersprechen" in r["text"]
     r = ki.fragen(v, d, [], "antwort", bewertung=r["text"], option="Widersprechen: Termin fand nie statt")
@@ -529,7 +569,8 @@ def test_claude(store):
     vorher = len(gesendet)
     ki.senden = lambda anfrage, s: (gesendet.append((anfrage, s)) or {"stop_reason": "end_turn", "usage": {"input_tokens": 100, "output_tokens": 50},
         "content": [{"type": "text", "text": json.dumps({"pruefungen": [{"vorschrift": "§ 362 BGB", "ergebnis": "passt", "begruendung": "Erfüllung."}]})}]})
-    r = ki.zitate_pruefen("Die Forderung ist nach § 362 Abs. 1 BGB erloschen.", g)
+    r = ki.zitate_pruefen("Die Forderung ist nach § 362 Abs. 1 BGB erloschen.", g, gespeichert["id"])
+    assert ki.verlauf(v, d, "bewerten")[0]["zitate"]["pruefungen"][0]["ergebnis"] == "passt"
     anfrage = gesendet[-1][0]
     assert len(gesendet) == vorher + 1 and "Schuldverhältnis erlischt" in anfrage["messages"][0]["content"]
     assert "AKTE" not in json.dumps(anfrage) and r["pruefungen"][0]["ergebnis"] == "passt" and r["kosten_usd"] > 0

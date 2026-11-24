@@ -1,4 +1,4 @@
--- SQLite-Schema der Korrespondenzverwaltung, Schemaversion 14 (PRAGMA user_version).
+-- SQLite-Schema der Korrespondenzverwaltung, Schemaversion 15 (PRAGMA user_version).
 -- Erzeugt aus einer frischen Installation. Ausschließlich Struktur, keine Daten.
 -- Maßgeblich sind die Migrationen in app.py (MIGRATIONS), akte.py (migrate_3, migrate_4, migrate_6), mail_import.py
 -- (migrate_5) und ChatSync.__init__. Fremdschlüssel müssen pro Verbindung aktiviert werden.
@@ -102,6 +102,13 @@ CREATE TABLE frist_verlauf(
     geaendert_am TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
+CREATE TABLE ki_ergebnis(
+    id INTEGER PRIMARY KEY, vorgang_id INTEGER NOT NULL REFERENCES vorgang(id), dokument_id INTEGER REFERENCES dokument(id),
+    gespraech TEXT, aufgabe TEXT NOT NULL, frage TEXT NOT NULL DEFAULT '', antwort TEXT NOT NULL,
+    daten TEXT, kontext TEXT, zitate TEXT, stufe TEXT, kosten_usd REAL,
+    erstellt_am TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%S','now','localtime'))
+);
+
 CREATE TABLE kontakt(
     id INTEGER PRIMARY KEY, name TEXT NOT NULL, kurzname TEXT, typ TEXT, notiz TEXT,
     angelegt_am TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, geloescht_am TEXT
@@ -173,6 +180,8 @@ CREATE INDEX eintrag_vorgang ON eintrag(vorgang_id);
 
 CREATE INDEX frist_faellig ON frist(faellig_am);
 
+CREATE INDEX ki_ergebnis_vorgang ON ki_ergebnis(vorgang_id, dokument_id, erstellt_am);
+
 CREATE INDEX referenz_wert ON referenz(wert);
 
 CREATE TRIGGER suche_dokument_ai AFTER INSERT ON dokument BEGIN
@@ -208,4 +217,4 @@ CREATE TRIGGER suche_vorgang_au AFTER UPDATE OF titel,beschreibung ON vorgang BE
   DELETE FROM suche WHERE art='vorgang' AND ref_id=OLD.id;
   INSERT INTO suche(art,ref_id,seite,text) VALUES('vorgang',NEW.id,NULL,NEW.titel||' '||NEW.beschreibung); END;
 
-PRAGMA user_version = 14;
+PRAGMA user_version = 15;

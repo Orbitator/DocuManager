@@ -656,7 +656,8 @@ async function compose(bezugId, editId, vorschlag) {
      <button type="button" class="btn sm" data-kib="bewerten">1 · Analysieren &amp; bewerten</button>
      <button type="button" class="btn sm" data-kib="${bezug ? 'antwort' : 'schreiben'}" data-stufe2 disabled title="Zuerst analysieren und eine Option wählen">2 · ${bezug ? 'Antwort' : 'Schreiben'} entwerfen</button>
      <button type="button" class="btn sm ghost" data-kib="ueberarbeiten">Text überarbeiten</button>
-     <input id="m-kianw" placeholder="Vorgabe (optional), z. B. „Ton freundlicher“ oder „Ratenzahlung über 3 Monate anbieten“"></div>
+     <input id="m-kianw" placeholder="Vorgabe (optional), z. B. „Ton freundlicher“ oder „Ratenzahlung über 3 Monate anbieten“">
+     <select id="m-kialt" hidden title="Gespeicherte Entwürfe von Claude zu diesem Schreiben"></select></div>
     <div id="m-kibew" class="kibew" hidden></div>
     <label>Brieftext<textarea id="m-body" class="cz-body">${esc(edit ? edit.text || '' : '')}</textarea></label>
     ${anl.length ? `<label>Anlagen</label><div class="stack" style="gap:4px">${anl.map(e => `<label class="chk"><input type="checkbox" class="m-att" value="${esc(e.titel)}" ${(b.anlagen || []).includes(e.titel) ? 'checked' : ''}>${esc(e.titel)} vom ${dt(e.ereignis_datum)}</label>`).join('')}</div>` : ''}
@@ -739,16 +740,33 @@ async function compose(bezugId, editId, vorschlag) {
         <span><b>${esc(o.titel)}</b>${o.empfohlen ? ' <span class="pill">Empfohlen</span>' : ''}<br>${esc(o.beschreibung)}
         <small>＋ ${esc(o.vorteile)}</small><small>－ ${esc(o.nachteile)}</small></span></label>`).join('')}
         <label class="kio"><input type="radio" name="m-kio" value="eigen"><span><b>Eigene Linie</b><br>Beschreiben Sie Ihr Vorgehen im Feld „Vorgabe“ oben.</span></label></div>`;
+    if (r.erstellt_am) el.insertAdjacentHTML('afterbegin', `<p class="ck-datum" style="text-align:left">Gespeicherte Bewertung vom ${dt(r.erstellt_am.slice(0, 10))}, ${r.erstellt_am.slice(11, 16)} Uhr – „1 · Analysieren“ erstellt eine neue.</p>`);
     el.innerHTML += kontextHinweis(r.kontext) + `<div style="display:flex;gap:6px;margin-top:8px"><button type="button" class="btn sm ghost" data-kinotiz>Bewertung als Notiz speichern</button>
-      <button type="button" class="btn sm ghost" data-kizit title="Zitierte Paragrafen am amtlichen Wortlaut prüfen (ca. 1 Cent)">Zitate prüfen</button></div><div class="ck-zit" hidden></div>`;
+      <button type="button" class="btn sm ghost" data-kizit title="Zitierte Paragrafen am amtlichen Wortlaut prüfen (ca. 1 Cent)">Zitate prüfen</button></div><div class="ck-zit" ${r.zitate ? '' : 'hidden'}>${r.zitate ? zitatErgebnis(r.zitate) : ''}</div>`;
     box.querySelector('[data-stufe2]').disabled = false; box.querySelector('[data-stufe2]').title = '';
   };
-  if (S.kiBewertung[bewKey]) zeigeBewertung(S.kiBewertung[bewKey]);
+  const ausAblage = g => ({id: g.id, text: g.antwort, bewertung: g.daten && g.daten.bewertung, kontext: g.kontext, zitate: g.zitate, erstellt_am: g.erstellt_am});
+  const entwuerfe = [];
+  (async () => {  // gespeicherte Bewertung und frühere Entwürfe von Claude zu diesem Schreiben laden
+    try {
+      const alle = (await api('claude/verlauf', {vorgang_id: a.id, dokument_id: bezug ? bezug.dokument_id : null})).ergebnisse
+        .filter(g => bezug ? true : !g.dokument_id);
+      const bw = alle.find(g => g.aufgabe === 'bewerten');
+      if (bw && !S.kiBewertung[bewKey]) S.kiBewertung[bewKey] = ausAblage(bw);
+      if (S.kiBewertung[bewKey] && document.body.contains(box)) zeigeBewertung(S.kiBewertung[bewKey]);
+      entwuerfe.push(...alle.filter(g => g.daten && g.daten.brieftext));
+      if (entwuerfe.length && document.body.contains(box)) {
+        const sel = $('#m-kialt'); sel.hidden = false;
+        sel.innerHTML = `<option value="">Frühere Entwürfe von Claude (${entwuerfe.length}) …</option>` + entwuerfe.map((g, i) =>
+          `<option value="${i}">${dt(g.erstellt_am.slice(0, 10))} ${g.erstellt_am.slice(11, 16)} · ${esc((g.daten.betreff || '').slice(0, 60))}</option>`).join('');
+      }
+    } catch (_) { /* ohne Ablage weiter */ }
+  })();
   const pvZoom = z => { S.pvZoom = Math.min(1, Math.max(0.6, z)); $('#m-pv').style.setProperty('--pvz', S.pvZoom); };
   pvZoom(S.pvZoom || 1);
   box.addEventListener('click', async ev => {
     const zb = ev.target.closest('[data-pvz]'); if (zb) { pvZoom((S.pvZoom || 1) + 0.1 * +zb.dataset.pvz); return; }
-    if (ev.target.closest('[data-kizit]')) { await zitatePruefen(S.kiBewertung[bewKey].text, $('#m-kibew .ck-zit'), ev.target.closest('[data-kizit]')); return; }
+    if (ev.target.closest('[data-kizit]')) { await zitatePruefen(S.kiBewertung[bewKey].text, $('#m-kibew .ck-zit'), ev.target.closest('[data-kizit]'), S.kiBewertung[bewKey].id); return; }
     if (ev.target.closest('[data-kinotiz]')) {
       const r = S.kiBewertung[bewKey], knopf = ev.target.closest('[data-kinotiz]');
       try { await api(`akte/${a.id}/eintraege`, {art: 'notiz', titel: 'Rechtliche Bewertung (Claude)' + (bezug ? ' – ' + bezug.titel : ''), text: r.text, bezug_id: bezug ? bezug.id : null, teile: bezug ? bezug.teile : []});
@@ -772,7 +790,8 @@ async function compose(bezugId, editId, vorschlag) {
     k.innerHTML = `<span class="spin"></span>${aufgabe === 'bewerten' ? 'Claude prüft die Akte …' : 'Claude schreibt …'}`;
     try {
       const r = await api('claude/fragen', {vorgang_id: a.id, dokument_id: bezug ? bezug.dokument_id : null, verlauf: [], aufgabe,
-        anweisung: val('m-kianw'), entwurf: val('m-body'), empfaenger: val('m-emp'), bewertung: bew ? bew.text : '', option});
+        anweisung: val('m-kianw'), entwurf: val('m-body'), empfaenger: val('m-emp'), bewertung: bew ? bew.text : '', option,
+        gespraech: 'brief-' + bewKey, frage: [alt.replace(/<[^>]+>/g, '').replace(/^\d · /, ''), option, val('m-kianw')].filter(Boolean).join(' – ')});
       if (!document.body.contains(box)) return;
       if (aufgabe === 'bewerten') { S.kiBewertung[bewKey] = r; zeigeBewertung(r); $('#m-kibew').scrollIntoView({block: 'nearest'}); throw null; }
       if (r.betreff) $('#m-subj').value = r.betreff;
@@ -782,7 +801,14 @@ async function compose(bezugId, editId, vorschlag) {
     delete box.dataset.ki; knoepfe.forEach(b => b.disabled = false); k.innerHTML = alt;
     zweiter.disabled = war2 && !S.kiBewertung[bewKey];
   });
-  box.addEventListener('change', ev => { if (ev.target.classList.contains('m-att')) upd(); if (ev.target.id === 'm-sent') $('#m-sentopt').hidden = !ev.target.checked; });
+  box.addEventListener('change', ev => {
+    if (ev.target.id === 'm-kialt' && ev.target.value !== '') {
+      const g = entwuerfe[+ev.target.value]; ev.target.value = '';
+      if ($('#m-body').dataset.touched && !confirm('Den bisherigen Brieftext durch diesen früheren Entwurf ersetzen?')) return;
+      $('#m-subj').value = g.daten.betreff || $('#m-subj').value; $('#m-body').value = g.daten.brieftext; $('#m-body').dataset.touched = '1'; upd();
+      return;
+    }
+    if (ev.target.classList.contains('m-att')) upd(); if (ev.target.id === 'm-sent') $('#m-sentopt').hidden = !ev.target.checked; });
   if (edit) upd(); else vorlage();
   if (vorschlag) { if (vorschlag.betreff) $('#m-subj').value = vorschlag.betreff; $('#m-body').value = vorschlag.brieftext || ''; $('#m-body').dataset.touched = '1'; upd(); }
 }
@@ -1161,14 +1187,14 @@ function zitatErgebnis(r) {  // Ergebnis der Gegenprüfung
     ${fehlt.length ? `<p class="muted">Nicht abrufbar: ${fehlt.map(v => esc(v.norm + ' ' + v.gesetz)).join(', ')}</p>` : ''}
     ${r.kosten_usd !== undefined ? `<p class="muted">Kosten ca. ${r.kosten_usd < 0.01 ? 'unter 1 Cent' : (r.kosten_usd * 100).toFixed(1).replace('.', ',') + ' Cent'}</p>` : ''}</div>`;
 }
-async function zitatePruefen(text, ziel, knopf) {
+async function zitatePruefen(text, ziel, knopf, ergebnisId) {
   const alt = knopf.innerHTML; knopf.disabled = true; knopf.innerHTML = '<span class="spin"></span>Prüfe Zitate …';
-  try { const r = await api('claude/zitate', {text}); ziel.innerHTML = zitatErgebnis(r); ziel.hidden = false; }
+  try { const r = await api('claude/zitate', {text, ergebnis_id: ergebnisId || null}); ziel.innerHTML = zitatErgebnis(r); ziel.hidden = false; }
   catch (e) { toast(e.message); }
   knopf.disabled = false; knopf.innerHTML = alt;
 }
 function kontextHinweis(k) {  // zeigt, welche Teile der Akte Claude vorlagen
-  if (!k) return '';
+  if (!k || k.eintraege === undefined) return '';
   const teile = [`${k.eintraege} Einträge der Akte`, `${k.eigene_schreiben} eigene Schreiben`, `${k.dokumente} Dokumente im Volltext`];
   const warn = [];
   if (k.gekuerzt && k.gekuerzt.length) warn.push(`Wegen der Größe der Akte nur gekürzt: ${k.gekuerzt.map(esc).join(', ')}`);
@@ -1189,7 +1215,17 @@ async function claudeDialog(docId, entryId) {
     return;
   }
   const d = docId ? a.dokumente.find(x => x.id === docId) : null, e = entryId ? a.eintraege.find(x => x.id === entryId) : null;
-  const verlauf = [];  // {rolle, text, anzeige, brief}
+  const verlauf = [];  // {rolle, text, anzeige, brief, id, datum}
+  const gespraech = 'dlg-' + Date.now().toString(36);
+  try {  // gespeicherte Analysen zu diesem Dokument bzw. Vorgang wieder anzeigen; Folgefragen knüpfen daran an
+    const alt = (await api('claude/verlauf', {vorgang_id: a.id, dokument_id: docId})).ergebnisse.reverse();
+    for (const g of alt) {
+      if (!docId && g.dokument_id) continue;
+      verlauf.push({rolle: 'user', text: g.frage || CLAUDE_FRAGEN[g.aufgabe] || g.aufgabe, anzeige: g.frage || CLAUDE_FRAGEN[g.aufgabe] || g.aufgabe, datum: g.erstellt_am});
+      verlauf.push({rolle: 'assistant', text: g.antwort, kontext: g.kontext, id: g.id, zitate: g.zitate ? zitatErgebnis(g.zitate) : null,
+        brief: g.daten && g.daten.brieftext ? {betreff: g.daten.betreff, brieftext: g.daten.brieftext, hinweise: g.daten.hinweise} : null});
+    }
+  } catch (_) { /* ohne gespeicherten Verlauf weiter */ }
   modal('Claude · ' + (d ? d.titel : a.titel), `<div class="claude">
     <p class="muted" style="margin:0;font-size:12.5px">Grundlage: die ganze Akte „${esc(a.titel)}“ in zeitlicher Reihenfolge – alle Schreiben im Volltext, Ihre eigenen Briefe und Entwürfe, Notizen und Telefonate${d ? `; im Mittelpunkt „${esc(d.titel)}“` : ''}. Claude kann sich irren – Fristen und Beträge bitte am Original prüfen.</p>
     <div class="claude-akt">${CLAUDE_AKTIONEN.map(([k, l]) => `<button class="btn sm" data-ck="${k}">${l}</button>`).join('')}</div>
@@ -1197,7 +1233,7 @@ async function claudeDialog(docId, entryId) {
     <div class="claude-ein"><textarea id="ck-frage" rows="2" placeholder="Eigene Frage, z. B. „Muss ich zahlen?“ oder „Formuliere den zweiten Absatz freundlicher.“"></textarea><button class="btn pri" data-ck="frage">Fragen</button></div></div>`, null, '', 'wide');
   const box = document.querySelector('.modal'), feld = $('#ck-verlauf');
   const zeigen = () => {
-    feld.innerHTML = verlauf.map((n, i) => n.rolle === 'user' ? `<div class="ck-frage">${esc(n.anzeige || n.text)}</div>`
+    feld.innerHTML = verlauf.map((n, i) => n.rolle === 'user' ? `${n.datum ? `<div class="ck-datum">${dt(n.datum.slice(0, 10))}, ${n.datum.slice(11, 16)} Uhr · gespeichert</div>` : ''}<div class="ck-frage">${esc(n.anzeige || n.text)}</div>`
       : `<div class="ck-antwort"><div class="ck-text">${claudeText(n.text)}</div><div class="ck-knoepfe">
           <button class="btn sm ghost" data-ckn="notiz" data-i="${i}">Als Notiz speichern</button>
           <button class="btn sm ghost" data-ckn="brief" data-i="${i}">${I('draft')}Als Brief übernehmen</button>
@@ -1207,17 +1243,19 @@ async function claudeDialog(docId, entryId) {
       + (box.dataset.laeuft ? '<div class="ck-antwort muted"><span class="spin"></span> Claude denkt nach … (kann bis zu einer Minute dauern)</div>' : '');
     feld.scrollTop = feld.scrollHeight;
   };
+  if (verlauf.length) zeigen();
   const fragen = async (aufgabe) => {
     if (box.dataset.laeuft) return;
     let text = aufgabe === 'frage' ? $('#ck-frage').value.trim() : CLAUDE_FRAGEN[aufgabe];
     if (!text) { $('#ck-frage').focus(); return; }
-    const gesendet = verlauf.filter(n => !n.fehler).map(n => ({rolle: n.rolle, text: n.text}));
+    let gesendet = verlauf.filter(n => !n.fehler).map(n => ({rolle: n.rolle, text: n.text})).slice(-20);
+    if (gesendet.length && gesendet[0].rolle !== 'user') gesendet = gesendet.slice(1);
     if (aufgabe === 'frage') gesendet.push({rolle: 'user', text});
     verlauf.push({rolle: 'user', text, anzeige: text}); if (aufgabe === 'frage') $('#ck-frage').value = '';
     box.dataset.laeuft = '1'; zeigen();
     try {
-      const r = await api('claude/fragen', {vorgang_id: a.id, dokument_id: docId, verlauf: gesendet, aufgabe});
-      verlauf.push({rolle: 'assistant', text: r.text, kontext: r.kontext, brief: r.brieftext ? {betreff: r.betreff, brieftext: r.brieftext, hinweise: r.hinweise} : null});
+      const r = await api('claude/fragen', {vorgang_id: a.id, dokument_id: docId, verlauf: gesendet, aufgabe, gespraech, frage: text});
+      verlauf.push({rolle: 'assistant', text: r.text, kontext: r.kontext, id: r.id, brief: r.brieftext ? {betreff: r.betreff, brieftext: r.brieftext, hinweise: r.hinweise} : null});
       if (aufgabe !== 'frage') verlauf[verlauf.length - 2].text = text;  // im Verlauf für Folgefragen steht die eigentliche Aufgabe
     } catch (err) { verlauf.pop(); toast(err.message); }
     delete box.dataset.laeuft; if (document.body.contains(feld)) zeigen();
@@ -1227,7 +1265,7 @@ async function claudeDialog(docId, entryId) {
     if (k) fragen(k.dataset.ck);
     if (!n) return;
     const m = verlauf[+n.dataset.i];
-    if (n.dataset.ckn === 'zitate') { const ziel = feld.querySelector(`[data-zit="${n.dataset.i}"]`); await zitatePruefen(m.text, ziel, n); m.zitate = ziel.innerHTML; return; }
+    if (n.dataset.ckn === 'zitate') { const ziel = feld.querySelector(`[data-zit="${n.dataset.i}"]`); await zitatePruefen(m.text, ziel, n, m.id); m.zitate = ziel.innerHTML; return; }
     if (n.dataset.ckn === 'kopie') { try { await navigator.clipboard.writeText(m.text); toast('Kopiert.'); } catch (_) { toast('Kopieren nicht möglich.'); } }
     else if (n.dataset.ckn === 'notiz') {
       try { await api(`akte/${a.id}/eintraege`, {art: 'notiz', titel: ('Claude: ' + (verlauf[+n.dataset.i - 1]?.anzeige || 'Analyse') + (d ? ' – ' + d.titel : '')).slice(0, 190), text: m.text, bezug_id: e ? e.id : null, teile: e ? e.teile : []});

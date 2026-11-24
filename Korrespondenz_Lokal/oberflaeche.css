@@ -505,11 +505,11 @@ button.heute:hover{background:var(--surface-2,rgba(127,127,127,.18))}
 .cz-pvkopf{display:flex;align-items:center;gap:4px;font-size:12.5px;color:var(--muted)}.cz-pvkopf .sp{flex:1}
 .modal.brief .compose .pv{flex:1;max-height:none;min-height:0;overflow:auto;container-type:inline-size;padding:14px}
 .a4{--mm:calc(100cqw / 210 * var(--pvz,1));width:calc(210 * var(--mm));min-height:calc(297 * var(--mm));margin:0 auto;position:relative;background:#fff;color:#000;
-  box-shadow:0 2px 12px rgba(0,0,0,.18);font-family:Arial,"Helvetica Neue",Helvetica,sans-serif;font-size:calc(3.88 * var(--mm));line-height:1.35;
+  box-shadow:0 2px 12px rgba(0,0,0,.18);font-family:Arial,"Helvetica Neue",Helvetica,sans-serif;font-size:calc(3.70 * var(--mm));line-height:1.35;
   padding:calc(100 * var(--mm)) calc(20 * var(--mm)) calc(20 * var(--mm)) calc(25 * var(--mm));
   background-image:repeating-linear-gradient(to bottom,transparent 0,transparent calc(297 * var(--mm) - 1px),#c9cedb calc(297 * var(--mm) - 1px),#c9cedb calc(297 * var(--mm)))}
 .a4-kopf{position:absolute;top:calc(15 * var(--mm));right:calc(20 * var(--mm));text-align:right;font-size:calc(3.17 * var(--mm));line-height:1.4}
-.a4-kopf b{font-size:calc(3.88 * var(--mm))}
+.a4-kopf b{font-size:calc(3.70 * var(--mm))}
 .a4-rs{position:absolute;top:calc(49 * var(--mm));left:calc(25 * var(--mm));width:calc(85 * var(--mm));font-size:calc(2.47 * var(--mm));white-space:nowrap;overflow:hidden;text-overflow:ellipsis;border-bottom:1px solid #000}
 .a4-an{position:absolute;top:calc(55 * var(--mm));left:calc(25 * var(--mm));width:calc(85 * var(--mm));max-height:calc(35 * var(--mm));overflow:hidden;white-space:pre-line;line-height:1.25}
 .a4-info{position:absolute;top:calc(55 * var(--mm));left:calc(125 * var(--mm));width:calc(65 * var(--mm));font-size:calc(3.17 * var(--mm));line-height:1.5;display:grid;grid-template-columns:auto 1fr;gap:0 calc(4 * var(--mm))}
@@ -531,3 +531,5 @@ button.norm{font:inherit;color:var(--accent,#2f4bd0);background:none;border:0;pa
 .ck-zit{margin-top:8px}.zitpruef{border:1px solid var(--line);border-radius:8px;padding:8px 10px;font-size:13px;display:flex;flex-direction:column;gap:5px}
 .zp{display:flex;gap:8px;align-items:flex-start}.zp-sym{flex:none;width:20px;height:20px;border-radius:50%;display:grid;place-items:center;font-weight:700;color:#fff;font-size:12px}
 .zp.ok .zp-sym{background:#2f9e44}.zp.teil .zp-sym{background:#e8890c}.zp.falsch .zp-sym{background:#d6336c}.zitpruef p{margin:0}
+.ck-datum{align-self:center;font-size:11.5px;color:var(--muted);margin:4px 0 -4px}
+#m-kialt{flex:1 1 100%;order:4;font:inherit;font-size:13px;padding:5px 8px;border:1px solid var(--line);border-radius:7px;background:var(--surface);color:var(--fg)}
