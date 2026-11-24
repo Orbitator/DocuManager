@@ -536,3 +536,11 @@ button.norm{font:inherit;color:var(--accent,#2f4bd0);background:none;border:0;pa
 #m-kialt{flex:1 1 100%;order:4;font:inherit;font-size:13px;padding:5px 8px;border:1px solid var(--line);border-radius:7px;background:var(--surface);color:var(--fg)}
 .kiext{border:1px dashed var(--line-strong);border-radius:10px;padding:10px 12px;display:flex;flex-direction:column;gap:8px;background:var(--surface);font-size:13px}
 .kiext .cz-schmal{flex-basis:220px}
+
+/* Übersicht mit drei Spalten: Fristen | Posteingang & Warten | Dringend */
+.grid3{display:grid;grid-template-columns:minmax(0,1.3fr) minmax(0,1fr) minmax(0,1fr);gap:16px;align-items:start}
+@media (max-width:1200px){.grid3{grid-template-columns:minmax(0,1fr) minmax(0,1fr)}.grid3>.dringend-panel{grid-column:1/-1}}
+@media (max-width:800px){.grid3{grid-template-columns:minmax(0,1fr)}}
+.dringend-panel h2{display:flex;align-items:center;gap:6px;color:var(--crit)}
+.dringend-panel .mini li{gap:8px}.dringend-panel .pill{white-space:nowrap}
+.st-dringend{color:var(--crit)}

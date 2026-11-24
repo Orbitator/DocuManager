@@ -60,6 +60,7 @@ const ST_KEY = {'Offen':'offen','Recherchieren':'recherche','Schreiben verfassen
 const ST_PILL = {'Offen':'grey','Schreiben abgeschickt':'ok','Wartet auf Antwort':'warn','Erledigt':'ok'};
 let ST_ORDER = ['Offen','Recherchieren','Schreiben verfassen','Schreiben abgeschickt','Wartet auf Antwort','Erledigt'];
 const stLabel = s => ST_LABEL[s] || s;
+const dringend = s => (s || '').includes('!');  // Status mit Ausrufezeichen gilt als dringend (Übersicht, Hervorhebung)
 const zuletzt = c => [c.zuletzt || '', c.angelegt_am || ''].map(x => x.replace(' ', 'T')).sort().pop();  // letzte Aktivität
 const statusPill = s => `<span class="pill ${ST_PILL[s] || ''}">${esc(stLabel(s))}</span>`;
 const statusOptions = cur => ST_ORDER.map(s => `<option value="${esc(s)}" ${s === cur ? 'selected' : ''}>${esc(stLabel(s))}</option>`).join('');
@@ -257,14 +258,18 @@ function vHome() {
   const offen = D.fristen.filter(f => !f.erledigt_am);
   const ueber = offen.filter(f => tage(f.faellig_am) < 0), bald = offen.filter(f => tage(f.faellig_am) >= 0 && tage(f.faellig_am) <= 14);
   const wartet = D.cases.filter(c => c.status === 'Wartet auf Antwort' || c.status === 'Schreiben abgeschickt');
+  const eilig = D.cases.filter(c => dringend(c.status) && c.status !== 'Erledigt')
+    .sort((x, y) => ST_ORDER.indexOf(x.status) - ST_ORDER.indexOf(y.status) || zuletzt(y).localeCompare(zuletzt(x)));
   return `<h1>Übersicht</h1>
   <div class="kpis"><a class="kpi ${ueber.length ? 'crit' : ''}" href="#fristen"><b class="num">${ueber.length}</b><span>Überfällig</span></a>
    <a class="kpi ${bald.length ? 'warn' : ''}" href="#fristen"><b class="num">${bald.length}</b><span>Fällig in 14 Tagen</span></a>
    <a class="kpi" href="#posteingang"><b class="num">${D.inbox.length}</b><span>Im Posteingang</span></a>
+   <a class="kpi ${eilig.length ? 'crit' : ''}" href="#vorgaenge"><b class="num">${eilig.length}</b><span>Dringend</span></a>
    <a class="kpi" href="#vorgaenge"><b class="num">${aktiv().length}</b><span>Laufende Vorgänge</span></a></div>
-  <div class="grid2"><div class="panel"><h2>Fristen</h2>${fristList([...ueber, ...bald], false)}</div>
+  <div class="grid3"><div class="panel"><h2>Fristen</h2>${fristList([...ueber, ...bald], false)}</div>
    <div class="stack"><div class="panel"><h2>Posteingang</h2><ul class="mini" style="margin-top:8px">${D.inbox.slice(0, 6).map(p => `<li><span>${esc(p.titel)}</span><span class="muted num">${dt(p.angelegt_am)}</span></li>`).join('') || '<li class="muted">Alles einsortiert.</li>'}</ul>${D.inbox.length ? '<div style="margin-top:10px"><a class="btn sm" href="#posteingang">Einsortieren</a></div>' : ''}</div>
-   <div class="panel"><h2>Warten auf Antwort</h2><ul class="mini" style="margin-top:8px">${wartet.map(c => `<li><a href="#akte-${c.id}">${esc(c.titel)}</a><span class="muted">${esc(stLabel(c.status))}</span></li>`).join('') || '<li class="muted">Keine.</li>'}</ul></div></div></div>`;
+   <div class="panel"><h2>Warten auf Antwort</h2><ul class="mini" style="margin-top:8px">${wartet.map(c => `<li><a href="#akte-${c.id}">${esc(c.titel)}</a><span class="muted">${esc(stLabel(c.status))}</span></li>`).join('') || '<li class="muted">Keine.</li>'}</ul></div></div>
+   <div class="panel dringend-panel"><h2>${I('alert')} Dringend</h2><ul class="mini" style="margin-top:8px">${eilig.map(c => `<li><a href="#akte-${c.id}">${esc(c.titel)}</a><span class="pill crit">${esc(stLabel(c.status))}</span></li>`).join('') || '<li class="muted">Nichts Dringendes. Status mit „!“ am Ende, z. B. „Dringend klären!“, erscheinen hier.</li>'}</ul></div></div>`;
 }
 
 // ---------- Posteingang ----------
@@ -404,7 +409,7 @@ function vList() {
   const thead = `<thead><tr>${sortTh('V','titel','Vorgang')}${sortTh('V','prio','Priorität')}${sortTh('V','bereich','Bereich')}${sortTh('V','status','Status')}${sortTh('V','frist','Nächste Frist')}${sortTh('V','akt','Zuletzt')}<th><span class="sr">Aktionen</span></th></tr></thead>`;
   const row = c => `<tr data-act="open-v" data-id="${c.id}"><td><b>${esc(c.titel)}</b><div class="muted" style="font-size:12.5px">${c.dokumente} Dokument${c.dokumente === 1 ? '' : 'e'}${c.dokumente ? ' · ' : ''}${typBadges(c.typen)}${(c.empfaenger || []).length ? ` · an ${esc(c.empfaenger.join(', '))}` : ''}</div></td>
    <td>${prioPill(c.prioritaet)}</td><td>${esc((c.bereiche || [c.bereich]).join(', '))}</td>
-   <td><span class="st-${ST_KEY[c.status] || 'offen'}" style="display:flex;align-items:center;gap:6px;font-size:13px"><span class="dot"></span><span style="color:var(--fg)">${esc(stLabel(c.status))}</span></span></td>
+   <td><span class="st-${dringend(c.status) ? 'dringend' : ST_KEY[c.status] || 'offen'}" style="display:flex;align-items:center;gap:6px;font-size:13px"><span class="dot"></span><span style="color:var(--fg)">${esc(stLabel(c.status))}</span></span></td>
    <td class="num">${c.naechste_frist ? `<span style="color:${tage(c.naechste_frist) < 0 ? 'var(--crit)' : tage(c.naechste_frist) <= 7 ? 'var(--warn)' : 'inherit'}">${dt(c.naechste_frist)}</span>` : '–'}</td><td class="num" title="Angelegt am ${dt((c.angelegt_am || '').slice(0, 10))}">${dt(zuletzt(c).slice(0, 10))}</td>
    <td style="white-space:nowrap"><button class="iconbtn" data-act="v-edit" data-id="${c.id}" title="Vorgang bearbeiten" aria-label="${esc(c.titel)} bearbeiten">${I('draft')}</button><button class="iconbtn" data-act="v-del" data-id="${c.id}" title="Vorgang löschen" aria-label="${esc(c.titel)} löschen">${I('trash')}</button></td></tr>`;
   const tabelle = items => `<div class="tbl-wrap" style="margin-bottom:16px"><table>${thead}<tbody>${items.map(row).join('')}</tbody></table></div>`;
@@ -1097,7 +1102,7 @@ function vSettings() {
    <div class="panel stack"><div class="chron-h"><h2>Bereiche</h2><button class="btn sm" data-act="b-add">${I('plus')}Bereich</button></div>
     <ul class="mini">${D.groups.map(b => { const n = D.cases.filter(c => c.bereich === b).length; return `<li><span>${esc(b)} <span class="muted">· ${n} ${n === 1 ? 'Vorgang' : 'Vorgänge'}</span></span><span style="display:flex;gap:6px"><button class="iconbtn sm" data-act="b-hoch" data-b="${esc(b)}" title="Nach oben" aria-label="${esc(b)} nach oben">↑</button><button class="iconbtn sm" data-act="b-runter" data-b="${esc(b)}" title="Nach unten" aria-label="${esc(b)} nach unten">↓</button><button class="btn sm ghost" data-act="b-ren" data-b="${esc(b)}">Umbenennen</button>${n ? '' : `<button class="btn sm ghost" data-act="b-del" data-b="${esc(b)}">Entfernen</button>`}</span></li>`; }).join('')}</ul></div>
    <div class="panel stack"><div class="chron-h"><h2>Status</h2><button class="btn sm" data-act="st-neu">${I('plus')}Status</button></div>
-    <p style="margin:0" class="muted">Eigene Statusmitteilungen für Vorgänge und Teilvorgänge, z. B. „Klage eingereicht“ oder „Termin vereinbart“. Die Reihenfolge gilt für Auswahllisten, Sortierung und Gruppierung. Mit 🔒 markierte Werte nutzt die Anwendung selbst (Brief, Versand, Archiv); sie lassen sich nur verschieben.</p>
+    <p style="margin:0" class="muted">Eigene Statusmitteilungen für Vorgänge und Teilvorgänge, z. B. „Klage eingereicht“ oder „Termin vereinbart“. Die Reihenfolge gilt für Auswahllisten, Sortierung und Gruppierung. Ein „!“ im Namen (z. B. „Dringend klären!“) kennzeichnet den Status als dringend: Solche Vorgänge stehen in der Übersicht in der Spalte „Dringend“. Mit 🔒 markierte Werte nutzt die Anwendung selbst (Brief, Versand, Archiv); sie lassen sich nur verschieben.</p>
     <ul class="mini">${ST_ORDER.map(s => { const n = D.cases.filter(c => c.status === s).length, fest = ['Offen', 'Schreiben verfassen', 'Schreiben abgeschickt', 'Erledigt'].includes(s);
       return `<li><span>${fest ? '🔒 ' : ''}${esc(stLabel(s))} <span class="muted">· ${n} ${n === 1 ? 'Vorgang' : 'Vorgänge'}</span></span><span style="display:flex;gap:6px"><button class="iconbtn sm" data-act="st-hoch" data-s="${esc(s)}" title="Nach oben" aria-label="${esc(s)} nach oben">↑</button><button class="iconbtn sm" data-act="st-runter" data-s="${esc(s)}" title="Nach unten" aria-label="${esc(s)} nach unten">↓</button>${fest ? '' : `<button class="btn sm ghost" data-act="st-ren" data-s="${esc(s)}">Umbenennen</button>${n ? '' : `<button class="btn sm ghost" data-act="st-del" data-s="${esc(s)}">Entfernen</button>`}`}</span></li>`; }).join('')}</ul></div>
    <div class="panel stack"><div class="chron-h"><h2>Eintragsarten</h2><button class="btn sm" data-act="art-neu">${I('plus')}Art</button></div>

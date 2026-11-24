@@ -186,6 +186,8 @@ Teil 2 (umgesetzt, Schemaversion 7):
   KI) einfügen oder ein Dokument des Vorgangs wählen; gespeichert als Chronik-Eintrag mit Typ `Einschätzung (extern)`
   und für Claude als „EINSCHÄTZUNG VON DRITTER SEITE“ gekennzeichnet, mit der Anweisung, sie zu prüfen und Abweichungen
   zu begründen.
+- 0.21.1: Status mit „!“ im Namen (z. B. „Dringend klären!“) gelten als dringend: eigene dritte Spalte „Dringend“ und
+  Kennzahl in der Übersicht, rote Hervorhebung in der Vorgangsliste. Reihenfolge nach Statusliste, dann letzter Aktivität.
 - 0.16: Scannen ohne Dialog. „Scannen“ scannt sofort mit dem zuletzt benutzten Scanner (`Daten/scanner.json`):
   Einzug wenn vorhanden, sonst Glas; beidseitig, wenn möglich; 300 dpi Farbe. Die Seiten werden mit PDFKit zu einem
   komprimierten PDF zusammengefügt (leere Rückseiten fallen weg) und landen im Posteingang bzw. Archiv. Nur ein kleines
