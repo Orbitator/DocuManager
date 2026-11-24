@@ -141,7 +141,11 @@ Erst wenn Schritt 2 bis 4 funktionieren. Die bisherige Anwendung vorher beenden.
 2. Falls nicht: Unten links **„Digitale Bilder“ öffnen**, dort links den Scanner wählen und bei „Scannen nach“ den
    Ordner **DocuManager Scans** (in Ihrem Benutzerordner) einstellen. Scannen. Erwartet: Nach wenigen Sekunden erscheint der Scan
    im Posteingang. Den Ordner öffnet auch **Dokument importieren → Scan-Ordner öffnen**.
-3. Bitte mitteilen, ob Ihr Scanner in Schritt 1 erscheint, und den Inhalt von `Daten/Logs/scanner.log`.
+3. Im Scan-Dialog **Scan** drücken. Erwartet: keine Meldung „not writable“; nach „Scans übernehmen“ erscheint der
+   Scan im Posteingang.
+4. **„Digitale Bilder“ öffnen**: Das Scanfenster schließt sich, „Digitale Bilder“ kann den Scanner benutzen, DocuManager
+   zeigt die Anleitung zum Ordner „DocuManager Scans“.
+5. Bei Problemen den Inhalt von `~/DocuManager/Daten/Logs/scanner.log` schicken.
 
 ## 11. Automatische Drehung
 

@@ -1429,6 +1429,12 @@ async function scan(insArchiv) {
     const job = await api(insArchiv ? 'archiv/scan' : 'posteingang/scan', {});
     toast('Scannen Sie im macOS-Dialog und wählen Sie dort „Scans übernehmen“.');
     let r; do { await new Promise(res => setTimeout(res, 1200)); r = await api(`scans/${job.id}/poll`, {}); } while (r.state === 'open');
+    if (r.state === 'digitale-bilder') {
+      modal('Scannen mit „Digitale Bilder“', `<ol style="margin:0;padding-left:20px;line-height:1.6"><li>In „Digitale Bilder“ links den Scanner wählen.</li>
+        <li>Unten bei <b>„Scannen nach“</b> auf <b>„Andere …“</b> gehen und den Ordner <b>„DocuManager Scans“</b> in Ihrem Benutzerordner wählen (einmalig, wird gemerkt).</li>
+        <li>Scannen. Die Scans erscheinen nach wenigen Sekunden von selbst im Posteingang.</li></ol>`, null, '');
+      return;
+    }
     toast(r.state === 'done' ? `${r.imported} Scan(s) ${insArchiv ? 'im Archiv abgelegt' : 'im Posteingang'}${r.errors.length ? ' · ' + r.errors.join(' · ') : ''}` : 'Scan abgebrochen.');
     if (!insArchiv) location.hash = 'posteingang'; await render();
   } catch (e) { toast(e.message); }

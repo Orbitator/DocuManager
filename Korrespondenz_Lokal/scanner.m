@@ -105,9 +105,15 @@
 }
 
 - (void)openImageCapture:(id)sender {
+    // Scanner freigeben und dieses Fenster schließen, sonst meldet „Digitale Bilder“: „wird von einem anderen
+    // Programm verwendet“. DocuManager zeigt danach die Anleitung für „Digitale Bilder“.
+    self.scanner.scannerDevice = nil;
+    [self.browser stop];
+    [[NSData data] writeToURL:[self.directory URLByAppendingPathComponent:@"digitale-bilder"] atomically:YES];
     NSURL *app = [NSWorkspace.sharedWorkspace URLForApplicationWithBundleIdentifier:@"com.apple.Image_Capture"];
     if (app) [NSWorkspace.sharedWorkspace openApplicationAtURL:app configuration:[NSWorkspaceOpenConfiguration configuration]
                                              completionHandler:nil];
+    [NSApp performSelector:@selector(terminate:) withObject:nil afterDelay:0.8];
     if (self.hotFolder.length) {
         [[NSFileManager defaultManager] createDirectoryAtPath:self.hotFolder withIntermediateDirectories:YES attributes:nil error:nil];
         self.status.stringValue = [NSString stringWithFormat:@"In „Digitale Bilder“ links den Scanner wählen und bei „Scannen nach“ "

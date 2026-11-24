@@ -118,6 +118,10 @@ Teil 2 (umgesetzt, Schemaversion 7):
   `dokument`; `migrate_9` baut die Tabelle ohne sie neu (Zugehörigkeit regelt `dokument_vorgang`). Der Scan-Ordner
   liegt jetzt unter `~/DocuManager Scans` (nicht in „Dokumente“, das macOS für Programme gesondert schützt).
   Fehlermeldungen beim Speichern nennen die Ursache.
+- 0.15.3: Scannen repariert. Der Scan-Dialog schrieb in einen versteckten Programmordner mit Rechten 0700; der
+  Scan-Dienst von macOS meldete „The selected folder is not writable“. Zwischenablage jetzt `~/Pictures/DocuManager
+  Scans/Scan-…` (0755), danach Übernahme und Aufräumen wie bisher. „Digitale Bilder öffnen“ gibt den Scanner frei und
+  schließt das Scanfenster (sonst „wird von einem anderen Programm verwendet“); DocuManager zeigt die Anleitung.
 - 0.15.2: Posteingang-Kacheln zeigen das Dokumentdatum (aus dem Text, sonst Erstellungsdatum der Datei; Quelle als
   Hinweis beim Darüberfahren). Nur ohne beides erscheint „importiert …“.
 - 0.15.1: Posteingang-Details mit Auswahl **Empfänger** in der Zeile von Dokumentdatum und Absender (zulässige

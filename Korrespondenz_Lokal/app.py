@@ -36,7 +36,7 @@ from mail_import import MailImport, migrate_5, test_mail
 
 ROOT = Path(__file__).resolve().parent
 PORT = 8765
-APP_VERSION = "DocuManager 0.15.2 · Dokumentdatum auf den Kacheln"
+APP_VERSION = "DocuManager 0.15.3 · Scannen: beschreibbarer Ordner, Digitale Bilder"
 MAX_UPLOAD = 25 * 1024 * 1024
 MIN_MACOS = "14.0"
 SCHEMA_VERSION = 13
@@ -45,6 +45,9 @@ OCR_WAITING = "Wartet auf Texterkennung"
 # Bewusst nicht unter „Dokumente“: Diesen Ordner schützt macOS, ein über Launchpad gestartetes Programm bräuchte
 # dafür eine eigene Erlaubnis.
 SCAN_ORDNER = Path.home() / "DocuManager Scans"
+# Zwischenablage des Scan-Dialogs. Der Scan-Dienst von macOS schreibt nur in übliche Benutzerordner (z. B. Bilder),
+# nicht in versteckte Programmordner – sonst meldet der Dialog „The selected folder is not writable“.
+SCAN_ZWISCHEN = Path.home() / "Pictures" / "DocuManager Scans"
 OCR_RUNNING = "Texterkennung läuft"
 log = logging.getLogger("korrespondenz")
 # Die ersten drei Werte und die Vorgabe „Schreiben verfassen“ stammen aus dem bisherigen Stand und bleiben gleich.
@@ -776,9 +779,14 @@ class Scanner:
         binary = build_scanner()
         if not binary:
             raise ValueError("Der macOS-Scandialog konnte nicht gestartet werden.")
-        inbox = self.store.data / "Scan_Eingang"
-        inbox.mkdir(exist_ok=True)
+        try:
+            inbox = SCAN_ZWISCHEN
+            inbox.mkdir(parents=True, exist_ok=True)
+        except OSError:
+            inbox = self.store.data / "Scan_Eingang"
+            inbox.mkdir(exist_ok=True)
         folder = Path(tempfile.mkdtemp(prefix="Scan-", dir=inbox))
+        folder.chmod(0o755)  # mkdtemp legt 0700 an; der Scan-Dienst läuft als eigener Prozess
         logs = self.store.data / "Logs"
         logs.mkdir(parents=True, exist_ok=True)
         output = open(logs / "scanner.log", "ab")  # Ausgabe des Scandialogs für die Fehlersuche
@@ -809,7 +817,8 @@ class Scanner:
         folder = job["folder"]
         manifest = folder / "scan-result.json"
         if not manifest.is_file():
-            job["result"] = {"state": "cancelled" if code == 0 else "error", "imported": 0}
+            weiter = (folder / "digitale-bilder").is_file()  # Nutzer wechselt zu „Digitale Bilder“
+            job["result"] = {"state": "digitale-bilder" if weiter else "cancelled" if code == 0 else "error", "imported": 0}
             if code == 0:
                 shutil.rmtree(folder)
             return job["result"]
@@ -839,7 +848,7 @@ class Scanner:
             errors.append("Die Scanliste konnte nicht gelesen werden.")
         if errors:
             log.warning("Scanimport mit Fehlern: %s", " | ".join(errors))
-            errors.append("Die Scan-Dateien liegen weiterhin im lokalen Ordner Daten/Scan_Eingang/" + folder.name + ".")
+            errors.append("Die Scan-Dateien liegen weiterhin im Ordner " + str(folder).replace(str(Path.home()), "~") + ".")
         else:
             shutil.rmtree(folder)
         job["result"] = {"state": "done", "imported": imported, "duplicates": duplicates, "errors": errors}
