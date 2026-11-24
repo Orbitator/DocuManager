@@ -25,7 +25,7 @@ Die bisherigen Schnittstellen (`/api/cases`, Dokumente, Scan, Chat) bleiben unve
 | GET `/api/documents/{id}/vorschaubild` | JPEG der ersten Seite, aufrecht gedreht (404, wenn keins erzeugt werden kann) |
 | GET `/api/scanordner` | Pfad des überwachten Scan-Ordners und letzte Übernahme; POST `/api/scanordner/oeffnen` öffnet ihn im Finder |
 | GET `/api/documents/{id}/pages` | Erkannter Text je Seite mit `methode` und `drehung` (0, 90, 180, 270) |
-| GET `/api/eintraege/{id}/brief` | Brief eines Entwurfs als druckfertige Seite nach DIN 5008 |
+| GET `/api/eintraege/{id}/brief` | Brief eines Entwurfs als druckfertige Seite nach DIN 5008; `?drucken=1` öffnet den Druckdialog |
 | GET `/api/akte/{id}/export?docs=alle\|1,2` | Akte als ZIP: Chronik.pdf, akte.json, ausgewählte Originale |
 | GET `/api/chatnotizen` | Alle Chat-Notizen mit Vorgang, Quelle und Prüfstatus |
 | GET `/api/sicherungen` | Vorhandene Datensicherungen; `/api/sicherungen/{name}` lädt eine herunter |
@@ -45,6 +45,9 @@ Die bisherigen Schnittstellen (`/api/cases`, Dokumente, Scan, Chat) bleiben unve
 | POST `/api/referenzen/{id}/entfernen` | – |
 | POST `/api/akte/{id}/eintraege` | `art` (eingang, ausgang, entwurf, nachweis, telefonat, notiz, entscheidung, chat, fehlt), `titel`, `datum`, optional `teile`, `richtung` (von, an, mit), `kontakt_id`, `dokument_id`, `bezug_id`, `text`, `quelle`, `geprueft` |
 | POST `/api/eintraege/{id}` | `titel`, `datum`, `text`, `kontakt_id`, `geprueft`, `teile`, `auch_in_vorgang` |
+| GET `/api/claude` | Ob Claude eingerichtet ist (`eingerichtet`, `endung` des Schlüssels) |
+| POST `/api/claude/schluessel` | `schluessel` (leer = entfernen); Ablage in `Daten/claude_schluessel` |
+| POST `/api/claude/fragen` | `vorgang_id`, `dokument_id` (optional), `verlauf` [{`rolle`: user/assistant, `text`}], `aufgabe` (frage, zusammenfassen, fristen, pruefen, antwort) → `text`; bei `antwort` zusätzlich `betreff`, `brieftext`, `hinweise` |
 | POST `/api/eintraege/{id}/versand` | `art` (Post, Einschreiben, E-Mail, Fax, Persönlich, Online-Portal), `datum`, `sendungsnummer`, `anschrift_id` oder `empfaenger`, `nachweis_dokument_id` |
 | POST `/api/akte/{id}/fristen` | `art` (frist, wiedervorlage, aufgabe), `titel`, `faellig_am`, optional `teilvorgang_id`, `zustaendig`, `quelle_dokument_id`, `quelle_seite`, `quelle_zitat`. Eine verbindliche Frist braucht eine Fundstelle oder ein Zitat. |
 | POST `/api/fristen/{id}` | `faellig_am` (mit `grund`, wird im Verlauf festgehalten), `zustaendig`, `titel`, `erledigt` |

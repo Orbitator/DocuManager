@@ -122,6 +122,15 @@ Teil 2 (umgesetzt, Schemaversion 7):
   sofort einen Chronik-Eintrag „Eingang“ (`direkt_eintrag`, Kennzeichen `quelle = DIREKT_ABGELEGT`); nach der
   Texterkennung werden Titel, Datum und bekannter Absender nachgetragen (`direkt_nachtragen`), solange der Eintrag nicht
   von Hand bearbeitet wurde. `migrate_14` legt die fehlenden Einträge für bereits abgelegte Dokumente an.
+- 0.17.0: **Claude-Analyse** (`claude_ki.py`). Schaltfläche „Claude“ in der Dokumentvorschau und im Chronik-Kopf öffnet
+  einen Dialog mit Zusammenfassen, Fristen & Pflichten, Prüfen & Einschätzen, Antwort entwerfen und freien Fragen
+  (Folgefragen behalten den Verlauf). Grundlage: Text des gewählten Dokuments, gekürzte Texte der übrigen Dokumente,
+  Chronik, Beteiligte, Referenzen, offene Fristen und Eigene Angaben. Der Antwortentwurf kommt als strukturierte
+  Antwort (Betreff, Brieftext, Hinweise) und lässt sich mit „Als Brief übernehmen“ in den Briefdialog übernehmen;
+  jede Antwort kann als Notiz in die Chronik. Der Briefdialog bietet „Nach dem Speichern drucken“ (Druckdialog öffnet
+  sich selbst, `?drucken=1`) und „Als versendet in der Chronik erfassen“ (Versandart, Datum → Eintrag „Versendet“,
+  Status „Schreiben abgeschickt“). Zugangsschlüssel unter Einstellungen → Claude, gespeichert in
+  `Daten/claude_schluessel` (nur für den Benutzer lesbar, nicht in der Datensicherung). Netzaufrufe nur auf Anfrage.
 - 0.16: Scannen ohne Dialog. „Scannen“ scannt sofort mit dem zuletzt benutzten Scanner (`Daten/scanner.json`):
   Einzug wenn vorhanden, sonst Glas; beidseitig, wenn möglich; 300 dpi Farbe. Die Seiten werden mit PDFKit zu einem
   komprimierten PDF zusammengefügt (leere Rückseiten fallen weg) und landen im Posteingang bzw. Archiv. Nur ein kleines

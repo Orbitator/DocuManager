@@ -153,7 +153,7 @@ def akte_zip(store, akte, a, dokument_ids):
 
 
 # --- Briefansicht nach DIN 5008 ------------------------------------------------------------
-def brief_html(e, eigene):
+def brief_html(e, eigene, drucken=False):
     b = e.get("brief") or {}
     absender = [z for z in (eigene or "").splitlines() if z.strip()]
     esc = lambda s: html.escape(s or "")
@@ -184,7 +184,7 @@ body{{margin:0;background:#eceef3;font-family:-apple-system,"Helvetica Neue",Ari
 <div class="info">{''.join(f'<span>{k}</span><span>{esc(v)}</span>' for k, v in info if v)}</div>
 <div class="inhalt"><p class="betreff">{esc(b.get('betreff') or e.get('titel'))}</p>{absaetze}
 {('<p style="margin-top:8mm"><b>Anlagen</b><br>' + '<br>'.join(esc(a) for a in anlagen) + '</p>') if anlagen else ''}</div>
-</div></body></html>"""
+</div>{'<script>addEventListener("load",()=>setTimeout(print,400))</script>' if drucken else ''}</body></html>"""
 
 
 # --- Datensicherung ------------------------------------------------------------------------

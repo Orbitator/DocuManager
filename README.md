@@ -18,6 +18,7 @@ Die Anwendung läuft auf dem Mac, wird im Browser bedient und braucht keinen Clo
 | Teilvorgänge, Chronik, Fristen mit Fundstelle und Verlauf, Kontakte mit Anschriftenverlauf, Versand, Referenzen, Bereiche, Schlagwörter, Papierkorb, Volltextsuche | Datenmodell und Schnittstellen ([docs/API.md](docs/API.md)) |
 | Neue Oberfläche: Posteingang mit Absendererkennung, Vorgänge, Akte, Fristen, Archiv (nur Abgeschlossenes), Adressbuch, Chat-Notizen, Papierkorb | Etappe 3; bisherige Oberfläche unter `/alt` |
 | Briefe mit Vorlagen und Druck, Fundstellen aus dem Text übernehmen, Abschlussprüfung, Aktenexport (ZIP mit Chronik.pdf), Datensicherung mit Prüfung | Etappe 3, Teil 2 |
+| Schreiben mit Claude analysieren, Antwort entwerfen lassen, Brief drucken und als versendet in der Chronik erfassen (eigener Anthropic-Zugangsschlüssel) | neu in 0.17 |
 
 Der Fahrplan steht in [docs/ETAPPEN.md](docs/ETAPPEN.md). Die Übergabe aus der ChatGPT-Entwicklung liegt in
 [docs/Uebergabe_ChatGPT](docs/Uebergabe_ChatGPT).

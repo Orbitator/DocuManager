@@ -18,6 +18,7 @@ const MON = ['Januar','Februar','März','April','Mai','Juni','Juli','August','Se
 let snap = {};  // Eingaben eines Dialogs, festgehalten beim Speichern (der Dialog schließt vor dem Senden)
 const val = id => document.getElementById(id)?.value ?? snap[id] ?? '';
 const P = {
+  ki: '<path d="M12 3l1.8 4.7L18.5 9.5l-4.7 1.8L12 16l-1.8-4.7L5.5 9.5l4.7-1.8z"/><path d="M18 15l.8 2.2L21 18l-2.2.8L18 21l-.8-2.2L15 18l2.2-.8z"/>',
   home:'<path d="M3 11l9-7 9 7v9a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z"/>',
   inbox:'<path d="M3 13l3-8h12l3 8v6a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1z"/><path d="M3 13h5l1 3h6l1-3h5"/>',
   folder:'<path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>',
@@ -131,7 +132,7 @@ async function render() {
     if (S.view === 'fristen' || S.view === 'uebersicht') D.fristen = (await api('fristen')).fristen;
     if (S.view === 'archiv') D.archiv = (await api('archiv')).dokumente;
     if (['adressbuch', 'akte', 'posteingang', 'archiv'].includes(S.view)) D.kontakte = (await api('kontakte')).kontakte;
-    if (S.view === 'einstellungen') { D.eigene = (await api('einstellungen')).eigene_angaben; D.mail = await api('mail'); D.sicherungen = (await api('sicherungen')).sicherungen; D.scanordner = await api('scanordner'); }
+    if (S.view === 'einstellungen') { D.eigene = (await api('einstellungen')).eigene_angaben; D.mail = await api('mail'); D.sicherungen = (await api('sicherungen')).sicherungen; D.scanordner = await api('scanordner'); D.claude = await api('claude'); }
     if (S.view === 'chat') { D.chats = (await api('chatnotizen')).notizen; D.threads = (await api('chat/threads')).threads || []; }
   } catch (e) {
     if (token !== renderToken) return;
@@ -499,7 +500,7 @@ function chronik() {
       <div class="row2"><span>${k[0]}${wer}</span>${badges.join('')}</div>${chips || acts ? `<div class="row3">${chips}${acts}</div>` : ''}</div></li>`;
   }).join('');
   const types = [['alle','Alle Typen'],['eingang','Eingang'],['ausgang','Versendet'],['entwurf','Entwürfe'],['gespraech','Telefonate & Notizen'],['chat','Chat-Notizen'], ...[...new Set([...(D.arten || []), ...D.akte.eintraege.map(e => e.typ).filter(Boolean)])].map(t => ['typ:' + t, t])];
-  return `<div class="stack" style="gap:6px"><div class="chron-h"><h2>Chronik</h2><span style="display:flex;gap:6px"><button class="btn out sm" data-act="compose">${I('draft')}Brief</button><button class="btn out sm" data-act="entry-add">${I('plus')}Eintrag</button><button class="btn out sm" data-act="ref-add">${I('plus')}Referenz</button></span></div>
+  return `<div class="stack" style="gap:6px"><div class="chron-h"><h2>Chronik</h2><span style="display:flex;gap:6px"><button class="btn out sm" data-act="claude" title="Den ganzen Vorgang mit Claude besprechen">${I('ki')}Claude</button><button class="btn out sm" data-act="compose">${I('draft')}Brief</button><button class="btn out sm" data-act="entry-add">${I('plus')}Eintrag</button><button class="btn out sm" data-act="ref-add">${I('plus')}Referenz</button></span></div>
    ${filterBlock([[{lbl: 'Typ', act: 'ktype', aktiv: S.ktype, opt: types}]], '', true)}
    <ul class="chron">${rows || '<li class="muted" style="padding:10px 0">Noch keine Einträge. Dokumente aus dem Posteingang zuordnen oder einen Eintrag anlegen.</li>'}</ul></div>`;
 }
@@ -529,6 +530,7 @@ function preview() {
     ${mail ? '<span class="muted" style="font-size:13px">E-Mail</span>' : `<span class="seg" role="group" aria-label="Ansicht"><button class="${modus === 'original' ? 'on' : ''}" data-act="pv-mode" data-id="original">Original</button><button class="${modus === 'text' ? 'on' : ''}" data-act="pv-mode" data-id="text">Text</button></span>`}
     <span class="pvname" title="${esc(d.dateiname || '')}">${esc(d.dateiname || '')}${d.gedreht ? ` <span class="pill grey" title="Automatisch aufrecht gedreht. Das Original bleibt unverändert.">gedreht</span>` : ''}</span>
     <span class="sp"></span>
+    <button class="btn sm" data-act="claude" data-doc="${d.id}" data-entry="${e.id}" title="Schreiben mit Claude analysieren oder eine Antwort entwerfen lassen">${I('ki')}Claude</button>
     <button class="iconbtn ${S.pvInfo ? 'on' : ''}" data-act="pv-info" title="Dokumentdetails" aria-label="Dokumentdetails" aria-pressed="${!!S.pvInfo}">${I('info')}</button>
     ${mail ? '' : `<button class="iconbtn" data-act="ocr-retry" data-doc="${d.id}" title="Text neu erkennen" aria-label="Text neu erkennen">${I('refresh')}</button>`}
     ${mail ? '' : `<button class="iconbtn" data-act="drehen" data-grad="-90" data-doc="${d.id}" title="90° nach links drehen" aria-label="90 Grad nach links drehen">${I('rotl')}</button><button class="iconbtn" data-act="drehen" data-grad="90" data-doc="${d.id}" title="90° nach rechts drehen" aria-label="90 Grad nach rechts drehen">${I('rotr')}</button>`}
@@ -614,7 +616,7 @@ const VORLAGEN = {
   leer: ['Freies Schreiben', '', '{anrede}\n\n\n\nMit freundlichen Grüßen\n{name}']};
 const anredeFuer = person => { const m = (person || '').match(/^(Frau|Herr)\s+(?:Dr\.\s+)?(?:[A-ZÄÖÜ]\.\s+)?(.+)$/); return m ? `Sehr geehrte${m[1] === 'Herr' ? 'r' : ''} ${m[1]} ${m[2]},` : 'Sehr geehrte Damen und Herren,'; };
 const flachText = t => String(t || '').toLowerCase().replace(/[\s\-_.–/]+/g, '');
-async function compose(bezugId, editId) {
+async function compose(bezugId, editId, vorschlag) {
   const a = D.akte; if (D.eigene === undefined || D.eigene === '') D.eigene = (await api('einstellungen')).eigene_angaben;
   const edit = editId ? a.eintraege.find(e => e.id === editId) : null, bezug = bezugId ? a.eintraege.find(e => e.id === bezugId) : (edit && edit.bezug_id ? a.eintraege.find(e => e.id === edit.bezug_id) : null);
   if (!D.kontakte.length) D.kontakte = (await api('kontakte')).kontakte;
@@ -651,6 +653,10 @@ async function compose(bezugId, editId) {
     <label>Betreff<input id="m-subj" value="${esc(b.betreff || '')}"></label>
     <label>Brieftext<textarea id="m-body">${esc(edit ? edit.text || '' : '')}</textarea></label>
     ${anl.length ? `<label>Anlagen</label><div class="stack" style="gap:4px">${anl.map(e => `<label class="chk"><input type="checkbox" class="m-att" value="${esc(e.titel)}" ${(b.anlagen || []).includes(e.titel) ? 'checked' : ''}>${esc(e.titel)} vom ${dt(e.ereignis_datum)}</label>`).join('')}</div>` : ''}
+    ${vorschlag && vorschlag.hinweise ? `<p class="notecard" style="margin:0;font-size:13px">${I('ki')} <b>Hinweise von Claude:</b> ${esc(vorschlag.hinweise)}</p>` : ''}
+    ${edit && edit.versendet_als ? '' : `<div class="stack" style="gap:4px"><label class="chk"><input type="checkbox" id="m-print">Nach dem Speichern drucken</label>
+     <label class="chk"><input type="checkbox" id="m-sent">Als versendet in der Chronik erfassen</label>
+     <span id="m-sentopt" class="two" hidden><label>Versandart<select id="m-sva">${VERSAND.map(v => `<option>${v}</option>`).join('')}</select></label><label>Versanddatum<input id="m-svd" type="date" value="${isoHeute()}"></label></span></div>`}
     <p class="muted" style="margin:0;font-size:12.5px">Ihr Absender kommt aus Einstellungen → Eigene Angaben. Platzhalter in eckigen Klammern bitte ersetzen.</p></div>
    <div class="pv" id="m-pv" aria-label="Vorschau"></div></div>`, async () => {
     const body = $('#m-body') ? $('#m-body').value : val('m-body');
@@ -659,15 +665,25 @@ async function compose(bezugId, editId) {
     const brief = {empfaenger: val('m-emp'), betreff: val('m-subj'), zeichen: val('m-zeichen'), datum: val('m-bdat'), bezug_datum: bezug ? dt(bezug.ereignis_datum) : null,
       anlagen: [...document.querySelectorAll('.m-att:checked')].map(x => x.value)};
     const titel = val('m-subj') || 'Brief';
+    const drucken = $('#m-print')?.checked, versand = $('#m-sent')?.checked ? {art: val('m-sva'), datum: val('m-svd'), empfaenger: brief.empfaenger} : null;
+    if (versand && !versand.empfaenger.trim()) { toast('Für den Versand bitte den Empfänger eintragen.'); $('#m-emp').focus(); return false; }
+    const fenster = drucken ? window.open('about:blank', '_blank') : null;  // jetzt öffnen, sonst blockiert der Browser das Fenster
     closeModal();
+    let entwurfId = edit ? edit.id : null;
+    const nachher = async () => {
+      if (fenster) fenster.location.href = `/api/eintraege/${entwurfId}/brief?drucken=1`;
+      if (versand) { const r = await api(`eintraege/${entwurfId}/versand`, versand); S.entry = r.id; }
+    };
     await act(async () => {
-      if (edit) { await api('eintraege/' + edit.id, {titel, text: body, brief}); return; }
+      if (edit) { await api('eintraege/' + edit.id, {titel, text: body, brief}); await nachher(); return; }
       const teile = bezug ? bezug.teile : (S.teil !== 'all' ? [S.teil] : []);
       const r = await api(`akte/${a.id}/eintraege`, {art: 'entwurf', titel, text: body, brief, kontakt_id: kId || null, richtung: kId ? 'an' : null, bezug_id: bezug ? bezug.id : null, teile});
-      S.entry = r.id;
+      S.entry = entwurfId = r.id;
       if (teile.length) for (const t of teile) { const tv = a.teilvorgaenge.find(x => x.id === t); if (tv && tv.status !== 'Erledigt') await api('teilvorgaenge/' + t, {status: 'Schreiben verfassen'}); }
       else if (a.status !== 'Erledigt') await api('akte/' + a.id, {status: 'Schreiben verfassen'});
-    }, edit ? 'Brief gespeichert.' : 'Entwurf angelegt. Status: Verfassen.');
+      await nachher();
+    }, versand ? 'Brief gespeichert und als versendet erfasst. Status: Schreiben abgeschickt.' : edit ? 'Brief gespeichert.' : 'Entwurf angelegt. Status: Verfassen.');
+    if (fenster && !entwurfId) fenster.close();
     return false;
   }, edit ? 'Speichern' : 'Entwurf anlegen', 'wide');
   const absender = (D.eigene || '').split('\n').filter(Boolean);
@@ -691,8 +707,9 @@ async function compose(bezugId, editId) {
     else if (ev.target.id === 'm-to') { const z = ziele.find(x => x.k === ev.target.value); $('#m-emp').value = z ? z.text : ''; if (!$('#m-body').dataset.touched && $('#m-tpl')) vorlage(); else upd(); }
     else { if (ev.target.id === 'm-body') ev.target.dataset.touched = '1'; upd(); }
   });
-  box.addEventListener('change', ev => { if (ev.target.classList.contains('m-att')) upd(); });
+  box.addEventListener('change', ev => { if (ev.target.classList.contains('m-att')) upd(); if (ev.target.id === 'm-sent') $('#m-sentopt').hidden = !ev.target.checked; });
   if (edit) upd(); else vorlage();
+  if (vorschlag) { if (vorschlag.betreff) $('#m-subj').value = vorschlag.betreff; $('#m-body').value = vorschlag.brieftext || ''; $('#m-body').dataset.touched = '1'; upd(); }
 }
 
 // ---------- Abschluss, Export, Chat-Notizen, Sicherung ----------
@@ -955,6 +972,10 @@ function vSettings() {
     <p class="muted" style="margin:0;font-size:12.5px">Benutzung: Chat in ChatGPT im Browser öffnen (nicht in der ChatGPT-App), Lesezeichen anklicken, im DocuManager-Fenster Vorgang und Dateien wählen. Klappt das Ziehen nicht: „Adresse kopieren“, ein beliebiges Lesezeichen anlegen und dessen Adresse durch die kopierte ersetzen.</p></div>
    <div class="panel stack"><h2>Zulässige Empfänger</h2><p style="margin:0">Für wen Post ankommt, z. B. Ihre Firma und Sie persönlich, ein Name pro Zeile. Die Erkennung ordnet jedes Schreiben dem Empfänger zu, der im Anschriftenfeld steht; im Archiv lässt sich danach gruppieren.</p>
     <textarea id="empflist" class="inp" rows="3" placeholder="Orbit Cross media e.K.&#10;Sven Muster">${esc((D.empfaenger || []).join('\n'))}</textarea><div><button class="btn" data-act="empf-save">Speichern</button></div></div>
+   <div class="panel stack"><h2>Claude (KI-Analyse)</h2><p style="margin:0">Mit einem eigenen Zugangsschlüssel von Anthropic analysiert Claude Schreiben und entwirft Antworten – direkt im Vorgang über die Schaltfläche „Claude“. Den Schlüssel erstellen Sie unter <b>console.anthropic.com</b> → API Keys (Guthaben nötig; eine Analyse kostet meist wenige Cent).</p>
+    ${D.claude && D.claude.eingerichtet ? `<p style="margin:0">${I('check')} Eingerichtet · Schlüssel endet auf <code>…${esc(D.claude.endung)}</code></p><div style="display:flex;gap:8px"><button class="btn" data-act="claude-key">Schlüssel ändern</button><button class="btn ghost" data-act="claude-key-del">Entfernen</button></div>`
+      : `<div style="display:flex;gap:8px;flex-wrap:wrap"><input id="claudekey" class="inp" type="password" autocomplete="off" placeholder="sk-ant-…" style="flex:1;min-width:240px"><button class="btn" data-act="claude-key-save">Speichern</button></div>`}
+    <p class="muted" style="margin:0;font-size:12.5px">Übertragen wird nur, wenn Sie Claude fragen: der Text des gewählten Dokuments, gekürzte Texte der übrigen Dokumente und die Chronik des Vorgangs. Der Schlüssel liegt nur auf diesem Mac in <code>Daten/claude_schluessel</code> und ist nicht Teil der Datensicherung.</p></div>
    <div class="panel stack"><h2>Eigene Angaben</h2><p style="margin:0">Ihr Name und Ihre Anschrift, eine Angabe pro Zeile. Die Absendererkennung schlägt diese Angaben nie als Absender vor.</p>
     <textarea id="eigene" class="inp" rows="4">${esc(D.eigene)}</textarea><div><button class="btn" data-act="eigene-save">Speichern</button></div></div>
    <div class="panel stack"><h2>Apple Mail</h2><p style="margin:0">„Aus Mail holen“ übernimmt alle E-Mails mit dieser Markierung samt Anlagen in den Posteingang. Die Markierung in Mail bleibt; jede E-Mail wird nur einmal übernommen, auch wenn sie in mehreren Postfächern liegt.</p>
@@ -1031,6 +1052,72 @@ function entryModal(bezugId) {
     closeModal(); await act(async () => { const r = await api(`akte/${a.id}/eintraege`, body); S.entry = r.id; }, 'Eintrag angelegt.');
     return false;
   }, 'Anlegen');
+}
+// ---------- Claude: Analyse und Textvorschläge ----------
+const CLAUDE_AKTIONEN = [['zusammenfassen', 'Zusammenfassen'], ['fristen', 'Fristen & Pflichten'], ['pruefen', 'Prüfen & Einschätzen'], ['antwort', 'Antwort entwerfen']];
+const CLAUDE_FRAGEN = {zusammenfassen: 'Bitte zusammenfassen.', fristen: 'Welche Fristen und Pflichten ergeben sich?', pruefen: 'Bitte kritisch prüfen und einschätzen.', antwort: 'Bitte eine Antwort entwerfen.'};
+function claudeText(t) {  // knappe Darstellung von Markdown: Absätze, Listen, Fett
+  return esc(t).replace(/\*\*([^*]+)\*\*/g, '<b>$1</b>').replace(/^#{1,4} (.+)$/gm, '<b>$1</b>').replace(/^[-*] /gm, '• ');
+}
+async function claudeDialog(docId, entryId) {
+  const a = D.akte;
+  if (!D.claude) D.claude = await api('claude');
+  if (!D.claude.eingerichtet) {
+    modal('Claude einrichten', `<p style="margin:0">Für die Analyse mit Claude brauchen Sie einen eigenen Zugangsschlüssel von Anthropic (console.anthropic.com → API Keys).</p>
+      <label>Zugangsschlüssel<input id="m-ck" type="password" autocomplete="off" placeholder="sk-ant-…"></label>
+      <p class="muted" style="margin:0;font-size:12.5px">Der Schlüssel bleibt auf diesem Mac. Übertragen wird nur, wenn Sie Claude etwas fragen.</p>`, async () => {
+      try { D.claude = await api('claude/schluessel', {schluessel: val('m-ck')}); } catch (e) { toast(e.message); return false; }
+      closeModal(); claudeDialog(docId, entryId); return false;
+    }, 'Speichern und weiter');
+    return;
+  }
+  const d = docId ? a.dokumente.find(x => x.id === docId) : null, e = entryId ? a.eintraege.find(x => x.id === entryId) : null;
+  const verlauf = [];  // {rolle, text, anzeige, brief}
+  modal('Claude · ' + (d ? d.titel : a.titel), `<div class="claude">
+    <p class="muted" style="margin:0;font-size:12.5px">${d ? `Grundlage: „${esc(d.titel)}“ und eine Übersicht des Vorgangs „${esc(a.titel)}“.` : `Grundlage: der Vorgang „${esc(a.titel)}“ mit Chronik und Dokumenten.`} Claude kann sich irren – Fristen und Beträge bitte am Original prüfen.</p>
+    <div class="claude-akt">${CLAUDE_AKTIONEN.map(([k, l]) => `<button class="btn sm" data-ck="${k}">${l}</button>`).join('')}</div>
+    <div class="claude-verlauf" id="ck-verlauf"><p class="muted" style="margin:auto;text-align:center">Wählen Sie oben eine Aufgabe oder stellen Sie unten eine eigene Frage.</p></div>
+    <div class="claude-ein"><textarea id="ck-frage" rows="2" placeholder="Eigene Frage, z. B. „Muss ich zahlen?“ oder „Formuliere den zweiten Absatz freundlicher.“"></textarea><button class="btn pri" data-ck="frage">Fragen</button></div></div>`, null, '', 'wide');
+  const box = document.querySelector('.modal'), feld = $('#ck-verlauf');
+  const zeigen = () => {
+    feld.innerHTML = verlauf.map((n, i) => n.rolle === 'user' ? `<div class="ck-frage">${esc(n.anzeige || n.text)}</div>`
+      : `<div class="ck-antwort"><div class="ck-text">${claudeText(n.text)}</div><div class="ck-knoepfe">
+          <button class="btn sm ghost" data-ckn="notiz" data-i="${i}">Als Notiz speichern</button>
+          <button class="btn sm ghost" data-ckn="brief" data-i="${i}">${I('draft')}Als Brief übernehmen</button>
+          <button class="btn sm ghost" data-ckn="kopie" data-i="${i}">Kopieren</button></div></div>`).join('')
+      + (box.dataset.laeuft ? '<div class="ck-antwort muted"><span class="spin"></span> Claude denkt nach … (kann bis zu einer Minute dauern)</div>' : '');
+    feld.scrollTop = feld.scrollHeight;
+  };
+  const fragen = async (aufgabe) => {
+    if (box.dataset.laeuft) return;
+    let text = aufgabe === 'frage' ? $('#ck-frage').value.trim() : CLAUDE_FRAGEN[aufgabe];
+    if (!text) { $('#ck-frage').focus(); return; }
+    const gesendet = verlauf.filter(n => !n.fehler).map(n => ({rolle: n.rolle, text: n.text}));
+    if (aufgabe === 'frage') gesendet.push({rolle: 'user', text});
+    verlauf.push({rolle: 'user', text, anzeige: text}); if (aufgabe === 'frage') $('#ck-frage').value = '';
+    box.dataset.laeuft = '1'; zeigen();
+    try {
+      const r = await api('claude/fragen', {vorgang_id: a.id, dokument_id: docId, verlauf: gesendet, aufgabe});
+      verlauf.push({rolle: 'assistant', text: r.text, brief: r.brieftext ? {betreff: r.betreff, brieftext: r.brieftext, hinweise: r.hinweise} : null});
+      if (aufgabe !== 'frage') verlauf[verlauf.length - 2].text = text;  // im Verlauf für Folgefragen steht die eigentliche Aufgabe
+    } catch (err) { verlauf.pop(); toast(err.message); }
+    delete box.dataset.laeuft; if (document.body.contains(feld)) zeigen();
+  };
+  box.addEventListener('click', async ev => {
+    const k = ev.target.closest('[data-ck]'), n = ev.target.closest('[data-ckn]');
+    if (k) fragen(k.dataset.ck);
+    if (!n) return;
+    const m = verlauf[+n.dataset.i];
+    if (n.dataset.ckn === 'kopie') { try { await navigator.clipboard.writeText(m.text); toast('Kopiert.'); } catch (_) { toast('Kopieren nicht möglich.'); } }
+    else if (n.dataset.ckn === 'notiz') {
+      try { await api(`akte/${a.id}/eintraege`, {art: 'notiz', titel: ('Claude: ' + (verlauf[+n.dataset.i - 1]?.anzeige || 'Analyse') + (d ? ' – ' + d.titel : '')).slice(0, 190), text: m.text, bezug_id: e ? e.id : null, teile: e ? e.teile : []});
+        toast('Als Notiz in der Chronik gespeichert.'); n.disabled = true; await render(); } catch (err) { toast(err.message); }
+    } else if (n.dataset.ckn === 'brief') {
+      const v = m.brief || {betreff: '', brieftext: m.text, hinweise: ''};
+      closeModal(); compose(e && e.art === 'eingang' ? e.id : null, null, v);
+    }
+  });
+  box.addEventListener('keydown', ev => { if (ev.target.id === 'ck-frage' && ev.key === 'Enter' && (ev.metaKey || ev.ctrlKey)) fragen('frage'); });
 }
 function versandModal(e) {
   const a = D.akte, k = D.kontakte.find(x => x.id === e.kontakt_id);
@@ -1321,6 +1408,10 @@ document.addEventListener('click', async ev => {
     chatModal((r.notes || []).map(n => `${n.rolle === 'user' ? 'Ich' : 'ChatGPT'}: ${n.text}`).join('\n\n').slice(0, 19000), `ChatGPT-Verlauf „${t ? t.titel : el.dataset.id}“`); break; }
   case 'backup': toast('Sicherung wird erstellt …'); try { const r = await api('sicherungen', {}); toast(r.pruefung.ok ? `Sicherung erstellt und geprüft: ${r.pruefung.anzahl.vorgang} Vorgänge, ${r.pruefung.dateien} Dateien.` : 'Sicherung erstellt, Prüfung meldet Fehler: ' + r.pruefung.fehler.join('; ')); await render(); } catch (e) { toast(e.message); } break;
   case 'backup-check': { const r = await api(`sicherungen/${el.dataset.name}/pruefen`, {}); toast(r.ok ? `In Ordnung: ${r.anzahl.vorgang} Vorgänge, ${r.anzahl.dokument} Dokumente, ${r.dateien} Dateien.` : 'Fehler: ' + r.fehler.join('; ')); break; }
+  case 'claude': claudeDialog(el.dataset.doc ? +el.dataset.doc : null, el.dataset.entry ? +el.dataset.entry : null); break;
+  case 'claude-key': D.claude.eingerichtet = false; await render(); $('#claudekey')?.focus(); break;
+  case 'claude-key-save': await act(async () => { D.claude = await api('claude/schluessel', {schluessel: val('claudekey')}); }, 'Zugangsschlüssel gespeichert.'); break;
+  case 'claude-key-del': await act(async () => { D.claude = await api('claude/schluessel', {schluessel: ''}); }, 'Zugangsschlüssel entfernt.'); break;
   case 'eigene-save': await act(() => api('einstellungen', {eigene_angaben: val('eigene')}), 'Gespeichert.'); break;
   case 'hit': $('#results').hidden = true; S.v = +el.dataset.v; S.tab = 'chronik'; S.teil = 'all'; S.ktype = 'alle'; S.entry = null; location.hash = 'akte-' + el.dataset.v;
     if (el.dataset.e) setTimeout(() => { S.entry = +el.dataset.e; if (D.akte) paintAkte(); }, 400); break;

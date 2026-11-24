@@ -177,6 +177,21 @@ Erst wenn Schritt 2 bis 4 funktionieren. Die bisherige Anwendung vorher beenden.
 5. Falls stattdessen eine Datei `….documanager.json` in Downloads landet: in das DocuManager-Fenster ziehen.
 6. Bitte melden, was der blaue Hinweis anzeigt, falls etwas nicht klappt.
 
+## 13. Claude-Analyse und Brief (ab 0.17)
+
+1. Unter **console.anthropic.com** anmelden, Guthaben aufladen (z. B. 5 $), unter **API Keys** einen Schlüssel erzeugen
+   und kopieren.
+2. **Einstellungen → Claude (KI-Analyse)**: Schlüssel einfügen, **Speichern**. Erwartet: „Eingerichtet · Schlüssel endet
+   auf …“.
+3. Einen Vorgang mit einem Schreiben öffnen, den Eingang anklicken, in der Vorschau auf **Claude** klicken,
+   **Zusammenfassen**. Erwartet: Nach einigen Sekunden steht die Zusammenfassung im Dialog.
+4. Eine eigene Frage stellen (z. B. „Muss ich zahlen?“). Erwartet: Die Antwort bezieht sich auf die vorige.
+5. **Antwort entwerfen** → **Als Brief übernehmen**. Erwartet: Briefdialog mit Betreff und Text von Claude, darüber
+   Claudes Hinweise. Empfänger prüfen.
+6. **Nach dem Speichern drucken** und **Als versendet in der Chronik erfassen** anhaken, **Entwurf anlegen**. Erwartet:
+   Ein Fenster mit dem Brief öffnet sich samt Druckdialog; in der Chronik stehen Entwurf und „Versendet · Post“, der
+   Status ist „Schreiben abgeschickt“.
+
 ## Rückmeldung
 
 Bitte mitteilen:

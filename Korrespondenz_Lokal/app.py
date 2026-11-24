@@ -32,11 +32,12 @@ from akte import (Akte, fristen_erkennen, empfaenger_erkennen, ROUTES as AKTE_RO
 from export import (akte_zip, brief_html, sicherung_erstellen, sicherung_pruefen, test_export, wiederherstellen,
                     wiederherstellen_laufend)
 from chat_sync import ChatSync, MAX_EXPORT, test_chat_sync
+from claude_ki import ClaudeKI, test_claude
 from mail_import import MailImport, migrate_5, test_mail
 
 ROOT = Path(__file__).resolve().parent
 PORT = 8765
-APP_VERSION = "DocuManager 0.16.1 · Direkt abgelegte Dokumente in der Chronik"
+APP_VERSION = "DocuManager 0.17.0 · Claude-Analyse, Antwortentwurf, Drucken und Versand"
 MAX_UPLOAD = 25 * 1024 * 1024
 MIN_MACOS = "14.0"
 SCHEMA_VERSION = 14
@@ -884,6 +885,7 @@ class Handler(BaseHTTPRequestHandler):
     mail = None
     mail_lock = Lock()
     restore_lock = Lock()
+    claude = None
     server_ref = None
     scanordner = None
     scanner = None
@@ -979,6 +981,8 @@ class Handler(BaseHTTPRequestHandler):
             self.send_json({"cases": self.store.list_cases(), "statuses": CASE_STATUSES, "groups": self.store.groups(),
                             "ocr": bool(self.store.ocr and self.store.ocr.is_file()),
                             "ocr_loading": not self.store.ocr_ready.is_set(), "version": APP_VERSION})
+        elif path == "/api/claude":
+            self.send_json(self.claude.status() if self.claude else {"eingerichtet": False})
         elif path == "/api/scanordner":
             ordner = self.scanordner.ordner if self.scanordner else SCAN_ORDNER
             self.send_json({"pfad": str(ordner), "zuletzt": self.scanordner.zuletzt if self.scanordner else None})
@@ -1003,7 +1007,7 @@ class Handler(BaseHTTPRequestHandler):
             if not eintrag:
                 self.send_json({"error": "Eintrag nicht gefunden."}, 404)
             else:
-                self.send_bytes(200, "text/html; charset=utf-8", brief_html(eintrag, self.akte.eigene_angaben()).encode())
+                self.send_bytes(200, "text/html; charset=utf-8", brief_html(eintrag, self.akte.eigene_angaben(), dict(parse_qsl(urlsplit(self.path).query)).get("drucken") == "1").encode())
         elif path == "/api/sicherungen":
             ordner = self.store.data / "Sicherungen"
             liste = sorted(ordner.glob("Korrespondenz-Sicherung_*.zip"), reverse=True) if ordner.is_dir() else []
@@ -1158,6 +1162,12 @@ class Handler(BaseHTTPRequestHandler):
                     for doc_id in ergebnis.get("ids", []):
                         self.ins_archiv(doc_id)
                 self.send_json(ergebnis)
+            elif path == "/api/claude/schluessel":
+                self.send_json(self.claude.schluessel_setzen(json.loads(self.read_body(4000)).get("schluessel")))
+            elif path == "/api/claude/fragen":  # Analyse oder Entwurf; kann bis zu einigen Minuten dauern
+                daten = json.loads(self.read_body(200_000))
+                self.send_json(self.claude.fragen(int(daten["vorgang_id"]), int(daten["dokument_id"]) if daten.get("dokument_id") else None,
+                                                  daten.get("verlauf") or [], daten.get("aufgabe") or "frage"))
             elif path == "/api/beenden":  # Anwendung ohne Terminal beenden
                 self.send_json({"ok": True})
                 if self.server_ref:
@@ -1449,6 +1459,7 @@ def self_test(ocr=None, image=None):
         test_archiv(store)
         test_fristen_ablage(store)
         test_dateien(store)
+        test_claude(store)
         test_mail(store)
         test_chatnotiz(store)
         test_export(store)
@@ -1655,6 +1666,7 @@ def main():
     Handler.store.nach_texterkennung = Handler.akte.nach_texterkennung
     Handler.scanner.ins_archiv = lambda doc_id: Handler.ins_archiv(Handler, doc_id)
     Handler.mail = MailImport(Handler.store)
+    Handler.claude = ClaudeKI(Handler.store, Handler.akte)
     Handler.scanordner = ScanOrdner(Handler.store, SCAN_ORDNER)
     try:
         server = LocalServer(("127.0.0.1", PORT), Handler)
