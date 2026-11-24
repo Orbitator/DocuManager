@@ -137,6 +137,10 @@ Teil 2 (umgesetzt, Schemaversion 7):
   Antwortentwurf muss sich auf den bisherigen Schriftverkehr beziehen. Erst über 600 000 Zeichen wird gekürzt, und nur
   ältere fremde Dokumente (auf 3 000 Zeichen); das gewählte Schreiben und eigene Schreiben bleiben vollständig. Unter
   jeder Antwort steht, was berücksichtigt wurde, und ob etwas gekürzt war oder ohne erkannten Text fehlte.
+- 0.17.2: Druckfertiger Brief nach DIN 5008 Form B (`BRIEF_MASSE` in export.py): Absender oben rechts, Rücksendezeile
+  bei 49 mm, Empfängeranschrift ab 55 mm (im Sichtfenster DIN lang/C5/C4, 45–90 mm), Informationsblock rechts,
+  Betreff bei 100 mm, Falzmarken bei 105/210 mm und Lochmarke bei 148,5 mm, Raum für die Unterschrift; Folgeseiten mit
+  oberem Rand. Claude liefert den Brieftext ohne Markdown, von der Anrede bis zum Namen; Reste werden entfernt.
 - 0.16: Scannen ohne Dialog. „Scannen“ scannt sofort mit dem zuletzt benutzten Scanner (`Daten/scanner.json`):
   Einzug wenn vorhanden, sonst Glas; beidseitig, wenn möglich; 300 dpi Farbe. Die Seiten werden mit PDFKit zu einem
   komprimierten PDF zusammengefügt (leere Rückseiten fallen weg) und landen im Posteingang bzw. Archiv. Nur ein kleines

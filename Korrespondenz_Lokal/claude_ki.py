@@ -46,13 +46,26 @@ BRIEF_SCHEMA = {
     "type": "object",
     "properties": {
         "betreff": {"type": "string", "description": "Betreffzeile ohne das Wort „Betreff“"},
-        "brieftext": {"type": "string", "description": "Brieftext ab der Anrede bis einschließlich Grußformel und Name; "
-                                                      "Absätze durch Leerzeilen getrennt"},
+        "brieftext": {"type": "string", "description": "Druckfertiger Brieftext nach DIN 5008: beginnt mit der Anrede, "
+                      "endet mit Grußformel und meinem Namen aus MEINE ANGABEN. Ohne Absender, Anschrift, Datum und "
+                      "Betreff (die setzt der Briefbogen). Absätze durch eine Leerzeile getrennt, kein Markdown, keine "
+                      "Sternchen oder Rauten; Aufzählungen mit „–“. Platzhalter in eckigen Klammern nur für wirklich "
+                      "unbekannte Angaben."},
         "hinweise": {"type": "string", "description": "Kurze Hinweise an den Absender (was zu prüfen/ergänzen ist)"},
     },
     "required": ["betreff", "brieftext", "hinweise"],
     "additionalProperties": False,
 }
+
+
+def brieftext_saeubern(text):
+    """Entfernt Markdown-Reste und überzählige Leerzeilen, damit der Text druckfertig im Briefbogen steht."""
+    import re
+    text = text.replace("\r\n", "\n").replace("**", "").replace("__", "")
+    text = re.sub(r"^#{1,6}\s*", "", text, flags=re.M)
+    text = re.sub(r"^[ \t]*[*•][ \t]+", "– ", text, flags=re.M)
+    text = re.sub(r"[ \t]+$", "", text, flags=re.M)
+    return re.sub(r"\n{3,}", "\n\n", text).strip()
 
 
 class ClaudeKI:
@@ -211,6 +224,8 @@ class ClaudeKI:
         if aufgabe == "antwort":
             try:
                 brief = json.loads(text)
+                brief["brieftext"] = brieftext_saeubern(brief["brieftext"])
+                brief["betreff"] = brief["betreff"].replace("*", "").removeprefix("Betreff:").strip()
                 ergebnis.update(betreff=brief["betreff"], brieftext=brief["brieftext"], hinweise=brief.get("hinweise", ""),
                                 text=f"Betreff: {brief['betreff']}\n\n{brief['brieftext']}"
                                      + (f"\n\nHinweise: {brief['hinweise']}" if brief.get("hinweise") else ""))
@@ -282,6 +297,7 @@ def test_claude(store):
     r = ki.fragen(v, d, [], "antwort")
     assert gesendet[-1][0]["output_config"]["format"]["type"] == "json_schema"
     assert r["betreff"] == "Ihre Forderung" and r["brieftext"].startswith("Sehr geehrte")
+    assert brieftext_saeubern("**Sehr geehrte**\n\n\n\n* Punkt\n## Titel") == "Sehr geehrte\n\n– Punkt\nTitel"
     try:
         ki.fragen(v, d, [{"rolle": "user", "text": "verboten"}])
         raise AssertionError("Ablehnung muss gemeldet werden")

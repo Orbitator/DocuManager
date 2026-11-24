@@ -192,6 +192,13 @@ Erst wenn Schritt 2 bis 4 funktionieren. Die bisherige Anwendung vorher beenden.
    Ein Fenster mit dem Brief öffnet sich samt Druckdialog; in der Chronik stehen Entwurf und „Versendet · Post“, der
    Status ist „Schreiben abgeschickt“.
 
+## 14. Brief im Fensterumschlag (ab 0.17.2)
+
+1. Einen Brief öffnen → **Drucken oder PDF**. Im Druckdialog: Maßstab **100 %**, „Kopf- und Fußzeilen drucken“ aus.
+2. Ausdrucken, zweimal an den kleinen Strichen links falten (Falzmarken) und in einen Fensterumschlag DIN lang stecken.
+   Erwartet: Die kleine Absenderzeile und die vollständige Empfängeranschrift sind im Fenster zu sehen.
+3. Bei längeren Briefen: Seite 2 beginnt mit einem Rand oben.
+
 ## Rückmeldung
 
 Bitte mitteilen:

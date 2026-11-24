@@ -153,37 +153,64 @@ def akte_zip(store, akte, a, dokument_ids):
 
 
 # --- Briefansicht nach DIN 5008 ------------------------------------------------------------
+# Maße in mm ab oberer linker Blattkante (DIN 5008, Form B; passt in Fensterumschläge DIN lang und C5/C4,
+# deren Fenster das Blatt von 45 bis 90 mm abdeckt).
+BRIEF_MASSE = {"rand_links": 25, "rand_rechts": 20, "ruecksende": 49, "empfaenger": 55, "empfaenger_bis": 90,
+               "info": 55, "betreff": 100, "falz1": 105, "loch": 148.5, "falz2": 210}
+
+
 def brief_html(e, eigene, drucken=False):
     b = e.get("brief") or {}
-    absender = [z for z in (eigene or "").splitlines() if z.strip()]
+    m = BRIEF_MASSE
+    absender = [z.strip() for z in (eigene or "").splitlines() if z.strip()]
     esc = lambda s: html.escape(s or "")
-    absaetze = "".join(f"<p>{esc(p).replace(chr(10), '<br>')}</p>" for p in re.split(r"\n\s*\n", e.get("text") or "") if p.strip())
+    teile = [t.strip() for t in re.split(r"\n\s*\n", e.get("text") or "") if t.strip()]
+    # Raum für die Unterschrift zwischen Grußformel und Name
+    unterschrift = len(teile) >= 2 and re.search(r"(Grüßen?|Gruß|Hochachtungsvoll)\W*$", teile[-2]) and len(teile[-1]) < 80
+    klasse = lambda i: ' class="name"' if unterschrift and i == len(teile) - 1 else ""
+    absaetze = "".join(f"<p{klasse(i)}>{esc(t).replace(chr(10), '<br>')}</p>" for i, t in enumerate(teile))
     info = [("Ihr Zeichen", b.get("zeichen")), ("Ihr Schreiben vom", b.get("bezug_datum")), ("Datum", b.get("datum"))]
     anlagen = b.get("anlagen") or []
+    empfaenger = "\n".join(z.strip() for z in (b.get("empfaenger") or "").splitlines() if z.strip())
+    kopf = (f"<b>{esc(absender[0])}</b><br>" + "<br>".join(esc(z) for z in absender[1:])) if absender else ""
     return f"""<!doctype html><html lang="de"><head><meta charset="utf-8"><title>{esc(b.get('betreff') or e.get('titel'))}</title>
 <style>
-@page{{size:A4;margin:0}}
-body{{margin:0;background:#eceef3;font-family:-apple-system,"Helvetica Neue",Arial,sans-serif;color:#111}}
-.blatt{{width:210mm;min-height:297mm;margin:12px auto;background:#fff;box-sizing:border-box;padding:0 20mm 20mm 25mm;position:relative;font-size:11pt;line-height:1.45}}
-.ruecksende{{position:absolute;top:45mm;left:25mm;width:85mm;font-size:7pt;color:#555;border-bottom:.3pt solid #999}}
-.anschrift{{position:absolute;top:50mm;left:25mm;width:85mm;height:40mm;white-space:pre-line}}
-.info{{position:absolute;top:50mm;left:125mm;font-size:9pt;display:grid;grid-template-columns:auto auto;gap:1mm 4mm}}
-.info span:nth-child(odd){{color:#555}}
-.kopf{{padding-top:12mm;text-align:right;font-size:9pt;color:#333;white-space:pre-line}}
-.inhalt{{padding-top:72mm}}
-.betreff{{font-weight:700;margin:0 0 8mm}}
-.leiste{{position:sticky;top:0;background:#1f2a5a;color:#fff;padding:8px 16px;font-size:13px;display:flex;gap:12px;align-items:center}}
+@page{{size:A4;margin:20mm 0 18mm 0}}
+@page :first{{margin-top:0}}
+*{{box-sizing:border-box}}
+body{{margin:0;background:#eceef3;font-family:Arial,"Helvetica Neue",Helvetica,sans-serif;color:#000;
+  -webkit-print-color-adjust:exact;print-color-adjust:exact}}
+.blatt{{width:210mm;min-height:297mm;margin:12px auto;background:#fff;position:relative;
+  padding:{m['betreff']}mm {m['rand_rechts']}mm 20mm {m['rand_links']}mm;font-size:11pt;line-height:1.35;box-shadow:0 2px 12px rgba(0,0,0,.15)}}
+.kopf{{position:absolute;top:15mm;right:{m['rand_rechts']}mm;text-align:right;font-size:9pt;line-height:1.4}}
+.kopf b{{font-size:11pt}}
+.ruecksende{{position:absolute;top:{m['ruecksende']}mm;left:{m['rand_links']}mm;width:85mm;font-size:7pt;line-height:1.2;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;border-bottom:.25pt solid #000;padding-bottom:.5mm}}
+.anschrift{{position:absolute;top:{m['empfaenger']}mm;left:{m['rand_links']}mm;width:85mm;
+  max-height:{m['empfaenger_bis'] - m['empfaenger']}mm;overflow:hidden;white-space:pre-line;line-height:1.25}}
+.info{{position:absolute;top:{m['info']}mm;left:125mm;width:{210 - 125 - m['rand_rechts']}mm;font-size:9pt;line-height:1.5;
+  display:grid;grid-template-columns:auto 1fr;gap:0 4mm}}
+.info span:nth-child(odd){{color:#444}}
+.marke{{position:absolute;left:4mm;width:5mm;border-top:.25pt solid #888}}
+.marke.loch{{width:7mm}}
+.betreff{{font-weight:700;margin:0 0 8.5mm}}
+.inhalt p{{margin:0 0 4.5mm;orphans:3;widows:3}}
+.inhalt p.name{{margin-top:14mm}}
+.anlagen{{margin-top:8mm}}
+.leiste{{position:sticky;top:0;z-index:2;background:#1f2a5a;color:#fff;padding:8px 16px;font-size:13px;display:flex;gap:12px;align-items:center}}
 .leiste button{{font:inherit;padding:4px 10px;border-radius:6px;border:0;cursor:pointer}}
-@media print{{body{{background:#fff}}.blatt{{margin:0}}.leiste{{display:none}}}}
+@media print{{body{{background:#fff}}.leiste{{display:none}}.blatt{{margin:0;box-shadow:none;min-height:0}}}}
 </style></head><body>
-<div class="leiste">Entwurf · {esc(e.get('titel'))}<span style="flex:1"></span><button onclick="print()">Drucken oder als PDF sichern</button></div>
+<div class="leiste">{'Versendet' if e.get('art') == 'ausgang' else 'Entwurf'} · {esc(e.get('titel'))}<span style="flex:1"></span>
+<span style="opacity:.8">DIN 5008 · Anschrift im Sichtfenster</span><button onclick="print()">Drucken oder als PDF sichern</button></div>
 <div class="blatt">
-<div class="kopf">{esc(chr(10).join(absender))}</div>
+<div class="kopf">{kopf}</div>
 <div class="ruecksende">{esc(' · '.join(absender))}</div>
-<div class="anschrift">{esc(b.get('empfaenger'))}</div>
+<div class="anschrift">{esc(empfaenger)}</div>
 <div class="info">{''.join(f'<span>{k}</span><span>{esc(v)}</span>' for k, v in info if v)}</div>
+<div class="marke" style="top:{m['falz1']}mm"></div><div class="marke loch" style="top:{m['loch']}mm"></div><div class="marke" style="top:{m['falz2']}mm"></div>
 <div class="inhalt"><p class="betreff">{esc(b.get('betreff') or e.get('titel'))}</p>{absaetze}
-{('<p style="margin-top:8mm"><b>Anlagen</b><br>' + '<br>'.join(esc(a) for a in anlagen) + '</p>') if anlagen else ''}</div>
+{('<p class="anlagen"><b>Anlagen</b><br>' + '<br>'.join(esc(a) for a in anlagen) + '</p>') if anlagen else ''}</div>
 </div>{'<script>addEventListener("load",()=>setTimeout(print,400))</script>' if drucken else ''}</body></html>"""
 
 
@@ -336,6 +363,10 @@ def test_export(store):
     e = [x for x in a["eintraege"] if x["id"] == entwurf][0]
     assert e["brief"]["betreff"].startswith("Stellungnahme")
     seite = brief_html(e, "A. Mustermann\nLindenweg 4\n50733 Köln")
+    assert "top:55mm" in seite and "@page :first{margin-top:0}" in seite  # Anschrift im Sichtfenster (DIN 5008)
+    gruss = brief_html({"titel": "T", "text": "Sehr geehrte Damen und Herren,\n\nText.\n\nMit freundlichen Grüßen\n\nA. Mustermann",
+                        "brief": {"empfaenger": "X"}}, "A. Mustermann")
+    assert '<p class="name">A. Mustermann</p>' in gruss
     assert "Lindenweg 4" in seite and "KFZ-2026-1842" in seite and "(Teil 1)" in seite and "<script" not in seite
     pdf = chronik_pdf(a, akte.kontakte())
     assert pdf.startswith(b"%PDF-1.4") and pdf.rstrip().endswith(b"%%EOF") and b"Chronik" in pdf
