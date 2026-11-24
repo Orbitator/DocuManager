@@ -118,6 +118,10 @@ Teil 2 (umgesetzt, Schemaversion 7):
   `dokument`; `migrate_9` baut die Tabelle ohne sie neu (Zugehörigkeit regelt `dokument_vorgang`). Der Scan-Ordner
   liegt jetzt unter `~/DocuManager Scans` (nicht in „Dokumente“, das macOS für Programme gesondert schützt).
   Fehlermeldungen beim Speichern nennen die Ursache.
+- 0.16.1 (Schemaversion 14): Direkt in einem Vorgang abgelegte Dokumente („+ Dokument“, Ziehen auf die Akte) bekommen
+  sofort einen Chronik-Eintrag „Eingang“ (`direkt_eintrag`, Kennzeichen `quelle = DIREKT_ABGELEGT`); nach der
+  Texterkennung werden Titel, Datum und bekannter Absender nachgetragen (`direkt_nachtragen`), solange der Eintrag nicht
+  von Hand bearbeitet wurde. `migrate_14` legt die fehlenden Einträge für bereits abgelegte Dokumente an.
 - 0.16: Scannen ohne Dialog. „Scannen“ scannt sofort mit dem zuletzt benutzten Scanner (`Daten/scanner.json`):
   Einzug wenn vorhanden, sonst Glas; beidseitig, wenn möglich; 300 dpi Farbe. Die Seiten werden mit PDFKit zu einem
   komprimierten PDF zusammengefügt (leere Rückseiten fallen weg) und landen im Posteingang bzw. Archiv. Nur ein kleines

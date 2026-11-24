@@ -36,10 +36,10 @@ from mail_import import MailImport, migrate_5, test_mail
 
 ROOT = Path(__file__).resolve().parent
 PORT = 8765
-APP_VERSION = "DocuManager 0.16 · Scannen ohne Dialog"
+APP_VERSION = "DocuManager 0.16.1 · Direkt abgelegte Dokumente in der Chronik"
 MAX_UPLOAD = 25 * 1024 * 1024
 MIN_MACOS = "14.0"
-SCHEMA_VERSION = 13
+SCHEMA_VERSION = 14
 OCR_WAITING = "Wartet auf Texterkennung"
 # Scan-Ordner für Scanner-Software und „Digitale Bilder“: Dateien darin kommen automatisch in den Posteingang.
 # Bewusst nicht unter „Dokumente“: Diesen Ordner schützt macOS, ein über Launchpad gestartetes Programm bräuchte
@@ -351,9 +351,23 @@ def migrate_13(db):
         db.execute("ALTER TABLE vorgang ADD COLUMN prioritaet TEXT NOT NULL DEFAULT 'keine'")
 
 
+def migrate_14(db):
+    """Dokumente, die direkt in einem Vorgang abgelegt wurden und keinen Chronik-Eintrag haben, bekommen einen."""
+    from akte import DIREKT_ABGELEGT, dokumentdatum
+    fehlend = db.execute("""SELECT dv.vorgang_id, d.id, d.titel, coalesce(d.dokument_datum, d.datei_datum, substr(d.angelegt_am,1,10))
+        FROM dokument_vorgang dv JOIN dokument d ON d.id=dv.dokument_id JOIN vorgang v ON v.id=dv.vorgang_id
+        WHERE d.geloescht_am IS NULL AND v.system IS NULL AND NOT EXISTS (SELECT 1 FROM eintrag e
+            WHERE e.dokument_id=d.id AND e.vorgang_id=dv.vorgang_id AND e.geloescht_am IS NULL)""").fetchall()
+    for vorgang_id, dokument_id, titel, datum in fehlend:
+        text = "\n".join(r[0] for r in db.execute("SELECT text FROM dokumentseite WHERE dokument_id=? ORDER BY nummer", (dokument_id,)))
+        erkannt = dokumentdatum(text)[0] if text.strip() else None
+        db.execute("""INSERT INTO eintrag(vorgang_id,art,titel,ereignis_datum,dokument_id,quelle) VALUES(?,?,?,?,?,?)""",
+                   (vorgang_id, "eingang", titel, erkannt or datum, dokument_id, DIREKT_ABGELEGT))
+
+
 MIGRATIONS = ((1, migrate_1), (2, migrate_2), (3, migrate_3), (4, migrate_4), (5, migrate_5), (6, migrate_6),
               (7, migrate_7), (8, migrate_8), (9, migrate_9), (10, migrate_10), (11, migrate_11), (12, migrate_12),
-              (13, migrate_13))
+              (13, migrate_13), (14, migrate_14))
 
 
 class Store:
@@ -912,7 +926,12 @@ class Handler(BaseHTTPRequestHandler):
         raw = self.read_body(MAX_UPLOAD)
         geaendert = self.headers.get("X-Datei-Datum") or None
         if Path(name).suffix.lower() != ".eml":
-            return self.store.import_document(vorgang, name, raw, geaendert)
+            doc_id, neu = self.store.import_document(vorgang, name, raw, geaendert)
+            if vorgang:  # direkt im Vorgang abgelegt: auch in der Chronik zeigen
+                self.akte.direkt_eintrag(vorgang, doc_id)
+                if not neu:
+                    self.akte.direkt_nachtragen(doc_id)
+            return doc_id, neu
         neu = self.mail.uebernehmen(raw, None, "Datei")
         with closing(self.store.connect()) as db:
             row = db.execute("SELECT id FROM dokument WHERE sha256=? AND mime='message/rfc822' ORDER BY id",
@@ -1633,7 +1652,7 @@ def main():
     Handler.scanner = Scanner(Handler.store)
     Handler.chat = ChatSync(Handler.store)
     Handler.akte = Akte(Handler.store)
-    Handler.store.nach_texterkennung = Handler.akte.ablage_nachtragen
+    Handler.store.nach_texterkennung = Handler.akte.nach_texterkennung
     Handler.scanner.ins_archiv = lambda doc_id: Handler.ins_archiv(Handler, doc_id)
     Handler.mail = MailImport(Handler.store)
     Handler.scanordner = ScanOrdner(Handler.store, SCAN_ORDNER)

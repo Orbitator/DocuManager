@@ -14,6 +14,7 @@ from datetime import date, timedelta
 STATUSES = ("Schreiben verfassen", "Recherchieren", "Schreiben abgeschickt",
             "Offen", "Wartet auf Antwort", "Erledigt")
 DEFAULT_GROUPS = ("Rechtliche Angelegenheiten", "Finanzamt und Steuern", "Versicherungen", "Anderes")
+DIREKT_ABGELEGT = "Direkt im Vorgang abgelegt"  # Kennzeichen: Eintrag automatisch angelegt, wird nach der Texterkennung ergänzt
 EINTRAG_ARTEN = ("eingang", "ausgang", "entwurf", "nachweis", "telefonat", "notiz", "entscheidung", "chat", "fehlt")
 RICHTUNGEN = ("von", "an", "mit")
 FRIST_ARTEN = ("frist", "wiedervorlage", "aufgabe")
@@ -847,6 +848,8 @@ class Akte:
                 felder["brief"] = _brief(data["brief"])
             if "typ" in data:
                 felder["typ"] = self._typ(data["typ"])
+            if e["quelle"] == DIREKT_ABGELEGT and any(k in data for k in ("titel", "datum", "kontakt_id", "art")):
+                felder["quelle"] = None  # vom Anwender bearbeitet: nicht mehr automatisch nachtragen
             if "art" in data:  # nur zwischen Arten ohne eigene Abläufe (Brief, Versand, Chat bleiben, wie sie sind)
                 frei = ("eingang", "ausgang", "telefonat", "notiz", "entscheidung", "fehlt")
                 if e["art"] not in frei:
@@ -1262,6 +1265,45 @@ class Akte:
         with closing(self.connect()) as db:
             return bool(db.execute("""SELECT 1 FROM dokument d JOIN vorgang v ON v.id=d.vorgang_id AND v.system='posteingang'
                 WHERE d.id=? AND d.geloescht_am IS NULL""", (dokument_id,)).fetchone())
+
+    def direkt_eintrag(self, vorgang_id, dokument_id):
+        """Chronik-Eintrag für ein direkt im Vorgang abgelegtes Dokument (nicht über den Posteingang)."""
+        with closing(self.connect()) as db, db:
+            if db.execute("SELECT 1 FROM eintrag WHERE vorgang_id=? AND dokument_id=? AND geloescht_am IS NULL",
+                          (vorgang_id, dokument_id)).fetchone():
+                return None
+            d = db.execute("SELECT titel, dokument_datum, datei_datum FROM dokument WHERE id=?", (dokument_id,)).fetchone()
+            if not d:
+                raise ValueError("Dokument nicht gefunden.")
+            return db.execute("""INSERT INTO eintrag(vorgang_id,art,titel,ereignis_datum,dokument_id,quelle)
+                VALUES(?,?,?,?,?,?)""", (vorgang_id, "eingang", d["titel"], d["dokument_datum"] or d["datei_datum"] or self.today(),
+                                         dokument_id, DIREKT_ABGELEGT)).lastrowid
+
+    def direkt_nachtragen(self, dokument_id):
+        """Nach der Texterkennung: Titel, Datum und (bekannten) Absender in automatisch angelegte Einträge übernehmen.
+        Hat der Anwender den Eintrag bearbeitet, ist das Kennzeichen weg und nichts wird überschrieben."""
+        with closing(self.connect()) as db, db:
+            eintraege = db.execute("SELECT id, kontakt_id, vorgang_id FROM eintrag WHERE dokument_id=? AND quelle=? AND geloescht_am IS NULL",
+                                   (dokument_id, DIREKT_ABGELEGT)).fetchall()
+            if not eintraege:
+                return
+            d = db.execute("SELECT titel, dokument_datum, datei_datum FROM dokument WHERE id=?", (dokument_id,)).fetchone()
+            text = "\n".join(r[0] for r in db.execute("SELECT text FROM dokumentseite WHERE dokument_id=? ORDER BY nummer", (dokument_id,)))
+            v = self._vorschlag(db, text) if text.strip() else {"datum": None, "kontakt": None}
+            datum = d["dokument_datum"] or v["datum"] or d["datei_datum"]
+            if v["datum"] and not d["dokument_datum"]:
+                db.execute("UPDATE dokument SET dokument_datum=? WHERE id=?", (v["datum"], dokument_id))
+            kontakt = v["kontakt"]["id"] if v.get("kontakt") else None
+            for e in eintraege:
+                db.execute("UPDATE eintrag SET titel=?, ereignis_datum=coalesce(?, ereignis_datum) WHERE id=?", (d["titel"], datum, e["id"]))
+                if kontakt and not e["kontakt_id"]:
+                    db.execute("UPDATE eintrag SET kontakt_id=?, richtung='von' WHERE id=?", (kontakt, e["id"]))
+                    if not db.execute("SELECT 1 FROM beteiligter WHERE vorgang_id=? AND kontakt_id=?", (e["vorgang_id"], kontakt)).fetchone():
+                        db.execute("INSERT INTO beteiligter(vorgang_id,kontakt_id,rolle) VALUES(?,?,'')", (e["vorgang_id"], kontakt))
+
+    def nach_texterkennung(self, dokument_id):
+        self.ablage_nachtragen(dokument_id)
+        self.direkt_nachtragen(dokument_id)
 
     def ablage_nachtragen(self, dokument_id):
         """Nach der Texterkennung: Bei direkt archivierten Dokumenten Datum, Titel und Absender aus dem Text übernehmen."""
@@ -2038,6 +2080,21 @@ def test_fristen_ablage(store):  # noqa: C901
     assert akte.oberflaeche_setzen({"filteransicht": "menue"})["filteransicht"] == "menue"
     assert akte.oberflaeche()["filteransicht"] == "menue"
     akte.oberflaeche_setzen({"filteransicht": "chips"})
+    # Direkt im Vorgang abgelegt: Chronik-Eintrag sofort, Titel/Datum/Absender nach der Texterkennung
+    kd = akte.kontakt_anlegen({"name": "Amtsgericht Rostock"})
+    dd, _ = store.import_document(b, "Scan_0042.pdf", b"%PDF-1.4\nDirekt")
+    eid = akte.direkt_eintrag(b, dd)
+    assert eid and akte.direkt_eintrag(b, dd) is None  # kein doppelter Eintrag
+    with closing(store.connect()) as db, db:
+        db.execute("INSERT INTO dokumentseite(dokument_id,nummer,methode,text) VALUES(?,?,?,?)", (dd, 1, "ocr",
+                   "Amtsgericht Rostock · Zochstraße 13 · 18057 Rostock\nRostock, 17.11.2026\nForderung TÜV"))
+        db.execute("UPDATE dokument SET titel='Forderung TÜV', titel_quelle='Überschrift' WHERE id=?", (dd,))
+    akte.nach_texterkennung(dd)
+    ed = [e for e in akte.akte(b)["eintraege"] if e["id"] == eid][0]
+    assert (ed["art"], ed["titel"], ed["ereignis_datum"], ed["kontakt_id"]) == ("eingang", "Forderung TÜV", "2026-11-17", kd), ed
+    akte.eintrag_aendern(eid, {"titel": "Eigener Titel"})
+    akte.nach_texterkennung(dd)
+    assert [e for e in akte.akte(b)["eintraege"] if e["id"] == eid][0]["titel"] == "Eigener Titel"
     # Eigene Eintragsart
     assert akte.eintragsart_anlegen("Ortstermin") == "Ortstermin"
     try:
