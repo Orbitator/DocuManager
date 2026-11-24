@@ -44,6 +44,7 @@ const P = {
   mail:'<rect x="3" y="5" width="18" height="14" rx="2"/><path d="m3 7 9 6 9-6"/>',
   move:'<path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><path d="M9 13h7M13 10l3 3-3 3"/>',
   info:'<circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8h.01"/>',
+  lupe:'<circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/>',
   rotl:'<path d="M4 12a8 8 0 1 0 2.3-5.6M4 4v5h5"/>',
   rotr:'<path d="M20 12a8 8 0 1 1-2.3-5.6M20 4v5h-5"/>',
   refresh:'<path d="M20 12a8 8 0 1 1-2.3-5.6M20 4v5h-5"/>',
@@ -276,9 +277,10 @@ function tileHtml(p) {
   const bereit = !/Wartet|läuft/.test(p.ocr_status || '');
   const prev = p.mime === 'message/rfc822' || !bereit ? text
     : `${text}<img class="thumb" src="/api/documents/${p.id}/vorschaubild?v=${encodeURIComponent(p.ocr_status + (p.seiten[0]?.drehung || 0))}" alt="" loading="lazy" onerror="this.remove()">`;
-  return `<button class="tile ${S.ibSel === p.id ? 'on' : ''}" id="it-${p.id}" role="listitem" data-act="ib-open" data-id="${p.id}" aria-pressed="${S.ibSel === p.id}">
-   <span class="tprev">${prev}</span><span class="tname" title="${esc(p.dateiname)}">${esc(p.titel)}</span>
-   <span class="tmeta num">${groesse(p.groesse)} · ${dt(p.angelegt_am)}</span><span class="pill ${cls} tstate">${lbl}</span></button>`;
+  return `<div class="tile ${S.ibSel === p.id ? 'on' : ''}" id="it-${p.id}" role="button" tabindex="0" data-act="ib-open" data-id="${p.id}" aria-pressed="${S.ibSel === p.id}" aria-label="${esc(p.titel)}">
+   <span class="tprev">${prev}<span class="tacts"><button class="tbtn" data-act="tile-view" data-id="${p.id}" title="Bildschirmfüllend ansehen" aria-label="${esc(p.titel)} ansehen">${I('lupe')}</button><button class="tbtn del" data-act="tile-del" data-id="${p.id}" title="Löschen (in den Papierkorb)" aria-label="${esc(p.titel)} löschen">${I('trash')}</button></span></span>
+   <span class="tname" title="${esc(p.dateiname)}">${esc(p.titel)}</span>
+   <span class="tmeta num">${groesse(p.groesse)} · ${dt(p.angelegt_am)}</span><span class="pill ${cls} tstate">${lbl}</span></div>`;
 }
 const draft = {};  // Eingaben im Posteingang bis zum Zuordnen
 function detailHtml(p) {
@@ -925,7 +927,12 @@ function modal(title, html, onSave, saveLabel = 'Speichern', cls = '') {
 }
 const closeModal = () => { $('#modalroot').innerHTML = ''; modalSave = null; };
 let toastTimer;
-function toast(m) { const t = $('#toast'); t.textContent = m; t.hidden = false; clearTimeout(toastTimer); toastTimer = setTimeout(() => t.hidden = true, 3800); }
+let toastAktion = null;
+function toast(m, aktion, fn) {
+  const t = $('#toast'); t.textContent = m; toastAktion = null;
+  if (aktion && fn) { toastAktion = fn; const b = document.createElement('button'); b.className = 'toastknopf'; b.dataset.act = 'toast-aktion'; b.textContent = aktion; t.append(' ', b); }
+  t.hidden = false; clearTimeout(toastTimer); toastTimer = setTimeout(() => { t.hidden = true; toastAktion = null; }, aktion ? 7000 : 3800);
+}
 const istMail = id => [...D.inbox, ...(D.akte?.dokumente || []), ...D.archiv].some(d => d.id === +id && d.mime === 'message/rfc822');
 async function mailTexte() {  // E-Mails zeigen ihren Text statt der Rohdatei
   for (const box of document.querySelectorAll('.mailtext[data-mail]')) {
@@ -1100,6 +1107,14 @@ document.addEventListener('click', async ev => {
   case 'scan-folder': $('#impmenu').hidden = true; try { const r = await api('scanordner/oeffnen', {}); toast(`Ordner „${r.pfad.split('/').pop()}“ (in Ihrem Benutzerordner) geöffnet. Was Sie dort hineinscannen oder ablegen, kommt automatisch in den Posteingang.`); } catch (e) { toast(e.message); } break;
   case 'ib-open': S.ibSel = S.ibSel === id ? null : id; zeichne(vInbox); if (S.ibSel) $('#it-' + S.ibSel)?.scrollIntoView({behavior: 'smooth', block: 'nearest'}); break;
   case 'ib-close': S.ibSel = null; zeichne(vInbox); break;
+  case 'tile-view': { const p = D.inbox.find(x => x.id === id); openViewer(id, p ? p.titel : 'Dokument'); break; }
+  case 'tile-del': {  // ohne Rückfrage: in den Papierkorb, mit „Rückgängig“ in der Meldung
+    const p = D.inbox.find(x => x.id === id);
+    try { await api(`dokument/${id}/loeschen`, {}); } catch (e) { toast(e.message); break; }
+    D.inbox = D.inbox.filter(x => x.id !== id); if (S.ibSel === id) S.ibSel = null; zeichne(vInbox); nav();
+    toast(`„${p ? p.titel : 'Dokument'}“ gelöscht.`, 'Rückgängig', async () => { await api(`dokument/${id}/wiederherstellen`, {}); toast('Wiederhergestellt.'); await render(); });
+    break; }
+  case 'toast-aktion': { const f = toastAktion; toastAktion = null; $('#toast').hidden = true; if (f) try { await f(); } catch (e) { toast(e.message); } break; }
   case 'ib-del': await act(() => api(`dokument/${id}/loeschen`, {}), 'In den Papierkorb verschoben.'); break;
   case 'ib-assign': try { await assign(id, el.dataset.v); } catch (e) { toast(e.message); } break;
   case 'ib-archiv': try { await assign(id, 'ablage'); } catch (e) { toast(e.message); } break;
@@ -1295,7 +1310,7 @@ document.addEventListener('input', ev => {
 });
 document.addEventListener('keydown', ev => {
   if (ev.key === 'Escape') { if (!$('#viewer').hidden) closeViewer(); else closeModal(); $('#results').hidden = true; }
-  if ((ev.key === 'Enter' || ev.key === ' ') && ev.target.matches('.card[data-act]')) { ev.preventDefault(); ev.target.click(); }
+  if ((ev.key === 'Enter' || ev.key === ' ') && ev.target.matches('.card[data-act], .tile[data-act]')) { ev.preventDefault(); ev.target.click(); }
 });
 let dubTimer;
 function dubletten(name) { clearTimeout(dubTimer); dubTimer = setTimeout(async () => { const box = $('#m-kd'); if (!box) return;

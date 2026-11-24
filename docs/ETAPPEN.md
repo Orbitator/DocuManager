@@ -118,6 +118,9 @@ Teil 2 (umgesetzt, Schemaversion 7):
   `dokument`; `migrate_9` baut die Tabelle ohne sie neu (Zugehörigkeit regelt `dokument_vorgang`). Der Scan-Ordner
   liegt jetzt unter `~/DocuManager Scans` (nicht in „Dokumente“, das macOS für Programme gesondert schützt).
   Fehlermeldungen beim Speichern nennen die Ursache.
+- 0.14.1: Posteingang-Kacheln mit zwei kleinen Knöpfen im Vorschaubild: Lupe (bildschirmfüllende Seitenansicht) und
+  Papierkorb (ohne Rückfrage, Meldung mit „Rückgängig“). Die Kachel ist dafür kein `<button>` mehr, sondern ein
+  per Maus und Tastatur bedienbares Element mit `role="button"`.
 - 0.14: ChatGPT-Lesezeichen „→ DocuManager“ (`chatgpt_lesezeichen.js`, eingerichtet unter Einstellungen). Es läuft in
   der angemeldeten ChatGPT-Seite (Safari oder Chrome, nicht in der ChatGPT-App), liest den geöffneten Chat und dessen
   hochgeladene Dateien über die Schnittstelle der Seite und übergibt alles per postMessage an das DocuManager-Fenster

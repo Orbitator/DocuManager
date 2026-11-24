@@ -455,3 +455,10 @@ button.heute:hover{background:var(--surface-2,rgba(127,127,127,.18))}
 .fsel{display:inline-flex;align-items:center;gap:6px}
 .fsel select{padding:5px 28px 5px 10px;border:1px solid var(--line-strong);border-radius:8px;background:var(--surface);color:var(--fg);font:inherit;font-size:13.5px;max-width:240px}
 .fumsch{flex:none;font-size:15px;line-height:1}
+.tacts{position:absolute;top:6px;right:6px;z-index:2;display:flex;gap:4px}
+.tbtn{display:grid;place-items:center;width:28px;height:28px;border-radius:7px;border:1px solid rgba(0,0,0,.12);background:rgba(255,255,255,.92);color:#1f2a44;cursor:pointer;padding:0;box-shadow:0 1px 4px rgba(0,0,0,.18);opacity:.85;transition:opacity .12s,transform .12s}
+.tbtn svg{width:15px;height:15px}
+.tile:hover .tbtn,.tbtn:focus-visible{opacity:1}
+.tbtn:hover{transform:scale(1.08)}
+.tbtn.del:hover{background:#d93a3a;color:#fff;border-color:#d93a3a}
+.toastknopf{margin-left:10px;padding:3px 10px;border-radius:6px;border:1px solid currentColor;background:transparent;color:inherit;font:inherit;font-weight:600;cursor:pointer}
