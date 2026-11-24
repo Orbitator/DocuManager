@@ -113,7 +113,7 @@ function nav() {
   document.querySelector('.side-foot a[href="#einstellungen"]').innerHTML = `${I('gear')}Einstellungen`;
   $('#version').textContent = D.version || '';
 }
-const VIEWS = ['uebersicht','posteingang','vorgaenge','fristen','archiv','adressbuch','chat','papierkorb','einstellungen'];
+const VIEWS = ['uebersicht','posteingang','vorgaenge','fristen','archiv','adressbuch','chat','papierkorb','einstellungen','chatempfang'];
 async function route() {
   const h = location.hash.slice(1);
   if (h.startsWith('akte-')) { const id = +h.slice(5); if (S.v !== id) { S.v = id; S.teil = 'all'; S.entry = null; S.tab = 'chronik'; } S.view = 'akte'; }
@@ -141,9 +141,10 @@ async function render() {
   nav();
   werkzeugeParken();
   $('#view').innerHTML = ({uebersicht: vHome, posteingang: vInbox, vorgaenge: vList, akte: vAkte, fristen: vFristen,
-    archiv: vArchiv, adressbuch: vAb, chat: vChat, papierkorb: vTrash, einstellungen: vSettings})[S.view]();
+    archiv: vArchiv, adressbuch: vAb, chat: vChat, papierkorb: vTrash, einstellungen: vSettings, chatempfang: vEmpfang})[S.view]();
   textPanes();
   werkzeugeEinsetzen();
+  if (S.view === 'einstellungen' && $('#lz-link')) fetch('/chatgpt_lesezeichen.js').then(r => r.text()).then(code => { $('#lz-link').href = 'javascript:' + encodeURIComponent(code.replace(/^\/\*[\s\S]*?\*\/\s*/, '')); });
   document.querySelector('.imp').hidden = !['posteingang', 'archiv'].includes(S.view);
   $('#impbtn').firstChild.textContent = S.view === 'archiv' ? 'Im Archiv ablegen ' : 'Dokument importieren ';
   if (S.view === 'archiv' && D.archiv.some(d => /Wartet|läuft/.test(d.ocr_status || ''))) { clearTimeout(followTimer); followTimer = setTimeout(() => { if (S.view === 'archiv' && !$('#modalroot').innerHTML) render(); }, 3000); }
@@ -711,6 +712,74 @@ function exportDialog() {
     closeModal(); location.href = `/api/akte/${a.id}/export?docs=${ids.length === a.dokumente.length ? 'alle' : ids.join(',') || '0'}`; toast('ZIP wird erstellt und heruntergeladen.'); return false;
   }, 'ZIP herunterladen');
 }
+// ---------- Aus ChatGPT übernehmen (Lesezeichen) ----------
+let EMPFANG = null;
+const EMPF_ERLAUBT = /\.(pdf|jpe?g|png|tiff?|docx|eml)$/i;
+const ENDUNG = {'application/pdf': '.pdf', 'image/jpeg': '.jpg', 'image/png': '.png', 'image/tiff': '.tif', 'image/webp': '.webp', 'image/gif': '.gif', 'message/rfc822': '.eml',
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document': '.docx'};
+function empfangVorbereiten(paket) {
+  paket.dateien = (paket.dateien || []).map((d, i) => {
+    let name = (d.name || '').trim() || `Datei ${i + 1}`;
+    if (!/\.[a-z0-9]{2,5}$/i.test(name) && ENDUNG[(d.mime || '').split(';')[0]]) name += ENDUNG[(d.mime || '').split(';')[0]];
+    const bild = /^image\/(webp|gif|heic|avif)/.test(d.mime || '') || /\.(webp|gif|heic|avif)$/i.test(name);
+    return {...d, name, umwandeln: bild && !!d.daten, an: !!d.daten && (EMPFANG_OK(name) || bild)};
+  });
+  return paket;
+}
+const EMPFANG_OK = name => EMPF_ERLAUBT.test(name);
+addEventListener('message', ev => {
+  if (!/^https:\/\/(chatgpt\.com|chat\.openai\.com)$/.test(ev.origin) || !ev.data || ev.data.documanager !== 'chat') return;
+  try { ev.source.postMessage({documanager: 'erhalten'}, ev.origin); } catch (e) { /* Absender schon geschlossen */ }
+  if (EMPFANG && EMPFANG.url === ev.data.url) return;  // dieselbe Sendung, wiederholt
+  EMPFANG = empfangVorbereiten(ev.data);
+  if (location.hash !== '#chatempfang') location.hash = 'chatempfang'; else render();
+});
+function empfangAusDatei(text) {
+  const p = JSON.parse(text);
+  if (p.documanager !== 'chat') throw new Error('Keine DocuManager-Datei aus ChatGPT.');
+  p.dateien = (p.dateien || []).map(d => d.daten ? {...d, daten: Uint8Array.from(atob(d.daten), c => c.charCodeAt(0)).buffer} : d);
+  EMPFANG = empfangVorbereiten(p);
+  if (location.hash !== '#chatempfang') location.hash = 'chatempfang'; else render();
+}
+function vEmpfang() {
+  if (!EMPFANG) return `<h1>Aus ChatGPT übernehmen</h1><div class="panel stack" style="margin-top:16px"><p style="margin:0">Warte auf Daten aus ChatGPT … Öffnen Sie in ChatGPT den gewünschten Chat und klicken Sie in der Lesezeichenleiste auf <b>„→ DocuManager“</b>.</p>
+    <p class="muted" style="margin:0;font-size:13px">Das Lesezeichen richten Sie unter <a href="#einstellungen">Einstellungen → ChatGPT-Lesezeichen</a> ein. Hat das Lesezeichen eine Datei <code>….documanager.json</code> gespeichert, ziehen Sie sie hierher.</p></div>`;
+  const e = EMPFANG, mitDaten = e.dateien.filter(d => d.daten);
+  return `<h1>Aus ChatGPT übernehmen</h1><p class="muted" style="margin:6px 0 16px">Chat <b>${esc(e.titel)}</b> · ${e.nachrichten.length} Beiträge · ${mitDaten.length} von ${e.dateien.length} Datei(en) erhalten</p>
+  <div class="panel stack">
+   <label class="stack" style="gap:5px;font-size:13px;color:var(--muted)">Ablegen in<select id="em-ziel" class="inp" style="max-width:420px"><option value="">Posteingang (später zuordnen)</option>${vorgangOptionen('')}<option value="__new">+ Neuer Vorgang …</option></select></label>
+   <div><h3 style="margin:6px 0">Dateien</h3>${e.dateien.length ? `<div class="stack" style="gap:6px">${e.dateien.map((d, i) => `<label class="chk"><input type="checkbox" class="em-datei" value="${i}" ${d.an ? 'checked' : ''} ${d.daten && (EMPFANG_OK(d.name) || d.umwandeln) ? '' : 'disabled'}>
+      ${typIcon(d.mime)} ${esc(d.name)} <span class="muted" style="font-size:12px">${d.daten ? groesse(d.daten.byteLength) : ''}${d.fehler ? ' · ' + esc(d.fehler) + ' (ChatGPT gibt die Datei nicht heraus)' : !EMPFANG_OK(d.name) && !d.umwandeln ? ' · Format wird nicht unterstützt' : d.umwandeln ? ' · wird als PNG übernommen' : ''}</span></label>`).join('')}</div>` : '<p class="muted" style="margin:0">In diesem Chat wurden keine Dateien hochgeladen.</p>'}</div>
+   <label class="chk"><input type="checkbox" id="em-notiz" ${e.nachrichten.length ? 'checked' : 'disabled'}>Chatverlauf als Chat-Notiz im Vorgang speichern <span class="muted" style="font-size:12px">(nur mit Vorgang)</span></label>
+   <div style="display:flex;gap:8px"><button class="btn pri" data-act="em-los">Übernehmen</button><button class="btn ghost" data-act="em-verwerfen">Verwerfen</button></div></div>`;
+}
+async function alsDatei(d) {
+  if (!d.umwandeln) return new File([d.daten], d.name, {type: d.mime || ''});
+  const bild = await createImageBitmap(new Blob([d.daten], {type: d.mime || 'image/webp'}));
+  const c = document.createElement('canvas'); c.width = bild.width; c.height = bild.height; c.getContext('2d').drawImage(bild, 0, 0);
+  const png = await new Promise(r => c.toBlob(r, 'image/png'));
+  return new File([png], d.name.replace(/\.[a-z0-9]+$/i, '') + '.png', {type: 'image/png'});
+}
+async function empfangUebernehmen(vorgang) {
+  const e = EMPFANG, gewaehlt = [...document.querySelectorAll('.em-datei:checked')].map(x => e.dateien[+x.value]);
+  const notiz = $('#em-notiz')?.checked && vorgang;
+  if (!gewaehlt.length && !notiz) { toast('Bitte eine Datei wählen oder einen Vorgang für die Chat-Notiz.'); return; }
+  let neu = 0; const fehler = [];
+  for (const d of gewaehlt) {
+    toast(`„${d.name}“ wird abgelegt …`);
+    try { const r = await upload(vorgang ? `cases/${vorgang}/documents` : 'posteingang/dokumente', await alsDatei(d)); if (r.created) neu++; }
+    catch (err) { fehler.push(`${d.name}: ${err.message}`); }
+  }
+  if (notiz) {
+    const text = e.nachrichten.map(n => `${n.rolle === 'user' ? 'Ich' : 'ChatGPT'}: ${n.text}`).join('\n\n').slice(0, 19500);
+    const erste = e.nachrichten.find(n => n.zeit);
+    try { await api(`akte/${vorgang}/chatnotiz`, {titel: e.titel.slice(0, 200), quelle: 'ChatGPT: ' + e.url, datum: erste ? new Date(erste.zeit * 1000).toISOString().slice(0, 10) : isoHeute(), text}); }
+    catch (err) { fehler.push('Chat-Notiz: ' + err.message); }
+  }
+  toast(`${neu} Datei(en) übernommen${notiz ? ', Chatverlauf als Chat-Notiz gespeichert' : ''}${fehler.length ? ' · ' + fehler.join(' · ') : ''}.`);
+  EMPFANG = null;
+  if (vorgang) { S.v = +vorgang; S.tab = 'chronik'; S.teil = 'all'; S.entry = null; location.hash = 'akte-' + vorgang; } else location.hash = 'posteingang';
+}
 function vChat() {
   return `<div class="head" style="justify-content:space-between"><h1>Chat-Notizen</h1><span style="display:flex;gap:8px"><button class="btn" data-act="chat-export">ChatGPT-Export importieren …</button><button class="btn pri" data-act="chat-new">${I('plus')}Chat-Notiz übernehmen</button></span></div>
   <p class="muted" style="margin:6px 0 16px;max-width:75ch">Zusammenfassungen und Auszüge aus Chats, etwa aus ChatGPT, mit Quellenhinweis. Sie bleiben als ungeprüft gekennzeichnet, bis Sie sie mit den Originalen abgeglichen haben. Im Text erwähnte Schreiben, die in der Akte fehlen, werden als „Original fehlt“ vermerkt.</p>
@@ -829,6 +898,9 @@ function vSettings() {
    <div class="panel stack"><div class="chron-h"><h2>Eintragsarten</h2><button class="btn sm" data-act="art-neu">${I('plus')}Art</button></div>
     <p style="margin:0" class="muted">Eigene Arten für die Chronik, z. B. Besprechung oder Ortstermin. Die eingebauten Arten (Eingang, Versendet, Telefonat, Notiz …) bleiben immer.</p>
     <ul class="mini">${(D.arten || []).map(t => `<li><span>${esc(t)}</span><button class="btn sm ghost" data-act="art-del" data-name="${esc(t)}">Entfernen</button></li>`).join('') || '<li class="muted">Noch keine eigenen Arten.</li>'}</ul></div>
+   <div class="panel stack"><h2>ChatGPT-Lesezeichen</h2><p style="margin:0">Übernimmt den in ChatGPT geöffneten Chat samt hochgeladener Dateien. Einrichten: Lesezeichenleiste einblenden (Safari: Darstellung → Favoritenleiste einblenden; Chrome: ⇧⌘B), dann den Knopf hineinziehen.</p>
+    <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap"><a class="btn pri" id="lz-link" href="#" onclick="event.preventDefault();toast('Bitte in die Lesezeichenleiste ziehen, nicht anklicken.')">→ DocuManager</a><button class="btn sm ghost" data-act="lz-kopieren">Adresse kopieren</button></div>
+    <p class="muted" style="margin:0;font-size:12.5px">Benutzung: Chat in ChatGPT im Browser öffnen (nicht in der ChatGPT-App), Lesezeichen anklicken, im DocuManager-Fenster Vorgang und Dateien wählen. Klappt das Ziehen nicht: „Adresse kopieren“, ein beliebiges Lesezeichen anlegen und dessen Adresse durch die kopierte ersetzen.</p></div>
    <div class="panel stack"><h2>Zulässige Empfänger</h2><p style="margin:0">Für wen Post ankommt, z. B. Ihre Firma und Sie persönlich, ein Name pro Zeile. Die Erkennung ordnet jedes Schreiben dem Empfänger zu, der im Anschriftenfeld steht; im Archiv lässt sich danach gruppieren.</p>
     <textarea id="empflist" class="inp" rows="3" placeholder="Orbit Cross media e.K.&#10;Sven Muster">${esc((D.empfaenger || []).join('\n'))}</textarea><div><button class="btn" data-act="empf-save">Speichern</button></div></div>
    <div class="panel stack"><h2>Eigene Angaben</h2><p style="margin:0">Ihr Name und Ihre Anschrift, eine Angabe pro Zeile. Die Absendererkennung schlägt diese Angaben nie als Absender vor.</p>
@@ -1066,6 +1138,9 @@ document.addEventListener('click', async ev => {
   case 'suche-auf': { const box = el.closest('.search'); box.classList.add('offen'); $('#q').focus(); break; }
   case 'filteransicht': try { D.ui = await api('oberflaeche', {filteransicht: (D.ui || {}).filteransicht === 'menue' ? 'chips' : 'menue'}); } catch (e) { toast(e.message); }
     if (S.view === 'akte') paintAkte(); else await render(); break;
+  case 'em-verwerfen': EMPFANG = null; await render(); break;
+  case 'em-los': { const ziel = val('em-ziel'); if (ziel === '__new') newVorgang(nv => empfangUebernehmen(nv)); else await empfangUebernehmen(ziel); break; }
+  case 'lz-kopieren': try { await navigator.clipboard.writeText($('#lz-link').href); toast('Lesezeichen-Adresse kopiert.'); } catch (e) { toast('Kopieren nicht möglich. Bitte den Knopf in die Lesezeichenleiste ziehen.'); } break;
   case 'vgroup': S.vGroup = el.dataset.id; await render(); break;
   case 'vb': S.vb = id === null ? 'alle' : String(el.dataset.id); await render(); break;
   case 'vs': S.vs = el.dataset.id; await render(); break;
@@ -1192,6 +1267,7 @@ document.addEventListener('change', async ev => {
     el.after(knopf); knopf.click(); knopf.remove();
   }
   if (el.classList.contains('madd') && el.value) { const id = el.dataset.multi; multiSetzen(id, [...multiWert(id), el.value]); }
+  if (el.id === 'chatinp' && el.files[0] && /\.documanager\.json$/i.test(el.files[0].name)) { const f = el.files[0]; el.value = ''; try { empfangAusDatei(await f.text()); } catch (err) { toast(err.message); } return; }
   if (el.id === 'chatinp' && el.files[0]) { const f = el.files[0]; el.value = ''; toast('Export wird gelesen …');
     try { const res = await holen('/api/chat/preview', {method: 'POST', body: f, headers: {'X-Korrespondenz': 'lokal'}}); const r = await res.json(); if (!res.ok) throw new Error(r.error || 'Export nicht lesbar.');
       modal(`ChatGPT-Export · ${r.threads.length} Unterhaltungen`, `<p style="margin:0">Unterhaltungen auswählen (bis zu 100). Bereits importierte werden aktualisiert.</p>
@@ -1272,7 +1348,10 @@ async function scan(insArchiv) {
 }
 addEventListener('dragover', e => { if ([...(e.dataTransfer?.types || [])].includes('Files')) { e.preventDefault(); document.body.classList.add('dragging'); } });
 addEventListener('dragleave', e => { if (!e.relatedTarget) document.body.classList.remove('dragging'); });
-addEventListener('drop', e => { document.body.classList.remove('dragging'); if (e.dataTransfer?.files?.length) { e.preventDefault(); importFiles([...e.dataTransfer.files], S.view === 'akte' ? D.akte.id : S.view === 'archiv' ? 'archiv' : null); } });
+addEventListener('drop', e => { document.body.classList.remove('dragging'); const fs = [...(e.dataTransfer?.files || [])];
+  const paket = fs.find(f => /\.documanager\.json$/i.test(f.name));
+  if (paket) { e.preventDefault(); paket.text().then(empfangAusDatei).catch(err => toast(err.message)); return; }
+  if (e.dataTransfer?.files?.length) { e.preventDefault(); importFiles([...e.dataTransfer.files], S.view === 'akte' ? D.akte.id : S.view === 'archiv' ? 'archiv' : null); } });
 addEventListener('hashchange', route);
 route();
 })();

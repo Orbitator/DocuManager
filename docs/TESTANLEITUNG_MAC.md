@@ -153,6 +153,17 @@ Erst wenn Schritt 2 bis 4 funktionieren. Die bisherige Anwendung vorher beenden.
 4. Falls die Texterkennung gar nicht mehr läuft: die letzten Zeilen aus `Daten/Logs/korrespondenz.log` schicken
    (der Helfer wird bei diesem Stand neu gebaut).
 
+## 12. ChatGPT-Lesezeichen
+
+1. **Einstellungen → ChatGPT-Lesezeichen**: Lesezeichenleiste einblenden (Safari: Darstellung → Favoritenleiste
+   einblenden; Chrome: ⇧⌘B) und den Knopf **„→ DocuManager“** hineinziehen.
+2. In Safari oder Chrome bei ChatGPT anmelden und einen Chat öffnen, in dem Sie eine Datei hochgeladen haben.
+3. Das Lesezeichen anklicken. Erwartet: Unten rechts erscheint ein blauer Hinweis, ein DocuManager-Fenster öffnet sich
+   mit Chat-Titel und Dateiliste.
+4. Vorgang wählen, Dateien anhaken, **Übernehmen**. Erwartet: Die Dateien stehen als Dokumente im Vorgang.
+5. Falls stattdessen eine Datei `….documanager.json` in Downloads landet: in das DocuManager-Fenster ziehen.
+6. Bitte melden, was der blaue Hinweis anzeigt, falls etwas nicht klappt.
+
 ## Rückmeldung
 
 Bitte mitteilen:

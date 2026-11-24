@@ -118,6 +118,13 @@ Teil 2 (umgesetzt, Schemaversion 7):
   `dokument`; `migrate_9` baut die Tabelle ohne sie neu (Zugehörigkeit regelt `dokument_vorgang`). Der Scan-Ordner
   liegt jetzt unter `~/DocuManager Scans` (nicht in „Dokumente“, das macOS für Programme gesondert schützt).
   Fehlermeldungen beim Speichern nennen die Ursache.
+- 0.14: ChatGPT-Lesezeichen „→ DocuManager“ (`chatgpt_lesezeichen.js`, eingerichtet unter Einstellungen). Es läuft in
+  der angemeldeten ChatGPT-Seite (Safari oder Chrome, nicht in der ChatGPT-App), liest den geöffneten Chat und dessen
+  hochgeladene Dateien über die Schnittstelle der Seite und übergibt alles per postMessage an das DocuManager-Fenster
+  `#chatempfang`. Dort Vorgang (oder Posteingang) wählen, Dateien anhaken, optional Chatverlauf als Chat-Notiz.
+  Bilder in WebP/GIF/HEIC werden als PNG übernommen. Ist die direkte Übergabe nicht möglich, speichert das Lesezeichen
+  `…documanager.json` in Downloads; die Datei lässt sich in DocuManager ziehen oder über Chat-Notizen einlesen.
+  Hinweis: Die ChatGPT-Schnittstelle ist nicht öffentlich dokumentiert und kann sich ändern.
 - 0.13: Filter in Vorgänge, Archiv, Chronik und Fristen wahlweise als Schaltflächen untereinander oder als
   Ausklappmenüs in einer Zeile (`filterBlock()`); umgeschaltet über das kleine Symbol am Ende der Filter, gespeichert
   in der Datenbank (`einstellung` „oberflaeche“, GET/POST `/api/oberflaeche`) und damit dauerhaft.
