@@ -167,6 +167,14 @@ Teil 2 (umgesetzt, Schemaversion 7):
   Updates erhalten. Der Claude-Dialog zeigt den gespeicherten Verlauf mit Datum, Folgefragen knüpfen daran an; der
   Briefdialog lädt die letzte Bewertung und bietet frühere Entwürfe zur Übernahme an. Briefschrift 10,5 pt (Druck und
   Vorschau).
+- 0.20.0: Zwischenspeicher neu aufgebaut. Bisher stand alles Wechselnde (Status, Fristen, gewähltes Schreiben, jede neue
+  Notiz) im zwischengespeicherten Teil – jede Anfrage schrieb ihn neu, gelesen wurde nie. Jetzt drei Teile: UNTERLAGEN
+  (Volltexte, nach Eingang sortiert, plus Faktenregister; Merker 1 Stunde), CHRONIK (Einträge im Wortlaut, Dokumente
+  über D<Nr> verwiesen; Merker 5 Minuten) und STAND (in der Frage, hinter dem Speicher). Denktiefe einheitlich mittel.
+  Zwischenspeicher-Diagnose (Beta) nennt die Ursache, wenn er verfehlt wird; Token und Kosten je Antwort sichtbar und im
+  Protokoll. **Faktenregister**: Beträge, Daten, Aktenzeichen/Nummern/IBAN und Fristen je Dokument, lokal und kostenlos
+  aus den Texten gezogen. Briefansicht passt sich der Fensterbreite an (Druck unverändert). Rücklöschtaste navigiert nicht
+  mehr zurück; im Posteingang löscht sie (wie Entf) das gewählte Dokument, mit Rückgängig.
 - 0.16: Scannen ohne Dialog. „Scannen“ scannt sofort mit dem zuletzt benutzten Scanner (`Daten/scanner.json`):
   Einzug wenn vorhanden, sonst Glas; beidseitig, wenn möglich; 300 dpi Farbe. Die Seiten werden mit PDFKit zu einem
   komprimierten PDF zusammengefügt (leere Rückseiten fallen weg) und landen im Posteingang bzw. Archiv. Nur ein kleines

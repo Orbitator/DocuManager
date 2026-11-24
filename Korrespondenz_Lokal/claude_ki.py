@@ -6,7 +6,9 @@ Datenbank, damit er nicht in Datensicherungen landet. Übertragen wird nur, was 
 gewählten Dokuments und eine knappe Übersicht des Vorgangs.
 """
 import json
+import logging
 import os
+import re
 import urllib.error
 import urllib.request
 from contextlib import closing
@@ -16,16 +18,18 @@ API = "https://api.anthropic.com/v1/messages"
 MODELL = "claude-opus-5-5"  # gründlichste Stufe
 # Stufen: Modell, Preise in $ je Million Token (Eingabe, Ausgabe, Cache lesen, Cache schreiben 5 Min.)
 STUFEN = {
-    "sparsam": {"modell": "claude-haiku-5-5", "name": "Sparsam", "preise": (0.10, 0.50, 0.01, 0.125)},
-    "ausgewogen": {"modell": "claude-sonnet-5-5", "name": "Ausgewogen", "preise": (2.0, 10.0, 0.10, 2.50)},
-    "gruendlich": {"modell": MODELL, "name": "Gründlich", "preise": (4.0, 20.0, 0.20, 5.0)},
+    "sparsam": {"modell": "claude-haiku-5-5", "name": "Sparsam", "preise": (0.10, 0.50, 0.01, 0.125, 0.20)},
+    "ausgewogen": {"modell": "claude-sonnet-5-5", "name": "Ausgewogen", "preise": (2.0, 10.0, 0.10, 2.50, 4.0)},
+    "gruendlich": {"modell": MODELL, "name": "Gründlich", "preise": (4.0, 20.0, 0.20, 5.0, 8.0)},
 }
 STANDARD_STUFE = "gruendlich"
 # Denktiefe je Aufgabe: einfache Aufgaben knapp, Bewertung gründlich (Denken kostet Ausgabe-Token)
-AUFWAND = {"zusammenfassen": "low", "fristen": "low", "frage": "medium", "pruefen": "medium", "bewerten": "medium",
+# Einheitlich „medium“: ein Wechsel der Denktiefe zwischen Anfragen kann den Zwischenspeicher ungültig machen.
+AUFWAND = {"zusammenfassen": "medium", "fristen": "medium", "frage": "medium", "pruefen": "medium", "bewerten": "medium",
            "antwort": "medium", "schreiben": "medium", "ueberarbeiten": "medium"}
 API_VERSION = "2026-10-21"
-FALLBACK_BETA = "server-side-fallback-2026-07-01"  # bei Ablehnung durch Sicherheitsfilter automatisch Ersatzmodell
+FALLBACK_BETA = "server-side-fallback-2026-07-01"
+DIAGNOSE_BETA = "cache-diagnosis-2026-04-07"  # meldet, warum der Zwischenspeicher nicht getroffen wurde  # bei Ablehnung durch Sicherheitsfilter automatisch Ersatzmodell
 MAX_KONTEXT = 600_000  # Zeichen Aktentext je Anfrage (rund 150 000 Token); darüber wird gekürzt
 KURZFASSUNG = 3000  # so viel bleibt von einem älteren fremden Dokument, wenn gekürzt werden muss
 
@@ -139,11 +143,53 @@ PRUEF_SCHEMA = {
 }
 
 
+_BETRAG = re.compile(r"(?:€|EUR)\s?\d{1,3}(?:\.\d{3})*(?:,\d{2})?|\d{1,3}(?:\.\d{3})*(?:,\d{2}|,-)\s?(?:€|(?:EUR|Euro)\b)")
+_DATUM = re.compile(r"\b(?:0?[1-9]|[12]\d|3[01])\.(?:0?[1-9]|1[0-2])\.(?:19|20)\d{2}\b")
+_NUMMERN = re.compile(
+    r"\b\d{1,3}\s?[A-Z]{1,3}\s?\d{1,6}/\d{2,4}\b"                              # Aktenzeichen 50 C 184/26
+    r"|\b(?:HRB|HRA|VR|GnR|PR)\s?\d{2,7}\b"                                     # Registernummern
+    r"|\bDE\d{2}(?:\s?\d{4}){4}\s?\d{2}\b"                                      # IBAN
+    r"|\b(?:Rechnungs|Kunden|Vertrags|Versicherungsschein|Steuer|Mitglieds|Auftrags|Schaden|Bestell)"
+    r"(?:-?[Nn]ummer|-?[Nn]r\.?)\s*:?\s*[A-Z0-9][A-Z0-9\-/.]{3,}")
+_FRIST = re.compile(r"(?:bis zum|bis spätestens|spätestens bis|binnen|innerhalb von)\s"
+                    r"(?:\d{1,2}\.\d{1,2}\.\d{2,4}|(?:\d{1,2}\.\s?[A-Za-zä]+\s\d{4})|[^.\n]{3,50})", re.I)
+
+
+def kosten(nutzung, stufe):
+    """Kosten einer Anfrage in $ aus der Token-Abrechnung (Schreiben in den Zwischenspeicher je nach Dauer)."""
+    ein, aus, lesen, schreiben5, schreiben60 = stufe["preise"]
+    erstellt = nutzung.get("cache_creation") or {}
+    stunde = erstellt.get("ephemeral_1h_input_tokens", 0)
+    minuten = erstellt.get("ephemeral_5m_input_tokens", nutzung.get("cache_creation_input_tokens", 0) - stunde)
+    return round((nutzung.get("input_tokens", 0) * ein + nutzung.get("output_tokens", 0) * aus
+                  + nutzung.get("cache_read_input_tokens", 0) * lesen + minuten * schreiben5 + stunde * schreiben60) / 1e6, 4)
+
+
+def faktenregister(dokumente):
+    """Zahlen, Daten, Aktenzeichen und Fristen je Dokument – einmal lokal aus dem Text gezogen (ohne Kosten), damit
+    Claude Beträge und Daten über alle Unterlagen hinweg abgleicht und nichts davon übersieht."""
+    zeilen = []
+    for nr, titel, text in dokumente:
+        einmal = lambda treffer: list(dict.fromkeys(re.sub(r"\s+", " ", t).strip(" :") for t in treffer))
+        teile = []
+        for name, muster, n in (("Beträge", _BETRAG, 25), ("Daten", _DATUM, 25), ("Nummern", _NUMMERN, 15), ("Fristen", _FRIST, 8)):
+            werte = einmal(muster.findall(text))[:n]
+            if werte:
+                teile.append(f"{name}: " + "; ".join(werte))
+        if teile:
+            zeilen.append(f"- {nr} „{titel}“ – " + " | ".join(teile))
+    if not zeilen:
+        return ""
+    return ("FAKTENREGISTER (automatisch aus den Texten gezogen; bei Abweichungen gilt der Volltext):\n"
+            + "\n".join(zeilen))
+
+
 class ClaudeKI:
     def __init__(self, store, akte, senden=None):
         self.store = store
         self.akte = akte
         self.senden = senden or self._http  # im Selbsttest ersetzt
+        self._letzte = {}  # letzte Antwort-ID je Vorgang, für die Zwischenspeicher-Diagnose
 
     # --- Zugangsschlüssel ----------------------------------------------------------------
     @property
@@ -186,10 +232,13 @@ class ClaudeKI:
 
     # --- Kontext aus dem Vorgang --------------------------------------------------------
     def kontext(self, vorgang_id, dokument_id=None):
-        """Die ganze Akte in zeitlicher Reihenfolge: jeder Chronik-Eintrag mit seinem Text (eigene Briefe, Notizen,
-        Telefonate, Chat-Notizen) und dem Volltext des zugehörigen Dokuments, dazu Dokumente ohne Eintrag.
-        Gekürzt wird nur, wenn die Akte die Obergrenze übersteigt – dann zuerst ältere fremde Dokumente; das gewählte
-        Dokument und alle eigenen Schreiben bleiben vollständig. Was gekürzt wurde, steht in `info`."""
+        """Die ganze Akte, aufgeteilt für den Zwischenspeicher:
+        - UNTERLAGEN: Volltext jedes Dokuments (D<Nr>, nach Eingang sortiert) und ein Faktenregister. Ändert sich nur,
+          wenn ein Dokument hinzukommt – wird eine Stunde zwischengespeichert.
+        - CHRONIK: alle Einträge in zeitlicher Reihenfolge mit eigenen Briefen, Entwürfen, Notizen und Telefonaten im
+          Wortlaut; Dokumente werden über ihre Nummer verwiesen. Ändert sich mit jedem neuen Eintrag.
+        - STAND: Status, Fristen, Beteiligte und das gewählte Schreiben – wechselt häufig und steht deshalb in der Frage.
+        Gekürzt wird nur oberhalb der Obergrenze, zuerst ältere fremde Dokumente; das gewählte Dokument bleibt ganz."""
         a = self.akte.akte(vorgang_id)
         zeilen = [f"VORGANG: {a['titel']} (Bereich: {', '.join(a.get('bereiche') or [a['bereich']])}; Status: {a['status']})"]
         if a.get("teilvorgaenge"):
@@ -204,61 +253,61 @@ class ClaudeKI:
         eigene = self.akte.eigene_angaben()
         if eigene:
             zeilen.append("MEINE ANGABEN (Absender): " + eigene.replace("\n", ", "))
-        uebersicht = "\n".join(zeilen)
 
-        dok_text = {}
-        for d in a["dokumente"]:
-            dok_text[d["id"]] = "\n".join(s["text"] for s in self.store.pages(d["id"])).strip()
+        dokumente = sorted(a["dokumente"], key=lambda d: d["id"])
+        dok_text = {d["id"]: "\n".join(s["text"] for s in self.store.pages(d["id"])).strip() for d in dokumente}
+        fokus = next((d for d in dokumente if d["id"] == dokument_id), None)
+        if fokus:
+            zeilen.append(f"GEWÄHLTES SCHREIBEN: D{fokus['id']} „{fokus['titel']}“")
+        stand = "\n".join(zeilen)
+
+        # Unterlagen mit Obergrenze: ältere fremde Dokumente zuerst kürzen (nie das gewählte)
+        texte = {i: t for i, t in dok_text.items() if t}
+        gekuerzt, ueber = [], sum(len(t) for t in texte.values()) - MAX_KONTEXT
+        eigen_dok = {e["dokument_id"] for e in a["eintraege"] if e["art"] in ("ausgang", "entwurf") and e.get("dokument_id")}
+        for d in dokumente:
+            if ueber <= 0:
+                break
+            t = texte.get(d["id"])
+            if t and d["id"] != dokument_id and d["id"] not in eigen_dok and len(t) > KURZFASSUNG:
+                ueber -= len(t) - KURZFASSUNG
+                texte[d["id"]] = t[:KURZFASSUNG] + "\n[… Rest dieses Dokuments aus Platzgründen weggelassen]"
+                gekuerzt.append(d["titel"])
+        teile = []
+        for d in dokumente:
+            if d["id"] in texte:
+                datum = d.get("dokument_datum") or d.get("datum") or ""
+                teile.append(f"<dokument nr=\"D{d['id']}\" titel=\"{d['titel']}\" datum=\"{datum}\" datei=\"{d['dateiname']}\">\n"
+                             f"{texte[d['id']]}\n</dokument>")
+        register = faktenregister([(f"D{d['id']}", d["titel"], dok_text[d["id"]]) for d in dokumente if dok_text.get(d["id"])])
+        unterlagen = "\n\n".join(teile) + ("\n\n" + register if register else "")
+
         namen = {k["kontakt_id"]: k["name"] for k in a["beteiligte"]}
-        # Bausteine: [sortierschlüssel, kopf, text, kürzbar]
-        teile, verwendet = [], set()
+        chronik, eigene_schreiben = [], 0
         for e in sorted(a["eintraege"], key=lambda x: (x["ereignis_datum"], x["id"])):
             if e["art"] == "entwurf" and e.get("versendet_als"):
                 continue  # steht als „Versendet“ in der Chronik
             art = {"eingang": "EINGANG", "ausgang": "MEIN SCHREIBEN (versendet)", "entwurf": "MEIN ENTWURF (nicht versendet)",
                    "telefonat": "TELEFONAT", "notiz": "NOTIZ", "entscheidung": "ENTSCHEIDUNG", "chat": "CHAT-NOTIZ",
                    "nachweis": "NACHWEIS", "fehlt": "ORIGINAL FEHLT"}.get(e["art"], e["art"].upper())
+            eigene_schreiben += e["art"] in ("ausgang", "entwurf")
             kopf = f"{e['ereignis_datum']} · {art}{' · ' + e['typ'] if e.get('typ') else ''} · {e['titel']}"
             if e.get("kontakt_id"):
                 kopf += f" · {e.get('richtung') or ''} {namen.get(e['kontakt_id']) or self._kontakt(e['kontakt_id'])}".rstrip()
             v = e.get("versand")
             if v:
                 kopf += f" · Versand per {v['art']} am {v['datum']} an {v['empfaenger'].replace(chr(10), ', ')}"
+            if e.get("dokument_id") and e["dokument_id"] in texte:
+                kopf += f" · Volltext: D{e['dokument_id']}"
             text = (e.get("text") or "").strip()
             b = e.get("brief") or {}
             if b and text:
                 text = f"Betreff: {b.get('betreff') or e['titel']}\n{text}"
-            stuecke = [text] if text else []
-            d = e.get("dokument_id")
-            fremd = bool(d and dok_text.get(d) and d not in verwendet)
-            if fremd:
-                verwendet.add(d)
-                if dok_text[d] != text:
-                    stuecke.append(dok_text[d])
-            fokus = d == dokument_id and dokument_id is not None
-            kuerzbar = fremd and not fokus and e["art"] not in ("ausgang", "entwurf")
-            teile.append([kopf + (" · [GEWÄHLTES SCHREIBEN]" if fokus else ""), "\n\n".join(stuecke), kuerzbar, d])
-        for d in a["dokumente"]:
-            if d["id"] not in verwendet and dok_text.get(d["id"]):
-                fokus = d["id"] == dokument_id
-                teile.append([f"{d.get('datum') or ''} · DOKUMENT ohne Chronik-Eintrag · {d['titel']}"
-                              + (" · [GEWÄHLTES SCHREIBEN]" if fokus else ""), dok_text[d["id"]], not fokus, d["id"]])
-        # Obergrenze: ältere kürzbare Dokumente zuerst auf einen Anfang kürzen
-        gekuerzt = []
-        ueber = sum(len(t[1]) for t in teile) - MAX_KONTEXT
-        for t in teile:
-            if ueber <= 0:
-                break
-            if t[2] and len(t[1]) > KURZFASSUNG:
-                ueber -= len(t[1]) - KURZFASSUNG
-                t[1] = t[1][:KURZFASSUNG] + "\n[… Rest dieses Dokuments aus Platzgründen weggelassen]"
-                gekuerzt.append(t[0].split(" · ")[-1] if "GEWÄHLT" not in t[0] else t[0])
-        akte = "\n\n".join(f"<eintrag nr=\"{i}\">\n{t[0]}\n{t[1] or '(kein Text)'}\n</eintrag>" for i, t in enumerate(teile, 1))
-        info = {"eintraege": len(teile), "dokumente": sum(1 for t in teile if t[3] and dok_text.get(t[3])),
-                "eigene_schreiben": sum(1 for t in teile if t[0].split(" · ")[1].startswith("MEIN")),
-                "ohne_text": sum(1 for d in a["dokumente"] if not dok_text.get(d["id"])),
-                "gekuerzt": gekuerzt, "zeichen": len(akte)}
-        return a, uebersicht, akte, info
+            chronik.append(f"<eintrag>\n{kopf}" + (f"\n{text}" if text else "") + "\n</eintrag>")
+        info = {"eintraege": len(chronik), "dokumente": len(texte), "eigene_schreiben": eigene_schreiben,
+                "ohne_text": sum(1 for d in dokumente if not dok_text.get(d["id"])), "gekuerzt": gekuerzt,
+                "fakten": register.count("\n- "), "zeichen": len(unterlagen) + sum(len(c) for c in chronik)}
+        return a, stand, unterlagen, "\n\n".join(chronik), info
 
     def _kontakt(self, kontakt_id):
         with closing(self.store.connect()) as db:
@@ -277,7 +326,7 @@ class ClaudeKI:
             raise ValueError("Unbekannte Aufgabe.")
         if not isinstance(verlauf, list) or len(verlauf) > 40:
             raise ValueError("Verlauf: ungültige Angabe.")
-        a, uebersicht, akte, info = self.kontext(vorgang_id, dokument_id)
+        a, stand, unterlagen, chronik, info = self.kontext(vorgang_id, dokument_id)
         nachrichten = []
         for n in verlauf:
             if not isinstance(n, dict) or n.get("rolle") not in ("user", "assistant") or not str(n.get("text", "")).strip():
@@ -300,15 +349,19 @@ class ClaudeKI:
             nachrichten.append({"role": "user", "content": auftrag})
         if not nachrichten or nachrichten[-1]["role"] != "user":
             raise ValueError("Bitte eine Frage stellen.")
+        # Der wechselnde Stand (Status, Fristen, gewähltes Schreiben) steht in der Frage, hinter dem Zwischenspeicher
+        nachrichten[-1] = {"role": "user", "content": f"<stand>\n{stand}\n</stand>\n\n{nachrichten[-1]['content']}"}
         stufe = STUFEN[self.stufe()]
         anfrage = {
             "model": stufe["modell"],
             "max_tokens": 16000,
-            # Zwischenspeicher (Prompt-Caching): Anweisung und Akte bilden einen gleichbleibenden Anfang. Der Merker
-            # sitzt am Ende der Akte, nicht am Ende der wechselnden Frage – so lesen Bewertung, Entwurf und Folgefragen
-            # zum selben Vorgang die Akte binnen 5 Minuten zu einem Zwanzigstel des Preises aus dem Speicher.
+            # Zwischenspeicher (Prompt-Caching), zwei Merker: die Unterlagen (ändern sich selten) eine Stunde, die
+            # Chronik (neue Notizen, Entwürfe) fünf Minuten. Bewertung, Entwürfe und Folgefragen zum selben Vorgang
+            # lesen die Akte dann zu einem Zwanzigstel des Preises, auch wenn dazwischen etwas gespeichert wurde.
             "system": [{"type": "text", "text": SYSTEM},
-                       {"type": "text", "text": uebersicht + "\n\nAKTE (vollständig, älteste zuerst):\n" + akte,
+                       {"type": "text", "text": "UNTERLAGEN (Volltexte aller Dokumente des Vorgangs):\n" + (unterlagen or "(keine)"),
+                        "cache_control": {"type": "ephemeral", "ttl": "1h"}},
+                       {"type": "text", "text": "CHRONIK (vollständig, älteste zuerst):\n" + (chronik or "(leer)"),
                         "cache_control": {"type": "ephemeral"}}],
             "messages": nachrichten,
             "output_config": {"effort": AUFWAND.get(aufgabe, "medium")},
@@ -319,18 +372,26 @@ class ClaudeKI:
             anfrage["output_config"]["format"] = {"type": "json_schema", "schema": BRIEF_SCHEMA}
         elif aufgabe == "bewerten":
             anfrage["output_config"]["format"] = {"type": "json_schema", "schema": BEWERTUNG_SCHEMA}
+        vorige = self._letzte.get(vorgang_id)
+        if vorige:  # Zwischenspeicher-Diagnose: nennt, falls die Akte nicht aus dem Speicher kam, die Ursache
+            anfrage["diagnostics"] = {"previous_message_id": vorige}
         antwort = self.senden(anfrage, schluessel)
+        if antwort.get("id"):
+            self._letzte[vorgang_id] = antwort["id"]
         if antwort.get("stop_reason") == "refusal":
             raise ValueError("Claude hat diese Anfrage abgelehnt. Bitte anders formulieren.")
         text = "".join(b.get("text", "") for b in antwort.get("content", []) if b.get("type") == "text").strip()
         if antwort.get("stop_reason") == "max_tokens":
             text += "\n\n[Antwort wurde wegen der Länge abgeschnitten.]"
         nutzung = antwort.get("usage", {})
-        ein, aus, lesen, schreiben = stufe["preise"]
-        kosten = (nutzung.get("input_tokens", 0) * ein + nutzung.get("output_tokens", 0) * aus
-                  + nutzung.get("cache_read_input_tokens", 0) * lesen + nutzung.get("cache_creation_input_tokens", 0) * schreiben) / 1e6
-        info = dict(info, kosten_usd=round(kosten, 4), stufe=stufe["name"],
-                    aus_speicher=nutzung.get("cache_read_input_tokens", 0))
+        info = dict(info, kosten_usd=kosten(nutzung, stufe), stufe=stufe["name"],
+                    aus_speicher=nutzung.get("cache_read_input_tokens", 0),
+                    token={"eingabe": nutzung.get("input_tokens", 0), "gelesen": nutzung.get("cache_read_input_tokens", 0),
+                           "geschrieben": nutzung.get("cache_creation_input_tokens", 0), "ausgabe": nutzung.get("output_tokens", 0)})
+        if antwort.get("diagnostics"):
+            info["diagnose"] = json.dumps(antwort["diagnostics"], ensure_ascii=False)[:500]
+        logging.getLogger("korrespondenz").info("Claude %s: %s Token, Kosten %.4f $%s", aufgabe, info["token"],
+                                                info["kosten_usd"], (" Diagnose: " + info["diagnose"]) if "diagnose" in info else "")
         ergebnis = {"text": text, "aufgabe": aufgabe, "nutzung": nutzung, "kontext": info}
         if aufgabe in BRIEF_AUFGABEN:
             try:
@@ -421,21 +482,18 @@ class ClaudeKI:
             pruefungen = json.loads(roh)["pruefungen"]
         except (json.JSONDecodeError, KeyError, TypeError):
             raise ValueError("Die Prüfung konnte nicht ausgewertet werden. Bitte erneut versuchen.") from None
-        nutzung = antwort.get("usage", {})
-        ein, aus, lesen, schreiben = stufe["preise"]
-        kosten = (nutzung.get("input_tokens", 0) * ein + nutzung.get("output_tokens", 0) * aus
-                  + nutzung.get("cache_read_input_tokens", 0) * lesen + nutzung.get("cache_creation_input_tokens", 0) * schreiben) / 1e6
-        ergebnis = {"vorschriften": normen, "pruefungen": pruefungen, "kosten_usd": round(kosten, 4)}
+        ergebnis = {"vorschriften": normen, "pruefungen": pruefungen, "kosten_usd": kosten(antwort.get("usage", {}), stufe)}
         if ergebnis_id:
             with closing(self.store.connect()) as db, db:
                 db.execute("UPDATE ki_ergebnis SET zitate=? WHERE id=?", (json.dumps(ergebnis, ensure_ascii=False), int(ergebnis_id)))
         return ergebnis
 
     def _http(self, anfrage, schluessel):
+        betas = ([FALLBACK_BETA] if "fallbacks" in anfrage else []) + ([DIAGNOSE_BETA] if "diagnostics" in anfrage else [])
         daten = json.dumps(anfrage).encode("utf-8")
         req = urllib.request.Request(API, data=daten, method="POST", headers={
             "Content-Type": "application/json", "x-api-key": schluessel, "anthropic-version": API_VERSION,
-            **({"anthropic-beta": FALLBACK_BETA} if "fallbacks" in anfrage else {})})
+            **({"anthropic-beta": ",".join(betas)} if betas else {})})
         try:
             with urllib.request.urlopen(req, timeout=600) as res:
                 return json.loads(res.read().decode("utf-8"))
@@ -444,6 +502,8 @@ class ClaudeKI:
                 meldung = json.loads(fehler.read().decode("utf-8")).get("error", {}).get("message", "")
             except (ValueError, OSError):
                 meldung = ""
+            if fehler.code == 400 and "diagnostics" in anfrage:  # Diagnose nicht verfügbar: ohne sie erneut
+                return self._http({k: v for k, v in anfrage.items() if k != "diagnostics"}, schluessel)
             grund = {401: "Der Zugangsschlüssel ist ungültig.", 403: "Der Zugangsschlüssel hat keine Berechtigung.",
                      429: "Zu viele Anfragen oder Guthaben aufgebraucht – bitte später erneut versuchen.",
                      529: "Claude ist gerade überlastet – bitte gleich erneut versuchen."}.get(fehler.code)
@@ -466,16 +526,17 @@ def test_claude(store):
 
     def falsch(anfrage, schluessel):
         gesendet.append((anfrage, schluessel))
-        if anfrage["messages"][-1]["content"].startswith("Entwirf"):
+        frage = anfrage["messages"][-1]["content"].split("</stand>\n\n", 1)[-1]
+        if frage.startswith("Entwirf"):
             return {"stop_reason": "end_turn", "content": [{"type": "text", "text": json.dumps(
                 {"betreff": "Ihre Forderung", "brieftext": "Sehr geehrte Damen und Herren,\n\nich widerspreche.", "hinweise": "Aktenzeichen ergänzen"})}]}
-        if anfrage["messages"][-1]["content"].startswith("Analysiere"):
+        if frage.startswith("Analysiere"):
             return {"stop_reason": "end_turn", "content": [{"type": "text", "text": json.dumps({
                 "zusammenfassung": "Mahnung über 180,98 €.", "rechtliche_bewertung": "Forderung zweifelhaft (§ 286 BGB).",
                 "fristen": [{"datum": "15.12.2026", "was": "Zahlung"}], "risiken": "Mahnbescheid", "fehlende_angaben": "",
                 "optionen": [{"titel": "Zahlen", "beschreibung": "b", "vorteile": "v", "nachteile": "n", "empfohlen": False},
                              {"titel": "Widersprechen", "beschreibung": "b", "vorteile": "v", "nachteile": "n", "empfohlen": True}]})}]}
-        if "verboten" in anfrage["messages"][-1]["content"]:
+        if "verboten" in frage:
             return {"stop_reason": "refusal", "content": []}
         return {"stop_reason": "end_turn", "content": [{"type": "text", "text": "Zahlung 180,98 € bis 15.12.2026."}],
                 "usage": {"input_tokens": 10, "output_tokens": 5}}
@@ -496,8 +557,12 @@ def test_claude(store):
     r = ki.fragen(v, d, [], "zusammenfassen")
     anfrage, schluessel = gesendet[-1]
     assert schluessel == "sk-ant-test-1234" and anfrage["model"] == MODELL and anfrage["fallbacks"] == "default"
-    assert anfrage["system"][1]["cache_control"] == {"type": "ephemeral"} and "cache_control" not in anfrage
-    assert anfrage["output_config"]["effort"] == "low" and r["kontext"]["kosten_usd"] == round((10 * 4 + 5 * 20) / 1e6, 4)
+    assert anfrage["system"][1]["cache_control"] == {"type": "ephemeral", "ttl": "1h"} and "cache_control" not in anfrage
+    assert anfrage["system"][2]["cache_control"] == {"type": "ephemeral"}
+    assert anfrage["output_config"]["effort"] == "medium" and r["kontext"]["kosten_usd"] == round((10 * 4 + 5 * 20) / 1e6, 4)
+    assert kosten({"input_tokens": 1000, "cache_read_input_tokens": 50000, "cache_creation_input_tokens": 3000,
+                   "cache_creation": {"ephemeral_1h_input_tokens": 2000, "ephemeral_5m_input_tokens": 1000},
+                   "output_tokens": 2000}, STUFEN["gruendlich"]) == round((1000 * 4 + 50000 * 0.2 + 2000 * 8 + 1000 * 5 + 2000 * 20) / 1e6, 4)
     assert ki.stufe_setzen("sparsam")["stufe"] == "sparsam"
     ki.fragen(v, d, [], "zusammenfassen")
     assert gesendet[-1][0]["model"] == "claude-haiku-5-5" and "fallbacks" not in gesendet[-1][0]
@@ -505,8 +570,10 @@ def test_claude(store):
     ki.fragen(v, d, [], "zusammenfassen")
     assert gesendet[-1][0]["model"] == "claude-sonnet-5-5"
     ki.stufe_setzen("gruendlich")
-    assert "180,98" in anfrage["system"][1]["text"] and "[GEWÄHLTES SCHREIBEN]" in anfrage["system"][1]["text"]
-    assert "Amtsgericht Forderung TÜV" in anfrage["system"][1]["text"] and r["text"].startswith("Zahlung")
+    assert "180,98" in anfrage["system"][1]["text"] and f"GEWÄHLTES SCHREIBEN: D{d}" in anfrage["messages"][-1]["content"]
+    assert "Amtsgericht Forderung TÜV" in anfrage["messages"][-1]["content"] and r["text"].startswith("Zahlung")
+    assert "FAKTENREGISTER" in anfrage["system"][1]["text"] and "180,98 €" in anfrage["system"][1]["text"].split("FAKTENREGISTER")[1]
+    assert "15.12.2026" in anfrage["system"][1]["text"].split("FAKTENREGISTER")[1]
     r = ki.fragen(v, d, [], "ueberarbeiten", anweisung="kürzer", entwurf="Sehr geehrte Damen und Herren, nein.",
                   empfaenger="Amtsgericht Rostock")
     letzte = gesendet[-1][0]["messages"][-1]["content"]
@@ -544,12 +611,19 @@ def test_claude(store):
     akte.eintrag_anlegen(v, {"art": "telefonat", "titel": "Anruf Inkasso", "datum": "2026-10-20",
                              "text": "Ratenzahlung abgelehnt, Sachbearbeiterin Frau Kurz."})
     r = ki.fragen(v, d, [], "zusammenfassen")
-    akte_text = gesendet[-1][0]["system"][1]["text"]
+    unterlagen_vorher = gesendet[-1][0]["system"][1]["text"]
+    akte_text = gesendet[-1][0]["system"][1]["text"] + gesendet[-1][0]["system"][2]["text"]
+    chronik_text = gesendet[-1][0]["system"][2]["text"]
     for muss in ("ENDE-MEINES-BRIEFS", "Versand per Einschreiben am 2026-10-11", "Ratenzahlung abgelehnt",
                  "SCHLUSSKLAUSEL-ALT", "Widerspruch gegen Mahnung", "MEIN SCHREIBEN (versendet)"):
         assert muss in akte_text, muss
     assert akte_text.count("ENDE-MEINES-BRIEFS") == 1, "versendeter Entwurf darf nicht doppelt erscheinen"
-    assert akte_text.index("Erste Mahnung") < akte_text.index("Widerspruch gegen Mahnung") < akte_text.index("Ratenzahlung")
+    assert chronik_text.index("Erste Mahnung") < chronik_text.index("Widerspruch gegen Mahnung") < chronik_text.index("Ratenzahlung")
+    # Zwischenspeicher: eine neue Notiz und ein anderes gewähltes Dokument lassen die Unterlagen unverändert
+    akte.eintrag_anlegen(v, {"art": "notiz", "titel": "Neue Notiz", "datum": "2026-11-24", "text": "NOTIZ-NEU"})
+    ki.fragen(v, alt, [], "zusammenfassen")
+    assert gesendet[-1][0]["system"][1]["text"] == unterlagen_vorher and "NOTIZ-NEU" in gesendet[-1][0]["system"][2]["text"]
+    assert gesendet[-1][0]["system"][0] == {"type": "text", "text": SYSTEM}
     assert r["kontext"]["eigene_schreiben"] == 1 and not r["kontext"]["gekuerzt"]
     # Obergrenze: gekürzt wird nur das ältere fremde Dokument, nie das eigene Schreiben oder das gewählte Schreiben
     global MAX_KONTEXT
@@ -558,9 +632,9 @@ def test_claude(store):
         r = ki.fragen(v, d, [], "zusammenfassen")
     finally:
         MAX_KONTEXT = alt_grenze
-    akte_text = gesendet[-1][0]["system"][1]["text"]
-    assert "SCHLUSSKLAUSEL-ALT" not in akte_text and "ENDE-MEINES-BRIEFS" in akte_text and "180,98 € bis zum 15.12" in akte_text
-    assert r["kontext"]["gekuerzt"] == ["Erste Mahnung"]
+    akte_text = gesendet[-1][0]["system"][1]["text"] + gesendet[-1][0]["system"][2]["text"]
+    assert "SCHLUSSKLAUSEL-ALT" not in akte_text.split("FAKTENREGISTER")[0] and "ENDE-MEINES-BRIEFS" in akte_text and "180,98 € bis zum 15.12" in akte_text
+    assert len(r["kontext"]["gekuerzt"]) == 1 and r["kontext"]["fakten"] >= 2
     # Zitate prüfen: nur Text und Wortlaut gehen hinaus, nicht die Akte
     from gesetze import Gesetze
     seite = ('<span class="jnenbez">&#167; 362</span><span class="jnentitel">Erl&ouml;schen durch Leistung</span>'

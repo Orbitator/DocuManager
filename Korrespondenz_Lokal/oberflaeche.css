@@ -521,6 +521,7 @@ button.heute:hover{background:var(--surface-2,rgba(127,127,127,.18))}
 .modal.brief .compose>.stack>*{flex-shrink:0}
 .compose .stack label.kio{flex-direction:row;color:var(--fg);font-size:13px;gap:8px}
 .ck-kosten{white-space:nowrap}
+.ck-token{font-size:11px;opacity:.85}
 
 /* Gesetzeszitate */
 button.norm{font:inherit;color:var(--accent,#2f4bd0);background:none;border:0;padding:0;text-decoration:underline dotted;cursor:pointer}

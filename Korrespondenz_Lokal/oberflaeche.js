@@ -1199,8 +1199,11 @@ function kontextHinweis(k) {  // zeigt, welche Teile der Akte Claude vorlagen
   const warn = [];
   if (k.gekuerzt && k.gekuerzt.length) warn.push(`Wegen der Größe der Akte nur gekürzt: ${k.gekuerzt.map(esc).join(', ')}`);
   if (k.ohne_text) warn.push(`${k.ohne_text} Dokument(e) ohne erkannten Text – Inhalt lag Claude nicht vor`);
-  const kosten = k.kosten_usd !== undefined ? ` <span class="ck-kosten">· ${esc(k.stufe || '')}, Kosten ca. ${k.kosten_usd < 0.01 ? 'unter 1 Cent' : (k.kosten_usd * 100).toFixed(1).replace('.', ',') + ' Cent'}${k.aus_speicher ? ', Akte aus dem Zwischenspeicher' : ''}</span>` : '';
-  return `<p class="ck-kontext ${warn.length ? 'warn' : ''}">${warn.length ? I('alert') : I('check')}<span>Berücksichtigt: ${teile.join(' · ')}${warn.length ? '. ' + warn.join('. ') + '.' : ' – vollständig.'}${kosten}</span></p>`;
+  if (k.fakten) teile.push(`Faktenregister mit ${k.fakten} Dokumenten`);
+  const tsd = n => (n || 0).toLocaleString('de-DE'), t = k.token;
+  const kosten = k.kosten_usd !== undefined ? ` <span class="ck-kosten">· ${esc(k.stufe || '')}, Kosten ca. ${k.kosten_usd < 0.01 ? 'unter 1 Cent' : (k.kosten_usd * 100).toFixed(1).replace('.', ',') + ' Cent'}</span>` : '';
+  const token = t ? `<br><span class="ck-token">Token: ${tsd(t.gelesen)} aus dem Zwischenspeicher · ${tsd(t.geschrieben)} neu gespeichert · ${tsd(t.eingabe)} sonstige Eingabe · ${tsd(t.ausgabe)} Ausgabe (inkl. Nachdenken)${k.diagnose && !t.gelesen ? ` · Zwischenspeicher verfehlt: ${esc(k.diagnose)}` : ''}</span>` : '';
+  return `<p class="ck-kontext ${warn.length ? 'warn' : ''}">${warn.length ? I('alert') : I('check')}<span>Berücksichtigt: ${teile.join(' · ')}${warn.length ? '. ' + warn.join('. ') + '.' : ' – vollständig.'}${kosten}${token}</span></p>`;
 }
 async function claudeDialog(docId, entryId) {
   const a = D.akte;
@@ -1633,7 +1636,14 @@ document.addEventListener('input', ev => {
   if (el.id === 'atext') { S.aText = el.value; const p = el.selectionStart; zeichne(vArchiv); const i = $('#atext'); i.focus(); i.setSelectionRange(p, p); }
   if (el.id === 'm-kn') dubletten(el.value);
 });
+const bearbeitbar = el => el && (el.isContentEditable || el.matches('textarea, select, input:not([type=checkbox]):not([type=radio]):not([type=button]):not([type=submit]):not([type=file])'));
 document.addEventListener('keydown', ev => {
+  // Rücklöschtaste nie als „Zurück“ im Browser: in Feldern löscht sie, sonst löscht sie das gewählte Dokument im Posteingang
+  if ((ev.key === 'Backspace' || ev.key === 'Delete') && !bearbeitbar(ev.target)) {
+    if (ev.key === 'Backspace') ev.preventDefault();
+    if (S.view === 'posteingang' && S.ibSel && !$('#modalroot').innerHTML) $(`[data-act=ib-del][data-id="${S.ibSel}"]`)?.click();
+    return;
+  }
   if (ev.key === 'Escape') { if (!$('#viewer').hidden) closeViewer(); else closeModal(); $('#results').hidden = true; }
   if ((ev.key === 'Enter' || ev.key === ' ') && ev.target.matches('.card[data-act], .tile[data-act]')) { ev.preventDefault(); ev.target.click(); }
 });

@@ -211,7 +211,11 @@ body{{margin:0;background:#eceef3;font-family:Arial,"Helvetica Neue",Helvetica,s
 <div class="marke" style="top:{m['falz1']}mm"></div><div class="marke loch" style="top:{m['loch']}mm"></div><div class="marke" style="top:{m['falz2']}mm"></div>
 <div class="inhalt"><p class="betreff">{esc(b.get('betreff') or e.get('titel'))}</p>{absaetze}
 {('<p class="anlagen"><b>Anlagen</b><br>' + '<br>'.join(esc(a) for a in anlagen) + '</p>') if anlagen else ''}</div>
-</div>{'<script>addEventListener("load",()=>setTimeout(print,400))</script>' if drucken else ''}</body></html>"""
+</div>
+<script>/* Bildschirm: Blatt an die Fensterbreite anpassen; der Druck bleibt in Originalgröße */
+function passen(){{var b=document.querySelector('.blatt');b.style.zoom='';var f=Math.min(1,(innerWidth-24)/b.offsetWidth);b.style.zoom=f<1?f:'';}}
+addEventListener('resize',passen);passen();addEventListener('beforeprint',function(){{document.querySelector('.blatt').style.zoom='';}});addEventListener('afterprint',passen);</script>
+{'<script>addEventListener("load",()=>setTimeout(print,400))</script>' if drucken else ''}</body></html>"""
 
 
 # --- Datensicherung ------------------------------------------------------------------------
@@ -367,7 +371,7 @@ def test_export(store):
     gruss = brief_html({"titel": "T", "text": "Sehr geehrte Damen und Herren,\n\nText.\n\nMit freundlichen Grüßen\n\nA. Mustermann",
                         "brief": {"empfaenger": "X"}}, "A. Mustermann")
     assert '<p class="name">A. Mustermann</p>' in gruss
-    assert "Lindenweg 4" in seite and "KFZ-2026-1842" in seite and "(Teil 1)" in seite and "<script" not in seite
+    assert "Lindenweg 4" in seite and "KFZ-2026-1842" in seite and "(Teil 1)" in seite and "print,400" not in seite
     pdf = chronik_pdf(a, akte.kontakte())
     assert pdf.startswith(b"%PDF-1.4") and pdf.rstrip().endswith(b"%%EOF") and b"Chronik" in pdf
     assert "Stellungnahme".encode("cp1252") in pdf and b"\\(Teil 1\\)" in pdf
