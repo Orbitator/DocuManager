@@ -188,6 +188,12 @@ Teil 2 (umgesetzt, Schemaversion 7):
   zu begründen.
 - 0.21.1: Status mit „!“ im Namen (z. B. „Dringend klären!“) gelten als dringend: eigene dritte Spalte „Dringend“ und
   Kennzahl in der Übersicht, rote Hervorhebung in der Vorgangsliste. Reihenfolge nach Statusliste, dann letzter Aktivität.
+- 0.22.0 (Schemaversion 16): **Erinnerung an Antworten.** Im Briefdialog und unter „Versand erfassen“: „Erinnerung an die
+  Antwort setzen“ mit „Antwort erwartet bis“ (aus dem Brieftext erkannt: „bis zum TT.MM.JJJJ“, „innerhalb von 10 Tagen /
+  zwei Wochen“, sonst 14 Tage) und „In der Übersicht erinnern ab“ (Vorschlag: 2 Tage vorher). Gespeichert als Wiedervorlage
+  mit `erinnern_am` und Bezug auf den Brief (`eintrag_id`, `migrate_16`). Übersicht: Kennzahl „Erinnerungen“, Panel
+  „Fristen und Erinnerungen“ zeigt auch weiter entfernte Antworttage ab dem Erinnerungsdatum. Fristzeile: 🔔, Hinweis
+  „Neuer Eingang am … – Antwort da?“ und nach Ablauf ohne Eingang „nachfassen?“. Fristdialog mit „Erinnern ab“.
 - 0.16: Scannen ohne Dialog. „Scannen“ scannt sofort mit dem zuletzt benutzten Scanner (`Daten/scanner.json`):
   Einzug wenn vorhanden, sonst Glas; beidseitig, wenn möglich; 300 dpi Farbe. Die Seiten werden mit PDFKit zu einem
   komprimierten PDF zusammengefügt (leere Rückseiten fallen weg) und landen im Posteingang bzw. Archiv. Nur ein kleines

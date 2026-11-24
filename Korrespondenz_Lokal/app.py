@@ -38,10 +38,10 @@ from mail_import import MailImport, migrate_5, test_mail
 
 ROOT = Path(__file__).resolve().parent
 PORT = 8765
-APP_VERSION = "DocuManager 0.21.1 · Dringende Vorgänge in der Übersicht"
+APP_VERSION = "DocuManager 0.22.0 · Erinnerung an Antworten"
 MAX_UPLOAD = 25 * 1024 * 1024
 MIN_MACOS = "14.0"
-SCHEMA_VERSION = 15
+SCHEMA_VERSION = 16
 OCR_WAITING = "Wartet auf Texterkennung"
 # Scan-Ordner für Scanner-Software und „Digitale Bilder“: Dateien darin kommen automatisch in den Posteingang.
 # Bewusst nicht unter „Dokumente“: Diesen Ordner schützt macOS, ein über Launchpad gestartetes Programm bräuchte
@@ -367,6 +367,12 @@ def migrate_14(db):
                    (vorgang_id, "eingang", titel, erkannt or datum, dokument_id, DIREKT_ABGELEGT))
 
 
+def migrate_16(db):
+    """Erinnerungen: Frist oder Wiedervorlage mit eigenem Erinnerungsdatum und Bezug auf den versendeten Brief."""
+    db.execute("ALTER TABLE frist ADD COLUMN erinnern_am TEXT")
+    db.execute("ALTER TABLE frist ADD COLUMN eintrag_id INTEGER REFERENCES eintrag(id)")
+
+
 def migrate_15(db):
     """Analysen, Bewertungen und Entwürfe von Claude werden dauerhaft gespeichert (vorher nur im Browserfenster)."""
     db.execute("""CREATE TABLE ki_ergebnis(
@@ -380,7 +386,7 @@ def migrate_15(db):
 
 MIGRATIONS = ((1, migrate_1), (2, migrate_2), (3, migrate_3), (4, migrate_4), (5, migrate_5), (6, migrate_6),
               (7, migrate_7), (8, migrate_8), (9, migrate_9), (10, migrate_10), (11, migrate_11), (12, migrate_12),
-              (13, migrate_13), (14, migrate_14), (15, migrate_15))
+              (13, migrate_13), (14, migrate_14), (15, migrate_15), (16, migrate_16))
 
 
 class Store:

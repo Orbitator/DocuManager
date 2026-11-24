@@ -19,6 +19,16 @@ STATUS_STANDARD = ("Offen", "Recherchieren", "Schreiben verfassen", "Schreiben a
 EINSCHAETZUNG = "Einschätzung (extern)"  # fester Eintragstyp: Einschätzung von dritter Seite als Wissensgrundlage für Claude
 
 
+def _erinnern(wert, faellig):
+    """Erinnerungsdatum: leer oder ein Datum, das nicht nach der Fälligkeit liegt."""
+    if not wert:
+        return None
+    datum = _date(wert, "Erinnern am")
+    if datum > faellig:
+        raise ValueError("Die Erinnerung muss vor oder am Fälligkeitstag liegen.")
+    return datum
+
+
 def status_liste(db):
     """Statuswerte in der gewählten Reihenfolge (Einstellungen), feste Werte immer enthalten."""
     row = db.execute("SELECT wert FROM einstellung WHERE schluessel='statusliste'").fetchone()
@@ -981,15 +991,19 @@ class Akte:
         zitat = _text(data.get("quelle_zitat"), "Fundstelle", 500)
         if art == "frist" and not (quelle_dok or zitat):
             raise ValueError("Eine verbindliche Frist braucht eine Fundstelle oder einen Quellenvermerk.")
+        erinnern = _erinnern(data.get("erinnern_am"), faellig)
         with closing(self.connect()) as db, db:
             self._vorgang(db, vorgang_id)
             teil = data.get("teilvorgang_id")
             if teil is not None:
                 self._teile(db, vorgang_id, [teil])
+            eintrag = _id(data.get("eintrag_id"), "Eintrag")
+            if eintrag and not db.execute("SELECT 1 FROM eintrag WHERE id=? AND vorgang_id=?", (eintrag, vorgang_id)).fetchone():
+                raise ValueError("Der Brief gehört nicht zu diesem Vorgang.")
             return db.execute("""INSERT INTO frist(vorgang_id,teilvorgang_id,art,titel,faellig_am,zustaendig,
-                quelle_dokument_id,quelle_seite,quelle_zitat) VALUES(?,?,?,?,?,?,?,?,?)""",
+                quelle_dokument_id,quelle_seite,quelle_zitat,erinnern_am,eintrag_id) VALUES(?,?,?,?,?,?,?,?,?,?,?)""",
                 (vorgang_id, teil, art, titel, faellig, _text(data.get("zustaendig"), "Zuständig", 80),
-                 quelle_dok, _id(data.get("quelle_seite"), "Seite"), zitat)).lastrowid
+                 quelle_dok, _id(data.get("quelle_seite"), "Seite"), zitat, erinnern, eintrag)).lastrowid
 
     def frist_aendern(self, frist_id, data):
         with closing(self.connect()) as db, db:
@@ -1007,6 +1021,9 @@ class Akte:
                            (_text(data["zustaendig"], "Zuständig", 80), frist_id))
             if "titel" in data:
                 db.execute("UPDATE frist SET titel=? WHERE id=?", (_text(data["titel"], "Titel", 200, True), frist_id))
+            if "erinnern_am" in data:
+                faellig = db.execute("SELECT faellig_am FROM frist WHERE id=?", (frist_id,)).fetchone()[0]
+                db.execute("UPDATE frist SET erinnern_am=? WHERE id=?", (_erinnern(data["erinnern_am"], faellig), frist_id))
             if "erledigt" in data:
                 db.execute("UPDATE frist SET erledigt_am=? WHERE id=?",
                            (self.today() if data["erledigt"] else None, frist_id))
@@ -1581,7 +1598,9 @@ class Akte:
 
     def fristen_alle(self):
         with closing(self.connect()) as db:
-            return [dict(r) for r in db.execute("""SELECT f.*, v.titel AS vorgang, t.name AS teilvorgang
+            return [dict(r) for r in db.execute("""SELECT f.*, v.titel AS vorgang, t.name AS teilvorgang,
+                (SELECT max(e.ereignis_datum) FROM eintrag e WHERE e.vorgang_id=f.vorgang_id AND e.art='eingang'
+                    AND e.geloescht_am IS NULL AND e.erfasst_am > f.angelegt_am) AS neuer_eingang
                 FROM frist f JOIN vorgang v ON v.id=f.vorgang_id LEFT JOIN teilvorgang t ON t.id=f.teilvorgang_id
                 WHERE f.geloescht_am IS NULL AND v.geloescht_am IS NULL
                 ORDER BY f.erledigt_am IS NOT NULL, f.faellig_am""")]

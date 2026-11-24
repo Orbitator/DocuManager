@@ -662,6 +662,22 @@ def test_claude(store):
     akte.statusliste_setzen(["Offen", "Verhandlung", "Schreiben verfassen", "Schreiben abgeschickt", "Erledigt"],
                             {"Klage eingereicht": "Verhandlung"})
     assert akte.akte(v)["status"] == "Verhandlung"
+    # Erinnerung: Wiedervorlage zum Brief mit Erinnerungsdatum, Hinweis auf späteren Eingang
+    import time
+    brief = akte.eintrag_anlegen(v, {"art": "entwurf", "titel": "Aufforderung", "datum": "2026-11-24", "text": "Antwort binnen 10 Tagen."})
+    try:
+        akte.frist_anlegen(v, {"art": "wiedervorlage", "titel": "Antwort", "faellig_am": "2026-12-04", "erinnern_am": "2026-12-05"})
+        raise AssertionError("Erinnerung nach Fälligkeit darf nicht gehen")
+    except ValueError:
+        pass
+    fid = akte.frist_anlegen(v, {"art": "wiedervorlage", "titel": "Antwort erwartet", "faellig_am": "2026-12-04",
+                                 "erinnern_am": "2026-12-02", "eintrag_id": brief})
+    time.sleep(1.1)
+    akte.eintrag_anlegen(v, {"art": "eingang", "titel": "Antwort Gegenseite", "datum": "2026-11-30"})
+    f = next(x for x in akte.fristen_alle() if x["id"] == fid)
+    assert f["erinnern_am"] == "2026-12-02" and f["eintrag_id"] == brief and f["neuer_eingang"] == "2026-11-30"
+    akte.frist_aendern(fid, {"erinnern_am": "2026-12-01"})
+    assert next(x for x in akte.fristen_alle() if x["id"] == fid)["erinnern_am"] == "2026-12-01"
     # Zitate prüfen: nur Text und Wortlaut gehen hinaus, nicht die Akte
     from gesetze import Gesetze
     seite = ('<span class="jnenbez">&#167; 362</span><span class="jnentitel">Erl&ouml;schen durch Leistung</span>'

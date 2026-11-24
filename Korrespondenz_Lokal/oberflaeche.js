@@ -60,6 +60,24 @@ const ST_KEY = {'Offen':'offen','Recherchieren':'recherche','Schreiben verfassen
 const ST_PILL = {'Offen':'grey','Schreiben abgeschickt':'ok','Wartet auf Antwort':'warn','Erledigt':'ok'};
 let ST_ORDER = ['Offen','Recherchieren','Schreiben verfassen','Schreiben abgeschickt','Wartet auf Antwort','Erledigt'];
 const stLabel = s => ST_LABEL[s] || s;
+// Antwortfrist aus einem Brieftext: „bis zum 05.12.2026“ oder „innerhalb von 10 Tagen / zwei Wochen“
+const ZAHLWORT = {einer: 1, eines: 1, einem: 1, zwei: 2, drei: 3, vier: 4, fünf: 5, sechs: 6, sieben: 7, acht: 8, neun: 9, zehn: 10, elf: 11, zwölf: 12, vierzehn: 14, einundzwanzig: 21, dreißig: 30};
+function antwortfrist(text, ab) {
+  const t = text || '';
+  let m = t.match(/bis\s+(?:spätestens\s+)?(?:zum\s+)?(\d{1,2})\.(\d{1,2})\.(\d{4})/i);
+  if (m) return {faellig: `${m[3]}-${m[2].padStart(2, '0')}-${m[1].padStart(2, '0')}`, zitat: m[0]};
+  m = t.match(/(?:innerhalb|binnen)\s+(?:von\s+)?(\d{1,3}|[a-zäöüß]+)\s+(Kalendertag|Werktag|Tag|Woche|Monat)\w*/i);
+  if (m) { const n = +m[1] || ZAHLWORT[m[1].toLowerCase()]; if (n) { const e = m[2].toLowerCase(), tage = e.startsWith('woche') ? n * 7 : e.startsWith('monat') ? n * 30 : e.startsWith('werktag') ? Math.ceil(n * 7 / 5) : n;
+    return {faellig: plusTage(ab, tage), zitat: m[0]}; } }
+  return {faellig: plusTage(ab, 14), zitat: null};
+}
+const erinnert = f => !f.erledigt_am && f.erinnern_am && f.erinnern_am <= isoHeute();
+function wvVorschlag(text, ab) {  // füllt die Felder der Erinnerung im geöffneten Dialog
+  const r = antwortfrist(text, ab), vorher = plusTage(r.faellig, -2);
+  $('#m-wvf').value = r.faellig; $('#m-wve').value = vorher < isoHeute() ? isoHeute() : vorher;
+  $('#m-wvhint').textContent = r.zitat ? `Aus dem Brief erkannt: „${r.zitat}“. Die Erinnerung erscheint ab dem gewählten Tag in der Übersicht.` : 'Keine Frist im Brieftext gefunden – Vorschlag: 14 Tage. Bitte anpassen.';
+  return r;
+}
 const dringend = s => (s || '').includes('!');  // Status mit Ausrufezeichen gilt als dringend (Übersicht, Hervorhebung)
 const zuletzt = c => [c.zuletzt || '', c.angelegt_am || ''].map(x => x.replace(' ', 'T')).sort().pop();  // letzte Aktivität
 const statusPill = s => `<span class="pill ${ST_PILL[s] || ''}">${esc(stLabel(s))}</span>`;
@@ -257,6 +275,7 @@ addEventListener('resize', () => drehungAnwenden());
 function vHome() {
   const offen = D.fristen.filter(f => !f.erledigt_am);
   const ueber = offen.filter(f => tage(f.faellig_am) < 0), bald = offen.filter(f => tage(f.faellig_am) >= 0 && tage(f.faellig_am) <= 14);
+  const erinnerungen = offen.filter(erinnert), spaeter = erinnerungen.filter(f => tage(f.faellig_am) > 14);
   const wartet = D.cases.filter(c => c.status === 'Wartet auf Antwort' || c.status === 'Schreiben abgeschickt');
   const eilig = D.cases.filter(c => dringend(c.status) && c.status !== 'Erledigt')
     .sort((x, y) => ST_ORDER.indexOf(x.status) - ST_ORDER.indexOf(y.status) || zuletzt(y).localeCompare(zuletzt(x)));
@@ -264,9 +283,10 @@ function vHome() {
   <div class="kpis"><a class="kpi ${ueber.length ? 'crit' : ''}" href="#fristen"><b class="num">${ueber.length}</b><span>Überfällig</span></a>
    <a class="kpi ${bald.length ? 'warn' : ''}" href="#fristen"><b class="num">${bald.length}</b><span>Fällig in 14 Tagen</span></a>
    <a class="kpi" href="#posteingang"><b class="num">${D.inbox.length}</b><span>Im Posteingang</span></a>
+   <a class="kpi ${erinnerungen.length ? 'warn' : ''}" href="#fristen"><b class="num">${erinnerungen.length}</b><span>Erinnerungen</span></a>
    <a class="kpi ${eilig.length ? 'crit' : ''}" href="#vorgaenge"><b class="num">${eilig.length}</b><span>Dringend</span></a>
    <a class="kpi" href="#vorgaenge"><b class="num">${aktiv().length}</b><span>Laufende Vorgänge</span></a></div>
-  <div class="grid3"><div class="panel"><h2>Fristen</h2>${fristList([...ueber, ...bald], false)}</div>
+  <div class="grid3"><div class="panel"><h2>Fristen und Erinnerungen</h2>${fristList([...ueber, ...bald, ...spaeter], false)}</div>
    <div class="stack"><div class="panel"><h2>Posteingang</h2><ul class="mini" style="margin-top:8px">${D.inbox.slice(0, 6).map(p => `<li><span>${esc(p.titel)}</span><span class="muted num">${dt(p.angelegt_am)}</span></li>`).join('') || '<li class="muted">Alles einsortiert.</li>'}</ul>${D.inbox.length ? '<div style="margin-top:10px"><a class="btn sm" href="#posteingang">Einsortieren</a></div>' : ''}</div>
    <div class="panel"><h2>Warten auf Antwort</h2><ul class="mini" style="margin-top:8px">${wartet.map(c => `<li><a href="#akte-${c.id}">${esc(c.titel)}</a><span class="muted">${esc(stLabel(c.status))}</span></li>`).join('') || '<li class="muted">Keine.</li>'}</ul></div></div>
    <div class="panel dringend-panel"><h2>${I('alert')} Dringend</h2><ul class="mini" style="margin-top:8px">${eilig.map(c => `<li><a href="#akte-${c.id}">${esc(c.titel)}</a><span class="pill crit">${esc(stLabel(c.status))}</span></li>`).join('') || '<li class="muted">Nichts Dringendes. Status mit „!“ am Ende, z. B. „Dringend klären!“, erscheinen hier.</li>'}</ul></div></div>`;
@@ -680,6 +700,9 @@ async function compose(bezugId, editId, vorschlag) {
     <div class="notecard" id="m-kihinweis" style="margin:0;font-size:13px" ${vorschlag && vorschlag.hinweise ? '' : 'hidden'}>${vorschlag && vorschlag.hinweise ? `${I('ki')} <b>Hinweise von Claude:</b> ${esc(vorschlag.hinweise)}` : ''}</div>
     ${edit && edit.versendet_als ? '' : `<div class="stack" style="gap:4px"><label class="chk"><input type="checkbox" id="m-print">Nach dem Speichern drucken</label>
      <label class="chk"><input type="checkbox" id="m-sent">Als versendet in der Chronik erfassen</label>
+     <label class="chk"><input type="checkbox" id="m-wv">Erinnerung an die Antwort setzen</label>
+     <span id="m-wvopt" class="two" hidden><label>Antwort erwartet bis<input id="m-wvf" type="date"></label><label>In der Übersicht erinnern ab<input id="m-wve" type="date"></label>
+      <span id="m-wvhint" class="muted" style="grid-column:1/-1;font-size:12.5px"></span></span>
      <span id="m-sentopt" class="two" hidden><label>Versandart<select id="m-sva">${VERSAND.map(v => `<option>${v}</option>`).join('')}</select></label><label>Versanddatum<input id="m-svd" type="date" value="${isoHeute()}"></label></span></div>`}
     <p class="muted" style="margin:0;font-size:12.5px">Ihr Absender kommt aus Einstellungen → Eigene Angaben. Platzhalter in eckigen Klammern bitte ersetzen.</p></div>
    <div class="cz-rechts"><div class="cz-pvkopf"><span>Vorschau · DIN A4, Anschrift im Sichtfenster</span><span class="sp"></span>
@@ -692,13 +715,19 @@ async function compose(bezugId, editId, vorschlag) {
       anlagen: [...document.querySelectorAll('.m-att:checked')].map(x => x.value)};
     const titel = val('m-subj') || 'Brief';
     const drucken = $('#m-print')?.checked, versand = $('#m-sent')?.checked ? {art: val('m-sva'), datum: val('m-svd'), empfaenger: brief.empfaenger} : null;
+    const wv = $('#m-wv')?.checked ? {faellig_am: val('m-wvf'), erinnern_am: val('m-wve') || null, zitat: antwortfrist(body, versand ? versand.datum : isoHeute()).zitat} : null;
+    if (wv && !wv.faellig_am) { toast('Bitte angeben, bis wann Sie eine Antwort erwarten.'); return false; }
+    if (wv && wv.erinnern_am && wv.erinnern_am > wv.faellig_am) { toast('Die Erinnerung muss vor oder am Antworttag liegen.'); return false; }
     if (versand && !versand.empfaenger.trim()) { toast('Für den Versand bitte den Empfänger eintragen.'); $('#m-emp').focus(); return false; }
     const fenster = drucken ? window.open('about:blank', '_blank') : null;  // jetzt öffnen, sonst blockiert der Browser das Fenster
     closeModal();
     let entwurfId = edit ? edit.id : null;
     const nachher = async () => {
       if (fenster) fenster.location.href = `/api/eintraege/${entwurfId}/brief?drucken=1`;
-      if (versand) { const r = await api(`eintraege/${entwurfId}/versand`, versand); S.entry = r.id; }
+      let briefId = entwurfId;
+      if (versand) { const r = await api(`eintraege/${entwurfId}/versand`, versand); S.entry = briefId = r.id; }
+      if (wv) await api(`akte/${a.id}/fristen`, {art: 'wiedervorlage', titel: 'Antwort erwartet: ' + titel, faellig_am: wv.faellig_am,
+        erinnern_am: wv.erinnern_am, eintrag_id: briefId, quelle_zitat: wv.zitat, teilvorgang_id: bezug && bezug.teile.length === 1 ? bezug.teile[0] : null});
     };
     await act(async () => {
       if (edit) { await api('eintraege/' + edit.id, {titel, text: body, brief}); await nachher(); return; }
@@ -708,7 +737,8 @@ async function compose(bezugId, editId, vorschlag) {
       if (teile.length) for (const t of teile) { const tv = a.teilvorgaenge.find(x => x.id === t); if (tv && tv.status !== 'Erledigt') await api('teilvorgaenge/' + t, {status: 'Schreiben verfassen'}); }
       else if (a.status !== 'Erledigt') await api('akte/' + a.id, {status: 'Schreiben verfassen'});
       await nachher();
-    }, versand ? 'Brief gespeichert und als versendet erfasst. Status: Schreiben abgeschickt.' : edit ? 'Brief gespeichert.' : 'Entwurf angelegt. Status: Verfassen.');
+    }, (versand ? 'Brief gespeichert und als versendet erfasst. Status: Schreiben abgeschickt.' : edit ? 'Brief gespeichert.' : 'Entwurf angelegt. Status: Verfassen.')
+       + (wv ? ` Erinnerung ${wv.erinnern_am ? 'ab ' + dt(wv.erinnern_am) : 'am ' + dt(wv.faellig_am)}.` : ''));
     if (fenster && !entwurfId) fenster.close();
     return false;
   }, edit ? 'Speichern' : 'Entwurf anlegen', 'wide brief');
@@ -844,7 +874,9 @@ async function compose(bezugId, editId, vorschlag) {
       $('#m-subj').value = g.daten.betreff || $('#m-subj').value; $('#m-body').value = g.daten.brieftext; $('#m-body').dataset.touched = '1'; upd();
       return;
     }
-    if (ev.target.classList.contains('m-att')) upd(); if (ev.target.id === 'm-sent') $('#m-sentopt').hidden = !ev.target.checked; });
+    if (ev.target.classList.contains('m-att')) upd(); if (ev.target.id === 'm-sent') $('#m-sentopt').hidden = !ev.target.checked;
+    if (ev.target.id === 'm-wv') { $('#m-wvopt').hidden = !ev.target.checked; if (ev.target.checked) wvVorschlag(val('m-body'), $('#m-sent')?.checked ? val('m-svd') : isoHeute()); }
+    if (ev.target.id === 'm-svd' && $('#m-wv')?.checked) wvVorschlag(val('m-body'), val('m-svd')); });
   if (edit) upd(); else vorlage();
   if (vorschlag) { if (vorschlag.betreff) $('#m-subj').value = vorschlag.betreff; $('#m-body').value = vorschlag.brieftext || ''; $('#m-body').dataset.touched = '1'; upd(); }
 }
@@ -1027,14 +1059,17 @@ function fristRow(f, inV) {
   const n = tage(f.faellig_am), u = f.erledigt_am ? '' : n < 0 ? 'crit' : n <= 7 ? 'warn' : '';
   return `<div class="frow ${f.erledigt_am ? 'done' : ''}"><div class="fdate ${u}"><b class="num">${dShort(f.faellig_am)}</b><small>${WD[new Date(f.faellig_am + 'T12:00').getDay()]} · ${f.faellig_am.slice(0, 4)}</small></div>
    <div style="min-width:0"><div class="t">${esc(f.titel)}</div><div class="m"><span class="pill ${FKC[f.art]}" style="font-size:12px;padding:1px 7px">${FK[f.art]}</span>
-    ${inV ? '' : `<a href="#akte-${f.vorgang_id}">${esc(f.vorgang)}</a>`}${f.teilvorgang ? `<span>· ${esc(f.teilvorgang)}</span>` : ''}${f.zustaendig ? `<span>· Zuständig: ${esc(f.zustaendig)}</span>` : ''}<span>· ${f.erledigt_am ? 'erledigt' : relTage(f.faellig_am)}</span></div>
+    ${inV ? '' : `<a href="#akte-${f.vorgang_id}">${esc(f.vorgang)}</a>`}${f.teilvorgang ? `<span>· ${esc(f.teilvorgang)}</span>` : ''}${f.zustaendig ? `<span>· Zuständig: ${esc(f.zustaendig)}</span>` : ''}<span>· ${f.erledigt_am ? 'erledigt' : relTage(f.faellig_am)}</span>
+    ${f.erinnern_am && !f.erledigt_am ? (erinnert(f) ? `<span class="pill warn" style="font-size:12px;padding:1px 7px">🔔 Erinnerung</span>` : `<span>· Erinnerung ab ${dt(f.erinnern_am)}</span>`) : ''}</div>
+    ${f.neuer_eingang && !f.erledigt_am ? `<div class="m" style="margin-top:2px;color:var(--ok)">Neuer Eingang am ${dt(f.neuer_eingang)} – Antwort da? Dann „Erledigt“.</div>` : ''}
+    ${f.art === 'wiedervorlage' && f.eintrag_id && !f.erledigt_am && !f.neuer_eingang && tage(f.faellig_am) < 0 ? '<div class="m" style="margin-top:2px;color:var(--crit)">Keine Antwort eingegangen – nachfassen?</div>' : ''}
     ${f.verlauf && f.verlauf.length ? `<div class="m" style="margin-top:2px">Ursprünglich fällig ${dt(f.verlauf[0].faellig_alt)} · ${f.verlauf.length}× verschoben</div>` : ''}
     <div class="m" style="margin-top:2px">Quelle: ${f.quelle_zitat ? '„' + esc(f.quelle_zitat) + '“' : f.quelle_dokument_id ? 'Dokument' : 'selbst gesetzt'}</div></div>
    <div class="acts">${f.erledigt_am ? `<button class="btn sm" data-act="f-undo" data-id="${f.id}">Wieder öffnen</button>` : `<button class="btn sm" data-act="f-done" data-id="${f.id}">Erledigt</button><button class="btn sm" data-act="f-move" data-id="${f.id}">Verschieben</button>`}</div></div>`;
 }
 function fristList(list, inV) {
   const open = list.filter(f => !f.erledigt_am), done = list.filter(f => f.erledigt_am);
-  const g = [['Überfällig', open.filter(f => tage(f.faellig_am) < 0)], ['Nächste 14 Tage', open.filter(f => tage(f.faellig_am) >= 0 && tage(f.faellig_am) <= 14)], ['Später', open.filter(f => tage(f.faellig_am) > 14)], ['Erledigt', done]].filter(x => x[1].length);
+  const g = [['Überfällig', open.filter(f => tage(f.faellig_am) < 0)], ['Nächste 14 Tage', open.filter(f => tage(f.faellig_am) >= 0 && tage(f.faellig_am) <= 14)], ['Erinnerung fällig', open.filter(f => tage(f.faellig_am) > 14 && erinnert(f))], ['Später', open.filter(f => tage(f.faellig_am) > 14 && !erinnert(f))], ['Erledigt', done]].filter(x => x[1].length);
   return g.length ? g.map(([t, l]) => `<div class="grp">${t}</div><div>${l.map(f => fristRow(f, inV)).join('')}</div>`).join('') : '<p class="muted">Keine Fristen.</p>';
 }
 function vFristen() {
@@ -1327,13 +1362,24 @@ function versandModal(e) {
    <label>Sendungsnummer (optional)<input id="m-vn"></label><label>Empfänger</label>
    ${ziele.map((z, i) => `<label class="radio"><input type="radio" name="m-adr" value="${z.id}" ${i === 0 ? 'checked' : ''}><span class="lines">${esc(z.text)}</span></label>`).join('')}
    <label class="radio"><input type="radio" name="m-adr" value="frei" ${ziele.length ? '' : 'checked'}><span style="flex:1">Andere Anschrift oder E-Mail<textarea id="m-vf" rows="3" class="inp" style="margin-top:6px"></textarea></span></label>
-   <p class="muted" style="margin:0;font-size:13px">Die verwendete Anschrift wird mit dem Versand gespeichert und bleibt erhalten, auch wenn sie sich im Adressbuch später ändert.</p>`, async () => {
+   <p class="muted" style="margin:0;font-size:13px">Die verwendete Anschrift wird mit dem Versand gespeichert und bleibt erhalten, auch wenn sie sich im Adressbuch später ändert.</p>
+   <div class="stack" style="gap:4px"><label class="chk"><input type="checkbox" id="m-wv">Erinnerung an die Antwort setzen</label>
+     <span id="m-wvopt" class="two" hidden><label>Antwort erwartet bis<input id="m-wvf" type="date"></label><label>In der Übersicht erinnern ab<input id="m-wve" type="date"></label>
+      <span id="m-wvhint" class="muted" style="grid-column:1/-1;font-size:12.5px"></span></span></div>`, async () => {
     const wahl = document.querySelector('input[name=m-adr]:checked').value;
     const body = {art: val('m-va'), datum: val('m-vd'), sendungsnummer: val('m-vn')};
     if (wahl === 'frei') { body.empfaenger = val('m-vf'); if (!body.empfaenger.trim()) { $('#m-vf').focus(); return false; } } else body.anschrift_id = +wahl;
-    closeModal(); await act(async () => { const r = await api(`eintraege/${e.id}/versand`, body); S.entry = r.id; }, 'Versand erfasst. Status: Schreiben abgeschickt.');
+    const wv = $('#m-wv').checked ? {faellig_am: val('m-wvf'), erinnern_am: val('m-wve') || null, zitat: antwortfrist(e.text, body.datum).zitat} : null;
+    if (wv && (!wv.faellig_am || (wv.erinnern_am && wv.erinnern_am > wv.faellig_am))) { toast('Bitte Antworttag und Erinnerung prüfen.'); return false; }
+    closeModal(); await act(async () => { const r = await api(`eintraege/${e.id}/versand`, body); S.entry = r.id;
+      if (wv) await api(`akte/${a.id}/fristen`, {art: 'wiedervorlage', titel: 'Antwort erwartet: ' + e.titel, faellig_am: wv.faellig_am, erinnern_am: wv.erinnern_am, eintrag_id: r.id, quelle_zitat: wv.zitat});
+    }, 'Versand erfasst. Status: Schreiben abgeschickt.' + (wv ? ` Erinnerung ab ${dt(wv.erinnern_am || wv.faellig_am)}.` : ''));
     return false;
   }, 'Versand speichern');
+  document.querySelector('.modal').addEventListener('change', ev => {
+    if (ev.target.id === 'm-wv') { $('#m-wvopt').hidden = !ev.target.checked; if (ev.target.checked) wvVorschlag(e.text, val('m-vd')); }
+    if (ev.target.id === 'm-vd' && $('#m-wv').checked) wvVorschlag(e.text, val('m-vd'));
+  });
 }
 function dokVerschieben(docId, vonId, titel) {
   modal('Vorgang ändern', `<p style="margin:0">„${esc(titel || 'Dokument')}“ samt Chronik-Eintrag in einen anderen Vorgang verschieben.</p>
@@ -1419,10 +1465,10 @@ function fristNeu() {
 function fristModal() {
   const a = D.akte;
   modal('Frist oder Wiedervorlage', `<div class="two"><label>Art<select id="m-fa"><option value="wiedervorlage">Wiedervorlage</option><option value="aufgabe">Aufgabe</option><option value="frist">Verbindliche Frist</option></select></label><label>Fällig am<input id="m-ff" type="date" value="${plusTage(isoHeute(), 14)}"></label></div>
-   <label>Titel<input id="m-ft" maxlength="200"></label><div class="two">${teilSelect('m-fteil', S.teil, true)}<label>Zuständig<input id="m-fz" value="Ich"></label></div>
+   <label>Titel<input id="m-ft" maxlength="200"></label><label>In der Übersicht erinnern ab (optional)<input id="m-fe" type="date"></label><div class="two">${teilSelect('m-fteil', S.teil, true)}<label>Zuständig<input id="m-fz" value="Ich"></label></div>
    <label>Fundstelle oder Quellenvermerk (Pflicht bei verbindlicher Frist)<input id="m-fq" placeholder="z. B. „Stellungnahme bis zum 16.12.2026“, Schreiben vom 18.11., S. 1"></label>`, async () => {
     const titel = val('m-ft').trim(); if (!titel) { $('#m-ft').focus(); return false; }
-    const body = {art: val('m-fa'), titel, faellig_am: val('m-ff'), zustaendig: val('m-fz'), quelle_zitat: val('m-fq') || null, teilvorgang_id: val('m-fteil') ? +val('m-fteil') : null};
+    const body = {art: val('m-fa'), titel, faellig_am: val('m-ff'), erinnern_am: val('m-fe') || null, zustaendig: val('m-fz'), quelle_zitat: val('m-fq') || null, teilvorgang_id: val('m-fteil') ? +val('m-fteil') : null};
     if (S.entry) { const e = a.eintraege.find(x => x.id === S.entry); if (e && e.dokument_id && body.quelle_zitat) body.quelle_dokument_id = e.dokument_id; }
     try { await api(`akte/${a.id}/fristen`, body); closeModal(); toast('Frist eingetragen.'); await render(); } catch (e) { toast(e.message); }
     return false;

@@ -1,4 +1,4 @@
--- SQLite-Schema der Korrespondenzverwaltung, Schemaversion 15 (PRAGMA user_version).
+-- SQLite-Schema der Korrespondenzverwaltung, Schemaversion 16 (PRAGMA user_version).
 -- Erzeugt aus einer frischen Installation. Ausschließlich Struktur, keine Daten.
 -- Maßgeblich sind die Migrationen in app.py (MIGRATIONS), akte.py (migrate_3, migrate_4, migrate_6), mail_import.py
 -- (migrate_5) und ChatSync.__init__. Fremdschlüssel müssen pro Verbindung aktiviert werden.
@@ -94,7 +94,7 @@ CREATE TABLE frist(
     quelle_dokument_id INTEGER REFERENCES dokument(id), quelle_seite INTEGER, quelle_zitat TEXT,
     erledigt_am TEXT, angelegt_am TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, geloescht_am TEXT,
     CHECK(art <> 'frist' OR quelle_dokument_id IS NOT NULL OR quelle_zitat IS NOT NULL)
-);
+, erinnern_am TEXT, eintrag_id INTEGER REFERENCES eintrag(id));
 
 CREATE TABLE frist_verlauf(
     id INTEGER PRIMARY KEY, frist_id INTEGER NOT NULL REFERENCES frist(id),
@@ -217,4 +217,4 @@ CREATE TRIGGER suche_vorgang_au AFTER UPDATE OF titel,beschreibung ON vorgang BE
   DELETE FROM suche WHERE art='vorgang' AND ref_id=OLD.id;
   INSERT INTO suche(art,ref_id,seite,text) VALUES('vorgang',NEW.id,NULL,NEW.titel||' '||NEW.beschreibung); END;
 
-PRAGMA user_version = 15;
+PRAGMA user_version = 16;
