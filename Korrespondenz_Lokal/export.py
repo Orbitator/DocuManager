@@ -175,20 +175,23 @@ def brief_html(e, eigene, drucken=False):
     kopf = (f"<b>{esc(absender[0])}</b><br>" + "<br>".join(esc(z) for z in absender[1:])) if absender else ""
     return f"""<!doctype html><html lang="de"><head><meta charset="utf-8"><title>{esc(b.get('betreff') or e.get('titel'))}</title>
 <style>
-@page{{size:A4;margin:20mm 0 18mm 0}}
-@page :first{{margin-top:0}}
+/* Jede Seite hat oben 15 mm Rand (auch Seite 2 ff.); die Angaben der ersten Seite werden im Druck um diesen Rand
+   nach oben versetzt, damit die Anschrift trotzdem bei 55 mm im Sichtfenster steht. */
+@page{{size:A4;margin:15mm 0 18mm 0}}
+:root{{--oben:0mm}}
+@media print{{:root{{--oben:15mm}}}}
 *{{box-sizing:border-box}}
 body{{margin:0;background:#eceef3;font-family:Arial,"Helvetica Neue",Helvetica,sans-serif;color:#000;
   -webkit-print-color-adjust:exact;print-color-adjust:exact}}
 .blatt{{width:210mm;min-height:297mm;margin:12px auto;background:#fff;position:relative;
-  padding:{m['betreff']}mm {m['rand_rechts']}mm 20mm {m['rand_links']}mm;font-size:10.5pt;line-height:1.35;box-shadow:0 2px 12px rgba(0,0,0,.15)}}
-.kopf{{position:absolute;top:15mm;right:{m['rand_rechts']}mm;text-align:right;font-size:9pt;line-height:1.4}}
+  padding:calc({m['betreff']}mm - var(--oben)) {m['rand_rechts']}mm 20mm {m['rand_links']}mm;font-size:10.5pt;line-height:1.35;box-shadow:0 2px 12px rgba(0,0,0,.15)}}
+.kopf{{position:absolute;top:calc(15mm - var(--oben));right:{m['rand_rechts']}mm;text-align:right;font-size:9pt;line-height:1.4}}
 .kopf b{{font-size:10.5pt}}
-.ruecksende{{position:absolute;top:{m['ruecksende']}mm;left:{m['rand_links']}mm;width:85mm;font-size:7pt;line-height:1.2;
+.ruecksende{{position:absolute;top:calc({m['ruecksende']}mm - var(--oben));left:{m['rand_links']}mm;width:85mm;font-size:7pt;line-height:1.2;
   white-space:nowrap;overflow:hidden;text-overflow:ellipsis;border-bottom:.25pt solid #000;padding-bottom:.5mm}}
-.anschrift{{position:absolute;top:{m['empfaenger']}mm;left:{m['rand_links']}mm;width:85mm;
+.anschrift{{position:absolute;top:calc({m['empfaenger']}mm - var(--oben));left:{m['rand_links']}mm;width:85mm;
   max-height:{m['empfaenger_bis'] - m['empfaenger']}mm;overflow:hidden;white-space:pre-line;line-height:1.25}}
-.info{{position:absolute;top:{m['info']}mm;left:125mm;width:{210 - 125 - m['rand_rechts']}mm;font-size:9pt;line-height:1.5;
+.info{{position:absolute;top:calc({m['info']}mm - var(--oben));left:125mm;width:{210 - 125 - m['rand_rechts']}mm;font-size:9pt;line-height:1.5;
   display:grid;grid-template-columns:auto 1fr;gap:0 4mm}}
 .info span:nth-child(odd){{color:#444}}
 .marke{{position:absolute;left:4mm;width:5mm;border-top:.25pt solid #888}}
@@ -199,7 +202,7 @@ body{{margin:0;background:#eceef3;font-family:Arial,"Helvetica Neue",Helvetica,s
 .anlagen{{margin-top:8mm}}
 .leiste{{position:sticky;top:0;z-index:2;background:#1f2a5a;color:#fff;padding:8px 16px;font-size:13px;display:flex;gap:12px;align-items:center}}
 .leiste button{{font:inherit;padding:4px 10px;border-radius:6px;border:0;cursor:pointer}}
-@media print{{body{{background:#fff}}.leiste{{display:none}}.blatt{{margin:0;box-shadow:none;min-height:0}}}}
+@media print{{body{{background:#fff}}.leiste{{display:none}}.blatt{{margin:0;box-shadow:none;min-height:0;zoom:1!important}}}}
 </style></head><body>
 <div class="leiste">{'Versendet' if e.get('art') == 'ausgang' else 'Entwurf'} · {esc(e.get('titel'))}<span style="flex:1"></span>
 <span style="opacity:.8">DIN 5008 · Anschrift im Sichtfenster</span><button onclick="print()">Drucken oder als PDF sichern</button></div>
@@ -208,7 +211,7 @@ body{{margin:0;background:#eceef3;font-family:Arial,"Helvetica Neue",Helvetica,s
 <div class="ruecksende">{esc(' · '.join(absender))}</div>
 <div class="anschrift">{esc(empfaenger)}</div>
 <div class="info">{''.join(f'<span>{k}</span><span>{esc(v)}</span>' for k, v in info if v)}</div>
-<div class="marke" style="top:{m['falz1']}mm"></div><div class="marke loch" style="top:{m['loch']}mm"></div><div class="marke" style="top:{m['falz2']}mm"></div>
+<div class="marke" style="top:calc({m['falz1']}mm - var(--oben))"></div><div class="marke loch" style="top:calc({m['loch']}mm - var(--oben))"></div><div class="marke" style="top:calc({m['falz2']}mm - var(--oben))"></div>
 <div class="inhalt"><p class="betreff">{esc(b.get('betreff') or e.get('titel'))}</p>{absaetze}
 {('<p class="anlagen"><b>Anlagen</b><br>' + '<br>'.join(esc(a) for a in anlagen) + '</p>') if anlagen else ''}</div>
 </div>
@@ -367,7 +370,7 @@ def test_export(store):
     e = [x for x in a["eintraege"] if x["id"] == entwurf][0]
     assert e["brief"]["betreff"].startswith("Stellungnahme")
     seite = brief_html(e, "A. Mustermann\nLindenweg 4\n50733 Köln")
-    assert "top:55mm" in seite and "@page :first{margin-top:0}" in seite  # Anschrift im Sichtfenster (DIN 5008)
+    assert "top:calc(55mm - var(--oben))" in seite and "@page{size:A4;margin:15mm 0 18mm 0}" in seite  # Sichtfenster, Rand ab Seite 2
     gruss = brief_html({"titel": "T", "text": "Sehr geehrte Damen und Herren,\n\nText.\n\nMit freundlichen Grüßen\n\nA. Mustermann",
                         "brief": {"empfaenger": "X"}}, "A. Mustermann")
     assert '<p class="name">A. Mustermann</p>' in gruss
