@@ -37,7 +37,7 @@ from mail_import import MailImport, migrate_5, test_mail
 
 ROOT = Path(__file__).resolve().parent
 PORT = 8765
-APP_VERSION = "DocuManager 0.17.0 · Claude-Analyse, Antwortentwurf, Drucken und Versand"
+APP_VERSION = "DocuManager 0.17.1 · Claude sieht die ganze Akte"
 MAX_UPLOAD = 25 * 1024 * 1024
 MIN_MACOS = "14.0"
 SCHEMA_VERSION = 14

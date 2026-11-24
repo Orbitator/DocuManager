@@ -131,6 +131,12 @@ Teil 2 (umgesetzt, Schemaversion 7):
   sich selbst, `?drucken=1`) und „Als versendet in der Chronik erfassen“ (Versandart, Datum → Eintrag „Versendet“,
   Status „Schreiben abgeschickt“). Zugangsschlüssel unter Einstellungen → Claude, gespeichert in
   `Daten/claude_schluessel` (nur für den Benutzer lesbar, nicht in der Datensicherung). Netzaufrufe nur auf Anfrage.
+- 0.17.1: Claude bekommt bei jeder Anfrage die **ganze Akte** in zeitlicher Reihenfolge: jeder Chronik-Eintrag mit
+  Volltext des Dokuments, eigene versendete Briefe (mit Versandart, Datum, Empfänger) und Entwürfe im Wortlaut, Notizen,
+  Telefonate, Chat-Notizen, Teilvorgänge; dazu Dokumente ohne Eintrag. Eigene Schreiben gelten als verbindlich, der
+  Antwortentwurf muss sich auf den bisherigen Schriftverkehr beziehen. Erst über 600 000 Zeichen wird gekürzt, und nur
+  ältere fremde Dokumente (auf 3 000 Zeichen); das gewählte Schreiben und eigene Schreiben bleiben vollständig. Unter
+  jeder Antwort steht, was berücksichtigt wurde, und ob etwas gekürzt war oder ohne erkannten Text fehlte.
 - 0.16: Scannen ohne Dialog. „Scannen“ scannt sofort mit dem zuletzt benutzten Scanner (`Daten/scanner.json`):
   Einzug wenn vorhanden, sonst Glas; beidseitig, wenn möglich; 300 dpi Farbe. Die Seiten werden mit PDFKit zu einem
   komprimierten PDF zusammengefügt (leere Rückseiten fallen weg) und landen im Posteingang bzw. Archiv. Nur ein kleines

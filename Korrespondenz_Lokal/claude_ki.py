@@ -16,11 +16,15 @@ API = "https://api.anthropic.com/v1/messages"
 MODELL = "claude-opus-5-5"
 API_VERSION = "2026-10-21"
 FALLBACK_BETA = "server-side-fallback-2026-07-01"  # bei Ablehnung durch Sicherheitsfilter automatisch Ersatzmodell
-MAX_KONTEXT = 120_000  # Zeichen Dokumenttext je Anfrage
+MAX_KONTEXT = 600_000  # Zeichen Aktentext je Anfrage (rund 150 000 Token); darüber wird gekürzt
+KURZFASSUNG = 3000  # so viel bleibt von einem älteren fremden Dokument, wenn gekürzt werden muss
 
 SYSTEM = """Du unterstützt eine Privatperson bzw. einen Kleinunternehmer in Deutschland bei der Bearbeitung von
 Korrespondenz (Behörden, Gerichte, Versicherungen, Vermieter, Firmen). Antworte auf Deutsch, sachlich und knapp.
-Stütze dich auf die mitgelieferten Unterlagen; nenne Fundstellen (Dokument, Datum) und kennzeichne Annahmen.
+Grundlage ist die mitgelieferte, vollständige Akte des Vorgangs in zeitlicher Reihenfolge – eingegangene Schreiben,
+meine eigenen versendeten Schreiben und Entwürfe, Notizen und Telefonate. Lies sie ganz, bevor du antwortest, und
+beziehe den bisherigen Verlauf immer ein. Eigene Schreiben sind verbindlich: Was ich dort erklärt, zugesagt oder
+bestritten habe, gilt fort, außer ich sage etwas anderes. Nenne Fundstellen (Eintrag, Datum) und kennzeichne Annahmen.
 Fristen immer mit Datum nennen. Bei rechtlichen Fragen: Einschätzung geben, aber auf Grenzen hinweisen, wo eine
 Fachberatung sinnvoll ist. Briefe schreibst du nach DIN 5008, höflich und bestimmt, ohne Floskeln."""
 
@@ -32,7 +36,10 @@ AUFGABEN = {
                "Welche Möglichkeiten habe ich, und was empfiehlst du?",
     "fristen": "Welche Fristen, Termine und Handlungspflichten ergeben sich aus dem Schreiben? Liste sie mit Datum, "
                "Fundstelle und was jeweils zu tun ist.",
-    "antwort": "Entwirf ein Antwortschreiben auf dieses Schreiben.",
+    "antwort": "Entwirf ein Antwortschreiben auf das gewählte Schreiben. Berücksichtige den gesamten bisherigen "
+               "Schriftverkehr der Akte: Beziehe dich auf frühere Schreiben mit Datum, bleibe bei dem, was ich bereits "
+               "geschrieben habe (keine Widersprüche, keine Wiederholung bereits beantworteter Punkte), und greife "
+               "offene Punkte aus früheren Schreiben auf. Nenne in den Hinweisen, auf welche früheren Schreiben du dich stützt.",
 }
 
 BRIEF_SCHEMA = {
@@ -82,8 +89,14 @@ class ClaudeKI:
 
     # --- Kontext aus dem Vorgang --------------------------------------------------------
     def kontext(self, vorgang_id, dokument_id=None):
+        """Die ganze Akte in zeitlicher Reihenfolge: jeder Chronik-Eintrag mit seinem Text (eigene Briefe, Notizen,
+        Telefonate, Chat-Notizen) und dem Volltext des zugehörigen Dokuments, dazu Dokumente ohne Eintrag.
+        Gekürzt wird nur, wenn die Akte die Obergrenze übersteigt – dann zuerst ältere fremde Dokumente; das gewählte
+        Dokument und alle eigenen Schreiben bleiben vollständig. Was gekürzt wurde, steht in `info`."""
         a = self.akte.akte(vorgang_id)
         zeilen = [f"VORGANG: {a['titel']} (Bereich: {', '.join(a.get('bereiche') or [a['bereich']])}; Status: {a['status']})"]
+        if a.get("teilvorgaenge"):
+            zeilen.append("TEILVORGÄNGE: " + "; ".join(f"{t['name']} ({t['status']})" for t in a["teilvorgaenge"]))
         if a["beteiligte"]:
             zeilen.append("BETEILIGTE: " + "; ".join(b["name"] for b in a["beteiligte"]))
         if a["referenzen"]:
@@ -91,29 +104,69 @@ class ClaudeKI:
         offen = [f for f in a["fristen"] if not f["erledigt_am"]]
         if offen:
             zeilen.append("OFFENE FRISTEN: " + "; ".join(f"{f['faellig_am']} {f['titel']}" for f in offen))
-        zeilen.append("CHRONIK (neueste zuerst):")
-        for e in a["eintraege"][:60]:
-            zeilen.append(f"- {e['ereignis_datum']} · {e.get('typ') or e['art']} · {e['titel']}")
         eigene = self.akte.eigene_angaben()
         if eigene:
             zeilen.append("MEINE ANGABEN (Absender): " + eigene.replace("\n", ", "))
         uebersicht = "\n".join(zeilen)
-        texte, rest = [], MAX_KONTEXT
-        reihenfolge = sorted(a["dokumente"], key=lambda d: d["id"] != dokument_id)
-        for d in reihenfolge:
-            seiten = self.store.pages(d["id"])
-            text = "\n".join(s["text"] for s in seiten).strip()
-            if not text:
-                continue
-            haupt = d["id"] == dokument_id
-            grenze = rest if haupt else min(rest, 4000)
-            if grenze <= 500:
+
+        dok_text = {}
+        for d in a["dokumente"]:
+            dok_text[d["id"]] = "\n".join(s["text"] for s in self.store.pages(d["id"])).strip()
+        namen = {k["kontakt_id"]: k["name"] for k in a["beteiligte"]}
+        # Bausteine: [sortierschlüssel, kopf, text, kürzbar]
+        teile, verwendet = [], set()
+        for e in sorted(a["eintraege"], key=lambda x: (x["ereignis_datum"], x["id"])):
+            if e["art"] == "entwurf" and e.get("versendet_als"):
+                continue  # steht als „Versendet“ in der Chronik
+            art = {"eingang": "EINGANG", "ausgang": "MEIN SCHREIBEN (versendet)", "entwurf": "MEIN ENTWURF (nicht versendet)",
+                   "telefonat": "TELEFONAT", "notiz": "NOTIZ", "entscheidung": "ENTSCHEIDUNG", "chat": "CHAT-NOTIZ",
+                   "nachweis": "NACHWEIS", "fehlt": "ORIGINAL FEHLT"}.get(e["art"], e["art"].upper())
+            kopf = f"{e['ereignis_datum']} · {art}{' · ' + e['typ'] if e.get('typ') else ''} · {e['titel']}"
+            if e.get("kontakt_id"):
+                kopf += f" · {e.get('richtung') or ''} {namen.get(e['kontakt_id']) or self._kontakt(e['kontakt_id'])}".rstrip()
+            v = e.get("versand")
+            if v:
+                kopf += f" · Versand per {v['art']} am {v['datum']} an {v['empfaenger'].replace(chr(10), ', ')}"
+            text = (e.get("text") or "").strip()
+            b = e.get("brief") or {}
+            if b and text:
+                text = f"Betreff: {b.get('betreff') or e['titel']}\n{text}"
+            stuecke = [text] if text else []
+            d = e.get("dokument_id")
+            fremd = bool(d and dok_text.get(d) and d not in verwendet)
+            if fremd:
+                verwendet.add(d)
+                if dok_text[d] != text:
+                    stuecke.append(dok_text[d])
+            fokus = d == dokument_id and dokument_id is not None
+            kuerzbar = fremd and not fokus and e["art"] not in ("ausgang", "entwurf")
+            teile.append([kopf + (" · [GEWÄHLTES SCHREIBEN]" if fokus else ""), "\n\n".join(stuecke), kuerzbar, d])
+        for d in a["dokumente"]:
+            if d["id"] not in verwendet and dok_text.get(d["id"]):
+                fokus = d["id"] == dokument_id
+                teile.append([f"{d.get('datum') or ''} · DOKUMENT ohne Chronik-Eintrag · {d['titel']}"
+                              + (" · [GEWÄHLTES SCHREIBEN]" if fokus else ""), dok_text[d["id"]], not fokus, d["id"]])
+        # Obergrenze: ältere kürzbare Dokumente zuerst auf einen Anfang kürzen
+        gekuerzt = []
+        ueber = sum(len(t[1]) for t in teile) - MAX_KONTEXT
+        for t in teile:
+            if ueber <= 0:
                 break
-            gekuerzt = text[:grenze] + ("\n[… gekürzt]" if len(text) > grenze else "")
-            rest -= len(gekuerzt)
-            fokus = ' fokus="ja"' if haupt else ""
-            texte.append(f'<dokument titel="{d["titel"]}" datei="{d["dateiname"]}"{fokus}>\n{gekuerzt}\n</dokument>')
-        return a, uebersicht, texte
+            if t[2] and len(t[1]) > KURZFASSUNG:
+                ueber -= len(t[1]) - KURZFASSUNG
+                t[1] = t[1][:KURZFASSUNG] + "\n[… Rest dieses Dokuments aus Platzgründen weggelassen]"
+                gekuerzt.append(t[0].split(" · ")[-1] if "GEWÄHLT" not in t[0] else t[0])
+        akte = "\n\n".join(f"<eintrag nr=\"{i}\">\n{t[0]}\n{t[1] or '(kein Text)'}\n</eintrag>" for i, t in enumerate(teile, 1))
+        info = {"eintraege": len(teile), "dokumente": sum(1 for t in teile if t[3] and dok_text.get(t[3])),
+                "eigene_schreiben": sum(1 for t in teile if t[0].split(" · ")[1].startswith("MEIN")),
+                "ohne_text": sum(1 for d in a["dokumente"] if not dok_text.get(d["id"])),
+                "gekuerzt": gekuerzt, "zeichen": len(akte)}
+        return a, uebersicht, akte, info
+
+    def _kontakt(self, kontakt_id):
+        with closing(self.store.connect()) as db:
+            row = db.execute("SELECT name FROM kontakt WHERE id=?", (kontakt_id,)).fetchone()
+        return row[0] if row else ""
 
     # --- Anfrage ------------------------------------------------------------------------
     def fragen(self, vorgang_id, dokument_id, verlauf, aufgabe="frage"):
@@ -126,7 +179,7 @@ class ClaudeKI:
             raise ValueError("Unbekannte Aufgabe.")
         if not isinstance(verlauf, list) or len(verlauf) > 40:
             raise ValueError("Verlauf: ungültige Angabe.")
-        a, uebersicht, texte = self.kontext(vorgang_id, dokument_id)
+        a, uebersicht, akte, info = self.kontext(vorgang_id, dokument_id)
         nachrichten = []
         for n in verlauf:
             if not isinstance(n, dict) or n.get("rolle") not in ("user", "assistant") or not str(n.get("text", "")).strip():
@@ -140,7 +193,7 @@ class ClaudeKI:
             "model": MODELL,
             "max_tokens": 16000,
             "system": [{"type": "text", "text": SYSTEM},
-                       {"type": "text", "text": uebersicht + "\n\nUNTERLAGEN:\n" + "\n\n".join(texte)}],
+                       {"type": "text", "text": uebersicht + "\n\nAKTE (vollständig, älteste zuerst):\n" + akte}],
             "messages": nachrichten,
             "cache_control": {"type": "ephemeral"},  # Folgefragen zum selben Dokument werden günstiger
             "fallbacks": "default",
@@ -154,7 +207,7 @@ class ClaudeKI:
         text = "".join(b.get("text", "") for b in antwort.get("content", []) if b.get("type") == "text").strip()
         if antwort.get("stop_reason") == "max_tokens":
             text += "\n\n[Antwort wurde wegen der Länge abgeschnitten.]"
-        ergebnis = {"text": text, "aufgabe": aufgabe, "nutzung": antwort.get("usage", {})}
+        ergebnis = {"text": text, "aufgabe": aufgabe, "nutzung": antwort.get("usage", {}), "kontext": info}
         if aufgabe == "antwort":
             try:
                 brief = json.loads(text)
@@ -224,7 +277,7 @@ def test_claude(store):
     r = ki.fragen(v, d, [], "zusammenfassen")
     anfrage, schluessel = gesendet[-1]
     assert schluessel == "sk-ant-test-1234" and anfrage["model"] == MODELL and anfrage["fallbacks"] == "default"
-    assert "180,98" in anfrage["system"][1]["text"] and 'fokus="ja"' in anfrage["system"][1]["text"]
+    assert "180,98" in anfrage["system"][1]["text"] and "[GEWÄHLTES SCHREIBEN]" in anfrage["system"][1]["text"]
     assert "Amtsgericht Forderung TÜV" in anfrage["system"][1]["text"] and r["text"].startswith("Zahlung")
     r = ki.fragen(v, d, [], "antwort")
     assert gesendet[-1][0]["output_config"]["format"]["type"] == "json_schema"
@@ -234,5 +287,36 @@ def test_claude(store):
         raise AssertionError("Ablehnung muss gemeldet werden")
     except ValueError as fehler:
         assert "abgelehnt" in str(fehler)
+
+    # Kontext: eigene Schreiben, Notizen und alle Dokumente gehen vollständig und in zeitlicher Reihenfolge mit
+    alt, _ = store.import_document(v, "Mahnung.pdf", b"%PDF-1.4\nMahnung alt")
+    with closing(store.connect()) as db, db:
+        db.execute("INSERT INTO dokumentseite(dokument_id,nummer,methode,text) VALUES(?,?,?,?)",
+                   (alt, 1, "pdf", "Erste Mahnung über 180,98 €. " + "Langer Vertragstext. " * 400 + "SCHLUSSKLAUSEL-ALT"))
+    akte.eintrag_anlegen(v, {"art": "eingang", "titel": "Erste Mahnung", "datum": "2026-10-01", "dokument_id": alt})
+    entw = akte.eintrag_anlegen(v, {"art": "entwurf", "titel": "Widerspruch", "datum": "2026-10-10",
+                                    "text": "Ich bestreite die Forderung, da der TÜV-Termin nie stattfand. " + "Begründung. " * 300 + "ENDE-MEINES-BRIEFS",
+                                    "brief": {"betreff": "Widerspruch gegen Mahnung", "empfaenger": "Inkasso GmbH"}})
+    akte.versand_erfassen(entw, {"art": "Einschreiben", "datum": "2026-10-11", "empfaenger": "Inkasso GmbH\nHauptstr. 1"})
+    akte.eintrag_anlegen(v, {"art": "telefonat", "titel": "Anruf Inkasso", "datum": "2026-10-20",
+                             "text": "Ratenzahlung abgelehnt, Sachbearbeiterin Frau Kurz."})
+    r = ki.fragen(v, d, [], "zusammenfassen")
+    akte_text = gesendet[-1][0]["system"][1]["text"]
+    for muss in ("ENDE-MEINES-BRIEFS", "Versand per Einschreiben am 2026-10-11", "Ratenzahlung abgelehnt",
+                 "SCHLUSSKLAUSEL-ALT", "Widerspruch gegen Mahnung", "MEIN SCHREIBEN (versendet)"):
+        assert muss in akte_text, muss
+    assert akte_text.count("ENDE-MEINES-BRIEFS") == 1, "versendeter Entwurf darf nicht doppelt erscheinen"
+    assert akte_text.index("Erste Mahnung") < akte_text.index("Widerspruch gegen Mahnung") < akte_text.index("Ratenzahlung")
+    assert r["kontext"]["eigene_schreiben"] == 1 and not r["kontext"]["gekuerzt"]
+    # Obergrenze: gekürzt wird nur das ältere fremde Dokument, nie das eigene Schreiben oder das gewählte Schreiben
+    global MAX_KONTEXT
+    alt_grenze, MAX_KONTEXT = MAX_KONTEXT, 6000
+    try:
+        r = ki.fragen(v, d, [], "zusammenfassen")
+    finally:
+        MAX_KONTEXT = alt_grenze
+    akte_text = gesendet[-1][0]["system"][1]["text"]
+    assert "SCHLUSSKLAUSEL-ALT" not in akte_text and "ENDE-MEINES-BRIEFS" in akte_text and "180,98 € bis zum 15.12" in akte_text
+    assert r["kontext"]["gekuerzt"] == ["Erste Mahnung"]
     ki.schluessel_setzen("")
     assert not ki.status()["eingerichtet"]

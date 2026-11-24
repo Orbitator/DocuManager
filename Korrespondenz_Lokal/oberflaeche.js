@@ -1059,6 +1059,14 @@ const CLAUDE_FRAGEN = {zusammenfassen: 'Bitte zusammenfassen.', fristen: 'Welche
 function claudeText(t) {  // knappe Darstellung von Markdown: Absätze, Listen, Fett
   return esc(t).replace(/\*\*([^*]+)\*\*/g, '<b>$1</b>').replace(/^#{1,4} (.+)$/gm, '<b>$1</b>').replace(/^[-*] /gm, '• ');
 }
+function kontextHinweis(k) {  // zeigt, welche Teile der Akte Claude vorlagen
+  if (!k) return '';
+  const teile = [`${k.eintraege} Einträge der Akte`, `${k.eigene_schreiben} eigene Schreiben`, `${k.dokumente} Dokumente im Volltext`];
+  const warn = [];
+  if (k.gekuerzt && k.gekuerzt.length) warn.push(`Wegen der Größe der Akte nur gekürzt: ${k.gekuerzt.map(esc).join(', ')}`);
+  if (k.ohne_text) warn.push(`${k.ohne_text} Dokument(e) ohne erkannten Text – Inhalt lag Claude nicht vor`);
+  return `<p class="ck-kontext ${warn.length ? 'warn' : ''}">${warn.length ? I('alert') : I('check')} Berücksichtigt: ${teile.join(' · ')}${warn.length ? '. ' + warn.join('. ') + '.' : ' – vollständig.'}</p>`;
+}
 async function claudeDialog(docId, entryId) {
   const a = D.akte;
   if (!D.claude) D.claude = await api('claude');
@@ -1074,7 +1082,7 @@ async function claudeDialog(docId, entryId) {
   const d = docId ? a.dokumente.find(x => x.id === docId) : null, e = entryId ? a.eintraege.find(x => x.id === entryId) : null;
   const verlauf = [];  // {rolle, text, anzeige, brief}
   modal('Claude · ' + (d ? d.titel : a.titel), `<div class="claude">
-    <p class="muted" style="margin:0;font-size:12.5px">${d ? `Grundlage: „${esc(d.titel)}“ und eine Übersicht des Vorgangs „${esc(a.titel)}“.` : `Grundlage: der Vorgang „${esc(a.titel)}“ mit Chronik und Dokumenten.`} Claude kann sich irren – Fristen und Beträge bitte am Original prüfen.</p>
+    <p class="muted" style="margin:0;font-size:12.5px">Grundlage: die ganze Akte „${esc(a.titel)}“ in zeitlicher Reihenfolge – alle Schreiben im Volltext, Ihre eigenen Briefe und Entwürfe, Notizen und Telefonate${d ? `; im Mittelpunkt „${esc(d.titel)}“` : ''}. Claude kann sich irren – Fristen und Beträge bitte am Original prüfen.</p>
     <div class="claude-akt">${CLAUDE_AKTIONEN.map(([k, l]) => `<button class="btn sm" data-ck="${k}">${l}</button>`).join('')}</div>
     <div class="claude-verlauf" id="ck-verlauf"><p class="muted" style="margin:auto;text-align:center">Wählen Sie oben eine Aufgabe oder stellen Sie unten eine eigene Frage.</p></div>
     <div class="claude-ein"><textarea id="ck-frage" rows="2" placeholder="Eigene Frage, z. B. „Muss ich zahlen?“ oder „Formuliere den zweiten Absatz freundlicher.“"></textarea><button class="btn pri" data-ck="frage">Fragen</button></div></div>`, null, '', 'wide');
@@ -1084,7 +1092,7 @@ async function claudeDialog(docId, entryId) {
       : `<div class="ck-antwort"><div class="ck-text">${claudeText(n.text)}</div><div class="ck-knoepfe">
           <button class="btn sm ghost" data-ckn="notiz" data-i="${i}">Als Notiz speichern</button>
           <button class="btn sm ghost" data-ckn="brief" data-i="${i}">${I('draft')}Als Brief übernehmen</button>
-          <button class="btn sm ghost" data-ckn="kopie" data-i="${i}">Kopieren</button></div></div>`).join('')
+          <button class="btn sm ghost" data-ckn="kopie" data-i="${i}">Kopieren</button></div>${kontextHinweis(n.kontext)}</div>`).join('')
       + (box.dataset.laeuft ? '<div class="ck-antwort muted"><span class="spin"></span> Claude denkt nach … (kann bis zu einer Minute dauern)</div>' : '');
     feld.scrollTop = feld.scrollHeight;
   };
@@ -1098,7 +1106,7 @@ async function claudeDialog(docId, entryId) {
     box.dataset.laeuft = '1'; zeigen();
     try {
       const r = await api('claude/fragen', {vorgang_id: a.id, dokument_id: docId, verlauf: gesendet, aufgabe});
-      verlauf.push({rolle: 'assistant', text: r.text, brief: r.brieftext ? {betreff: r.betreff, brieftext: r.brieftext, hinweise: r.hinweise} : null});
+      verlauf.push({rolle: 'assistant', text: r.text, kontext: r.kontext, brief: r.brieftext ? {betreff: r.betreff, brieftext: r.brieftext, hinweise: r.hinweise} : null});
       if (aufgabe !== 'frage') verlauf[verlauf.length - 2].text = text;  // im Verlauf für Folgefragen steht die eigentliche Aufgabe
     } catch (err) { verlauf.pop(); toast(err.message); }
     delete box.dataset.laeuft; if (document.body.contains(feld)) zeigen();
