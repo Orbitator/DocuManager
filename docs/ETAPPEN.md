@@ -144,6 +144,13 @@ Teil 2 (umgesetzt, Schemaversion 7):
 - 0.17.3: Claude direkt im Briefdialog: „Antwort entwerfen“ (bzw. „Schreiben entwerfen“ ohne Bezugsschreiben) und
   „Text überarbeiten“, jeweils mit optionaler Vorgabe; Grundlage ist die ganze Akte, der Empfänger aus dem Dialog und
   beim Überarbeiten der eigene Entwurf. Aufgaben `schreiben` und `ueberarbeiten` mit strukturierter Antwort.
+- 0.18.0: Zweistufiger Ablauf im Briefdialog. **1 · Analysieren & bewerten** (Aufgabe `bewerten`, `BEWERTUNG_SCHEMA`):
+  Zusammenfassung, rechtliche Bewertung mit Normen, Fristen, Risiken, fehlende Angaben und 2–4 Handlungsoptionen mit
+  Vor- und Nachteilen, eine davon empfohlen; als Notiz in die Chronik übernehmbar. **2 · Antwort entwerfen** ist erst
+  danach frei und setzt die gewählte Option (oder eine eigene Linie aus der Vorgabe) auf Grundlage dieser Bewertung um.
+  Briefdialog neu aufgeteilt: fast bildschirmfüllend, links kompakte Felder (Vorlage/Datum, Zeichen/Betreff in einer
+  Zeile), rechts große Vorschau in echter A4-Aufteilung (Anschrift bei 55 mm, Betreff bei 100 mm, Falzmarken,
+  Seitenende), vergrößer- und verkleinerbar.
 - 0.16: Scannen ohne Dialog. „Scannen“ scannt sofort mit dem zuletzt benutzten Scanner (`Daten/scanner.json`):
   Einzug wenn vorhanden, sonst Glas; beidseitig, wenn möglich; 300 dpi Farbe. Die Seiten werden mit PDFKit zu einem
   komprimierten PDF zusammengefügt (leere Rückseiten fallen weg) und landen im Posteingang bzw. Archiv. Nur ein kleines

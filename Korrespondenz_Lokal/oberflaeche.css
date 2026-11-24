@@ -486,3 +486,37 @@ button.heute:hover{background:var(--surface-2,rgba(127,127,127,.18))}
 .ck-brief{display:flex;gap:6px;align-items:center;flex-wrap:wrap;padding:8px 10px;border:1px solid var(--line);border-radius:10px;background:var(--surface)}
 .ck-brief-t{flex:1;display:flex;gap:4px;align-items:center;font-weight:600;font-size:13px}
 .ck-brief input{flex:1 1 100%;order:3;font:inherit;font-size:13px;padding:6px 8px;border:1px solid var(--line);border-radius:7px;background:var(--surface);color:var(--fg)}
+.kibew{border:1px solid var(--line);border-radius:10px;background:var(--surface);padding:10px 12px;max-height:48vh;overflow:auto;font-size:13.5px}
+.kibew p{margin:0 0 6px}.kibew details{margin:4px 0 8px}.kibew summary{cursor:pointer;font-weight:600}
+.kifr{margin:0 0 6px;padding-left:18px}.kiwarn{color:#a15c00}
+.kiopt{display:flex;flex-direction:column;gap:6px}
+.kio{display:flex;gap:8px;align-items:flex-start;border:1px solid var(--line);border-radius:8px;padding:8px 10px;cursor:pointer;font-weight:400}
+.kio:has(input:checked){border-color:var(--accent,#3b5bdb);background:var(--dialog)}
+.kio input{margin-top:3px}.kio small{display:block;color:var(--muted);margin-top:2px}
+
+/* Briefdialog: zwei Spalten, Vorschau in echter A4-Aufteilung */
+.modal.brief{width:min(1560px,97vw);height:94vh;max-height:94vh;overflow:hidden}
+.modal.brief .compose{flex:1;min-height:0;grid-template-columns:minmax(420px,.8fr) minmax(0,1.2fr);gap:20px;align-items:stretch}
+.modal.brief .compose>.stack{overflow:auto;padding-right:6px;gap:10px}
+.cz-zeile{display:flex;gap:10px}.cz-zeile>label{flex:1;min-width:0}.cz-zeile>.cz-schmal{flex:0 0 150px}
+.compose textarea.cz-emp{min-height:0;height:auto;resize:vertical}
+.compose textarea.cz-body{min-height:340px;resize:vertical}
+.cz-rechts{display:flex;flex-direction:column;min-height:0;gap:6px}
+.cz-pvkopf{display:flex;align-items:center;gap:4px;font-size:12.5px;color:var(--muted)}.cz-pvkopf .sp{flex:1}
+.modal.brief .compose .pv{flex:1;max-height:none;min-height:0;overflow:auto;container-type:inline-size;padding:14px}
+.a4{--mm:calc(100cqw / 210 * var(--pvz,1));width:calc(210 * var(--mm));min-height:calc(297 * var(--mm));margin:0 auto;position:relative;background:#fff;color:#000;
+  box-shadow:0 2px 12px rgba(0,0,0,.18);font-family:Arial,"Helvetica Neue",Helvetica,sans-serif;font-size:calc(3.88 * var(--mm));line-height:1.35;
+  padding:calc(100 * var(--mm)) calc(20 * var(--mm)) calc(20 * var(--mm)) calc(25 * var(--mm));
+  background-image:repeating-linear-gradient(to bottom,transparent 0,transparent calc(297 * var(--mm) - 1px),#c9cedb calc(297 * var(--mm) - 1px),#c9cedb calc(297 * var(--mm)))}
+.a4-kopf{position:absolute;top:calc(15 * var(--mm));right:calc(20 * var(--mm));text-align:right;font-size:calc(3.17 * var(--mm));line-height:1.4}
+.a4-kopf b{font-size:calc(3.88 * var(--mm))}
+.a4-rs{position:absolute;top:calc(49 * var(--mm));left:calc(25 * var(--mm));width:calc(85 * var(--mm));font-size:calc(2.47 * var(--mm));white-space:nowrap;overflow:hidden;text-overflow:ellipsis;border-bottom:1px solid #000}
+.a4-an{position:absolute;top:calc(55 * var(--mm));left:calc(25 * var(--mm));width:calc(85 * var(--mm));max-height:calc(35 * var(--mm));overflow:hidden;white-space:pre-line;line-height:1.25}
+.a4-info{position:absolute;top:calc(55 * var(--mm));left:calc(125 * var(--mm));width:calc(65 * var(--mm));font-size:calc(3.17 * var(--mm));line-height:1.5;display:grid;grid-template-columns:auto 1fr;gap:0 calc(4 * var(--mm))}
+.a4-info span:nth-child(odd){color:#555}
+.a4-m{position:absolute;left:calc(4 * var(--mm));width:calc(5 * var(--mm));border-top:1px solid #999}.a4-m.l{width:calc(7 * var(--mm))}
+.a4-betreff{font-weight:700;margin:0 0 calc(8.5 * var(--mm))}
+.a4-inhalt p{margin:0 0 calc(4.5 * var(--mm))}.a4-inhalt p.name{margin-top:calc(14 * var(--mm))}.a4-anl{margin-top:calc(8 * var(--mm))}
+@media (max-width:1100px){.modal.brief{height:auto;max-height:94vh;overflow:auto}.modal.brief .compose{grid-template-columns:minmax(0,1fr)}.modal.brief .compose>.stack{overflow:visible}.modal.brief .compose .pv{height:70vh;flex:none}}
+.modal.brief .compose>.stack>*{flex-shrink:0}
+.compose .stack label.kio{flex-direction:row;color:var(--fg);font-size:13px;gap:8px}

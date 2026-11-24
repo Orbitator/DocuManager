@@ -50,6 +50,47 @@ AUFGABEN["ueberarbeiten"] = ("Überarbeite meinen Briefentwurf: sprachlich klar,
                              "und Absicht bei, ergänze Fehlendes und fülle Platzhalter, wo die Akte die Angabe enthält. In den "
                              "Hinweisen nenne kurz, was du geändert hast.")
 BRIEF_AUFGABEN = ("antwort", "schreiben", "ueberarbeiten")
+AUFGABEN["bewerten"] = (
+    "Analysiere das gewählte Schreiben und bewerte es rechtlich vor dem Hintergrund der ganzen Akte, bevor ich antworte. "
+    "Prüfe nach deutschem Recht (Normen nennen, wo einschlägig, z. B. BGB, ZPO, VwVfG, AO, VVG): Ist die Forderung bzw. "
+    "das Anliegen dem Grunde und der Höhe nach berechtigt? Stimmen Daten, Beträge und Aktenzeichen mit der Akte überein? "
+    "Fristen (mit Datum und Folge bei Versäumnis), Form- und Zustellungsfragen, Verjährung, Beweislage, Widersprüche zu "
+    "früheren Schreiben. Schlage dann 2 bis 4 sinnvolle Handlungsoptionen vor (z. B. zahlen, widersprechen, Nachweise "
+    "anfordern, Ratenzahlung oder Fristverlängerung erbitten, Fachanwalt einschalten) mit Vor- und Nachteilen und "
+    "markiere genau eine als empfohlen. Nenne, welche Angaben oder Unterlagen fehlen. Bleibe sachlich und ehrlich, auch "
+    "wenn die Gegenseite im Recht ist; die Einschätzung ersetzt keine anwaltliche Beratung.")
+_TEXT = {"type": "string"}
+BEWERTUNG_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "zusammenfassung": {"type": "string", "description": "Worum es geht, in 2 bis 4 Sätzen"},
+        "rechtliche_bewertung": {"type": "string", "description": "Rechtliche Einschätzung mit Begründung und Normen; Absätze durch Leerzeilen"},
+        "fristen": {"type": "array", "items": {"type": "object", "properties": {"datum": _TEXT, "was": _TEXT},
+                                               "required": ["datum", "was"], "additionalProperties": False}},
+        "risiken": {"type": "string", "description": "Was droht, wenn nichts oder das Falsche getan wird"},
+        "fehlende_angaben": {"type": "string", "description": "Welche Angaben oder Unterlagen fehlen; leer, wenn nichts fehlt"},
+        "optionen": {"type": "array", "items": {"type": "object", "properties": {
+            "titel": _TEXT, "beschreibung": _TEXT, "vorteile": _TEXT, "nachteile": _TEXT, "empfohlen": {"type": "boolean"}},
+            "required": ["titel", "beschreibung", "vorteile", "nachteile", "empfohlen"], "additionalProperties": False}},
+    },
+    "required": ["zusammenfassung", "rechtliche_bewertung", "fristen", "risiken", "fehlende_angaben", "optionen"],
+    "additionalProperties": False,
+}
+
+
+def bewertung_als_text(b):
+    """Lesbare Fassung einer Bewertung (für den Gesprächsverlauf, die Notiz und den Antwortentwurf)."""
+    teile = [f"ZUSAMMENFASSUNG\n{b.get('zusammenfassung', '')}", f"RECHTLICHE BEWERTUNG\n{b.get('rechtliche_bewertung', '')}"]
+    if b.get("fristen"):
+        teile.append("FRISTEN\n" + "\n".join(f"– {f.get('datum', '')}: {f.get('was', '')}" for f in b["fristen"]))
+    if b.get("risiken"):
+        teile.append(f"RISIKEN\n{b['risiken']}")
+    if b.get("fehlende_angaben"):
+        teile.append(f"FEHLENDE ANGABEN\n{b['fehlende_angaben']}")
+    for i, o in enumerate(b.get("optionen") or [], 1):
+        teile.append(f"OPTION {i}{' (empfohlen)' if o.get('empfohlen') else ''}: {o.get('titel', '')}\n{o.get('beschreibung', '')}"
+                     f"\nVorteile: {o.get('vorteile', '')}\nNachteile: {o.get('nachteile', '')}")
+    return brieftext_saeubern("\n\n".join(teile))
 
 BRIEF_SCHEMA = {
     "type": "object",
@@ -191,7 +232,8 @@ class ClaudeKI:
         return row[0] if row else ""
 
     # --- Anfrage ------------------------------------------------------------------------
-    def fragen(self, vorgang_id, dokument_id, verlauf, aufgabe="frage", anweisung="", entwurf="", empfaenger=""):
+    def fragen(self, vorgang_id, dokument_id, verlauf, aufgabe="frage", anweisung="", entwurf="", empfaenger="",
+               bewertung="", option=""):
         """verlauf: Liste von {rolle: "user"|"assistant", text}. Die letzte Nachricht ist die neue Frage
         (bei aufgabe != "frage" wird sie aus AUFGABEN ergänzt)."""
         schluessel = self.schluessel()
@@ -213,6 +255,10 @@ class ClaudeKI:
                 if not str(entwurf).strip():
                     raise ValueError("Zum Überarbeiten zuerst einen Brieftext eingeben.")
                 auftrag += f"\n\n<mein_entwurf>\n{str(entwurf)[:20000]}\n</mein_entwurf>"
+            if aufgabe in BRIEF_AUFGABEN and str(bewertung).strip():
+                auftrag += f"\n\nZugrunde liegende Bewertung (zuvor mit mir erarbeitet):\n<bewertung>\n{str(bewertung)[:30000]}\n</bewertung>"
+            if aufgabe in BRIEF_AUFGABEN and str(option).strip():
+                auftrag += (f"\n\nGewählte Vorgehensweise – das Schreiben muss genau diese Linie umsetzen:\n{str(option)[:4000]}")
             if str(empfaenger).strip():
                 auftrag += f"\n\nEmpfänger des Briefs:\n{str(empfaenger)[:500]}"
             if str(anweisung).strip():
@@ -228,10 +274,12 @@ class ClaudeKI:
             "messages": nachrichten,
             "cache_control": {"type": "ephemeral"},  # Folgefragen zum selben Dokument werden günstiger
             "fallbacks": "default",
-            "output_config": {"effort": "high" if aufgabe in BRIEF_AUFGABEN + ("pruefen",) else "medium"},
+            "output_config": {"effort": "high" if aufgabe in BRIEF_AUFGABEN + ("pruefen", "bewerten") else "medium"},
         }
         if aufgabe in BRIEF_AUFGABEN:
             anfrage["output_config"]["format"] = {"type": "json_schema", "schema": BRIEF_SCHEMA}
+        elif aufgabe == "bewerten":
+            anfrage["output_config"]["format"] = {"type": "json_schema", "schema": BEWERTUNG_SCHEMA}
         antwort = self.senden(anfrage, schluessel)
         if antwort.get("stop_reason") == "refusal":
             raise ValueError("Claude hat diese Anfrage abgelehnt. Bitte anders formulieren.")
@@ -249,6 +297,14 @@ class ClaudeKI:
                                      + (f"\n\nHinweise: {brief['hinweise']}" if brief.get("hinweise") else ""))
             except (json.JSONDecodeError, KeyError, TypeError):
                 pass  # dann als freier Text anzeigen
+        elif aufgabe == "bewerten":
+            try:
+                b = json.loads(text)
+                if not isinstance(b.get("optionen"), list):
+                    raise TypeError
+                ergebnis.update(bewertung=b, text=bewertung_als_text(b))
+            except (json.JSONDecodeError, TypeError, AttributeError):
+                pass
         return ergebnis
 
     def _http(self, anfrage, schluessel):
@@ -289,6 +345,12 @@ def test_claude(store):
         if anfrage["messages"][-1]["content"].startswith("Entwirf"):
             return {"stop_reason": "end_turn", "content": [{"type": "text", "text": json.dumps(
                 {"betreff": "Ihre Forderung", "brieftext": "Sehr geehrte Damen und Herren,\n\nich widerspreche.", "hinweise": "Aktenzeichen ergänzen"})}]}
+        if anfrage["messages"][-1]["content"].startswith("Analysiere"):
+            return {"stop_reason": "end_turn", "content": [{"type": "text", "text": json.dumps({
+                "zusammenfassung": "Mahnung über 180,98 €.", "rechtliche_bewertung": "Forderung zweifelhaft (§ 286 BGB).",
+                "fristen": [{"datum": "15.12.2026", "was": "Zahlung"}], "risiken": "Mahnbescheid", "fehlende_angaben": "",
+                "optionen": [{"titel": "Zahlen", "beschreibung": "b", "vorteile": "v", "nachteile": "n", "empfohlen": False},
+                             {"titel": "Widersprechen", "beschreibung": "b", "vorteile": "v", "nachteile": "n", "empfohlen": True}]})}]}
         if "verboten" in anfrage["messages"][-1]["content"]:
             return {"stop_reason": "refusal", "content": []}
         return {"stop_reason": "end_turn", "content": [{"type": "text", "text": "Zahlung 180,98 € bis 15.12.2026."}],
@@ -317,6 +379,12 @@ def test_claude(store):
     letzte = gesendet[-1][0]["messages"][-1]["content"]
     assert "<mein_entwurf>" in letzte and "kürzer" in letzte and "Amtsgericht Rostock" in letzte
     assert gesendet[-1][0]["output_config"]["format"]["type"] == "json_schema"
+    r = ki.fragen(v, d, [], "bewerten")
+    assert gesendet[-1][0]["output_config"]["format"]["schema"] is BEWERTUNG_SCHEMA
+    assert r["bewertung"]["optionen"][1]["empfohlen"] and "OPTION 2 (empfohlen): Widersprechen" in r["text"]
+    r = ki.fragen(v, d, [], "antwort", bewertung=r["text"], option="Widersprechen: Termin fand nie statt")
+    letzte = gesendet[-1][0]["messages"][-1]["content"]
+    assert "<bewertung>" in letzte and "genau diese Linie" in letzte and "Termin fand nie statt" in letzte
     r = ki.fragen(v, d, [], "antwort")
     assert gesendet[-1][0]["output_config"]["format"]["type"] == "json_schema"
     assert r["betreff"] == "Ihre Forderung" and r["brieftext"].startswith("Sehr geehrte")

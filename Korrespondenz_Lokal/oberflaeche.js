@@ -645,24 +645,29 @@ async function compose(bezugId, editId, vorschlag) {
   const anl = a.eintraege.filter(e => e.dokument_id && e.art !== 'entwurf');
   const b = edit && edit.brief || {};
   modal(edit ? 'Brief bearbeiten' : 'Brief verfassen', `<div class="compose"><div class="stack">
-    ${edit ? '' : `<label>Vorlage<select id="m-tpl">${Object.entries(VORLAGEN).map(([key, t]) => `<option value="${key}">${t[0]}</option>`).join('')}</select></label>`}
+    <div class="cz-zeile">${edit ? '' : `<label>Vorlage<select id="m-tpl">${Object.entries(VORLAGEN).map(([key, t]) => `<option value="${key}">${t[0]}</option>`).join('')}</select></label>`}
+     <label class="cz-schmal">Datum<input id="m-bdat" value="${esc(b.datum || dt(isoHeute()))}"></label></div>
     <div class="two"><label>Kontakt<select id="m-kontakt"><option value="">– ohne Adressbuch –</option>${kontaktOptionen}</select></label>
      <label>Anschrift<select id="m-to" ${ziele.length > 1 ? '' : 'hidden'}>${zielOptionen()}</select><span class="muted" id="m-tohint" style="font-size:12.5px" ${ziele.length > 1 ? 'hidden' : ''}>${k ? (ziele[0]?.k === 'n' ? 'Keine Anschrift hinterlegt – bitte ergänzen.' : 'Aktuelle Anschrift aus dem Adressbuch') : 'Kontakt wählen oder Anschrift eintragen'}</span></label></div>
-    <label>Empfänger<textarea id="m-emp" rows="4">${esc(b.empfaenger || (ziele[0] ? ziele[0].text : ''))}</textarea></label>
-    <div class="two"><label>Ihr Zeichen<input id="m-zeichen" value="${esc(b.zeichen || (ref ? ref.wert : ''))}"></label><label>Datum<input id="m-bdat" value="${esc(b.datum || dt(isoHeute()))}"></label></div>
-    <label>Betreff<input id="m-subj" value="${esc(b.betreff || '')}"></label>
+    <label>Empfänger<textarea id="m-emp" rows="5" class="cz-emp">${esc(b.empfaenger || (ziele[0] ? ziele[0].text : ''))}</textarea></label>
+    <div class="cz-zeile"><label class="cz-schmal">Ihr Zeichen<input id="m-zeichen" value="${esc(b.zeichen || (ref ? ref.wert : ''))}"></label>
+     <label>Betreff<input id="m-subj" value="${esc(b.betreff || '')}"></label></div>
     <div class="ck-brief"><span class="ck-brief-t">${I('ki')}Claude</span>
-     <input id="m-kianw" placeholder="Vorgabe (optional), z. B. „Widerspruch, Zahlung ablehnen“ oder „kürzer und freundlicher“">
-     <button type="button" class="btn sm" data-kib="${bezug ? 'antwort' : 'schreiben'}">${bezug ? 'Antwort entwerfen' : 'Schreiben entwerfen'}</button>
-     <button type="button" class="btn sm ghost" data-kib="ueberarbeiten">Text überarbeiten</button></div>
-    <label>Brieftext<textarea id="m-body">${esc(edit ? edit.text || '' : '')}</textarea></label>
+     <button type="button" class="btn sm" data-kib="bewerten">1 · Analysieren &amp; bewerten</button>
+     <button type="button" class="btn sm" data-kib="${bezug ? 'antwort' : 'schreiben'}" data-stufe2 disabled title="Zuerst analysieren und eine Option wählen">2 · ${bezug ? 'Antwort' : 'Schreiben'} entwerfen</button>
+     <button type="button" class="btn sm ghost" data-kib="ueberarbeiten">Text überarbeiten</button>
+     <input id="m-kianw" placeholder="Vorgabe (optional), z. B. „Ton freundlicher“ oder „Ratenzahlung über 3 Monate anbieten“"></div>
+    <div id="m-kibew" class="kibew" hidden></div>
+    <label>Brieftext<textarea id="m-body" class="cz-body">${esc(edit ? edit.text || '' : '')}</textarea></label>
     ${anl.length ? `<label>Anlagen</label><div class="stack" style="gap:4px">${anl.map(e => `<label class="chk"><input type="checkbox" class="m-att" value="${esc(e.titel)}" ${(b.anlagen || []).includes(e.titel) ? 'checked' : ''}>${esc(e.titel)} vom ${dt(e.ereignis_datum)}</label>`).join('')}</div>` : ''}
     <div class="notecard" id="m-kihinweis" style="margin:0;font-size:13px" ${vorschlag && vorschlag.hinweise ? '' : 'hidden'}>${vorschlag && vorschlag.hinweise ? `${I('ki')} <b>Hinweise von Claude:</b> ${esc(vorschlag.hinweise)}` : ''}</div>
     ${edit && edit.versendet_als ? '' : `<div class="stack" style="gap:4px"><label class="chk"><input type="checkbox" id="m-print">Nach dem Speichern drucken</label>
      <label class="chk"><input type="checkbox" id="m-sent">Als versendet in der Chronik erfassen</label>
      <span id="m-sentopt" class="two" hidden><label>Versandart<select id="m-sva">${VERSAND.map(v => `<option>${v}</option>`).join('')}</select></label><label>Versanddatum<input id="m-svd" type="date" value="${isoHeute()}"></label></span></div>`}
     <p class="muted" style="margin:0;font-size:12.5px">Ihr Absender kommt aus Einstellungen → Eigene Angaben. Platzhalter in eckigen Klammern bitte ersetzen.</p></div>
-   <div class="pv" id="m-pv" aria-label="Vorschau"></div></div>`, async () => {
+   <div class="cz-rechts"><div class="cz-pvkopf"><span>Vorschau · DIN A4, Anschrift im Sichtfenster</span><span class="sp"></span>
+    <button type="button" class="btn sm ghost" data-pvz="-1" title="Kleiner">−</button><button type="button" class="btn sm ghost" data-pvz="1" title="Größer">＋</button></div>
+    <div class="pv" id="m-pv" aria-label="Vorschau"></div></div></div>`, async () => {
     const body = $('#m-body') ? $('#m-body').value : val('m-body');
     if (/\[[^\]]{3,40}\]/.test(body) && !S.platzhalterOk) { S.platzhalterOk = true; toast('Der Text enthält noch Platzhalter in eckigen Klammern. Erneut speichern, um trotzdem fortzufahren.'); return false; }
     S.platzhalterOk = false;
@@ -689,12 +694,20 @@ async function compose(bezugId, editId, vorschlag) {
     }, versand ? 'Brief gespeichert und als versendet erfasst. Status: Schreiben abgeschickt.' : edit ? 'Brief gespeichert.' : 'Entwurf angelegt. Status: Verfassen.');
     if (fenster && !entwurfId) fenster.close();
     return false;
-  }, edit ? 'Speichern' : 'Entwurf anlegen', 'wide');
+  }, edit ? 'Speichern' : 'Entwurf anlegen', 'wide brief');
   const absender = (D.eigene || '').split('\n').filter(Boolean);
   const upd = () => {
     const absaetze = val('m-body').split(/\n\s*\n/).filter(x => x.trim()).map(x => `<p>${esc(x).replace(/\n/g, '<br>')}</p>`).join('');
     const anlagen = [...document.querySelectorAll('.m-att:checked')].map(x => esc(x.value));
-    $('#m-pv').innerHTML = `<div class="paper"><div class="sender">${esc(absender.join(' · '))}</div><div class="lhead"><div class="rcpt">${esc(val('m-emp'))}</div><div class="info">${val('m-zeichen') ? `<span>Ihr Zeichen</span><span>${esc(val('m-zeichen'))}</span>` : ''}${bezug ? `<span>Ihr Schreiben</span><span>${dt(bezug.ereignis_datum)}</span>` : ''}<span>Datum</span><span>${esc(val('m-bdat'))}</span></div></div><p class="subj">${esc(val('m-subj'))}</p>${absaetze}${anlagen.length ? `<p><b>Anlagen</b><br>${anlagen.join('<br>')}</p>` : ''}</div>`;
+    const kopf = absender.length ? `<b>${esc(absender[0])}</b><br>${absender.slice(1).map(esc).join('<br>')}` : '';
+    const info = [[val('m-zeichen') && 'Ihr Zeichen', val('m-zeichen')], [bezug && 'Ihr Schreiben vom', bezug && dt(bezug.ereignis_datum)], ['Datum', val('m-bdat')]].filter(x => x[0]);
+    const teile = val('m-body').split(/\n\s*\n/).filter(x => x.trim()), gruss = teile.length > 1 && /(Grüßen?|Gruß|Hochachtungsvoll)\W*$/.test(teile[teile.length - 2].trim());
+    const absaetze2 = teile.map((x, i) => `<p${gruss && i === teile.length - 1 ? ' class="name"' : ''}>${esc(x.trim()).replace(/\n/g, '<br>')}</p>`).join('');
+    $('#m-pv').innerHTML = `<div class="a4"><div class="a4-kopf">${kopf}</div><div class="a4-rs">${esc(absender.join(' · '))}</div>
+      <div class="a4-an">${esc(val('m-emp').split('\n').map(z => z.trim()).filter(Boolean).join('\n'))}</div>
+      <div class="a4-info">${info.map(([k, v]) => `<span>${k}</span><span>${esc(v)}</span>`).join('')}</div>
+      <i class="a4-m" style="top:calc(105 * var(--mm))"></i><i class="a4-m l" style="top:calc(148.5 * var(--mm))"></i><i class="a4-m" style="top:calc(210 * var(--mm))"></i>
+      <div class="a4-inhalt"><p class="a4-betreff">${esc(val('m-subj'))}</p>${absaetze2}${anlagen.length ? `<p class="a4-anl"><b>Anlagen</b><br>${anlagen.join('<br>')}</p>` : ''}</div></div>`;
   };
   const vorlage = () => { const t = VORLAGEN[val('m-tpl')], z = ziele.find(x => x.k === val('m-to')) || ziele[0]; $('#m-subj').value = fill(t[1], z); $('#m-body').value = fill(t[2], z); upd(); };
   const box = document.querySelector('.modal');
@@ -711,22 +724,61 @@ async function compose(bezugId, editId, vorschlag) {
     else if (ev.target.id === 'm-to') { const z = ziele.find(x => x.k === ev.target.value); $('#m-emp').value = z ? z.text : ''; if (!$('#m-body').dataset.touched && $('#m-tpl')) vorlage(); else upd(); }
     else { if (ev.target.id === 'm-body') ev.target.dataset.touched = '1'; upd(); }
   });
+  const bewKey = `${a.id}:${bezug ? bezug.id : 'v'}`;
+  S.kiBewertung = S.kiBewertung || {};
+  const zeigeBewertung = r => {  // Schritt 1: Bewertung mit Optionen anzeigen, Schritt 2 freigeben
+    const el = $('#m-kibew'), bw = r.bewertung; el.hidden = false;
+    if (!bw) { el.innerHTML = `<div class="ck-text">${claudeText(r.text)}</div>`; }
+    else el.innerHTML = `<p><b>Worum es geht:</b> ${esc(bw.zusammenfassung)}</p>
+      <details open><summary>Rechtliche Bewertung</summary><div class="ck-text">${claudeText(bw.rechtliche_bewertung)}</div></details>
+      ${bw.fristen.length ? `<p><b>Fristen:</b></p><ul class="kifr">${bw.fristen.map(f => `<li><b>${esc(f.datum)}</b> – ${esc(f.was)}</li>`).join('')}</ul>` : ''}
+      ${bw.risiken ? `<p><b>Risiken:</b> ${esc(bw.risiken)}</p>` : ''}
+      ${bw.fehlende_angaben ? `<p class="kiwarn">${I('alert')} <b>Fehlt noch:</b> ${esc(bw.fehlende_angaben)}</p>` : ''}
+      <p style="margin-top:10px"><b>Wie möchten Sie vorgehen?</b></p>
+      <div class="kiopt">${bw.optionen.map((o, i) => `<label class="kio"><input type="radio" name="m-kio" value="${i}" ${o.empfohlen ? 'checked' : ''}>
+        <span><b>${esc(o.titel)}</b>${o.empfohlen ? ' <span class="pill">Empfohlen</span>' : ''}<br>${esc(o.beschreibung)}
+        <small>＋ ${esc(o.vorteile)}</small><small>－ ${esc(o.nachteile)}</small></span></label>`).join('')}
+        <label class="kio"><input type="radio" name="m-kio" value="eigen"><span><b>Eigene Linie</b><br>Beschreiben Sie Ihr Vorgehen im Feld „Vorgabe“ oben.</span></label></div>`;
+    el.innerHTML += kontextHinweis(r.kontext) + `<div style="display:flex;gap:6px;margin-top:8px"><button type="button" class="btn sm ghost" data-kinotiz>Bewertung als Notiz speichern</button></div>`;
+    box.querySelector('[data-stufe2]').disabled = false; box.querySelector('[data-stufe2]').title = '';
+  };
+  if (S.kiBewertung[bewKey]) zeigeBewertung(S.kiBewertung[bewKey]);
+  const pvZoom = z => { S.pvZoom = Math.min(1, Math.max(0.6, z)); $('#m-pv').style.setProperty('--pvz', S.pvZoom); };
+  pvZoom(S.pvZoom || 1);
   box.addEventListener('click', async ev => {
+    const zb = ev.target.closest('[data-pvz]'); if (zb) { pvZoom((S.pvZoom || 1) + 0.1 * +zb.dataset.pvz); return; }
+    if (ev.target.closest('[data-kinotiz]')) {
+      const r = S.kiBewertung[bewKey], knopf = ev.target.closest('[data-kinotiz]');
+      try { await api(`akte/${a.id}/eintraege`, {art: 'notiz', titel: 'Rechtliche Bewertung (Claude)' + (bezug ? ' – ' + bezug.titel : ''), text: r.text, bezug_id: bezug ? bezug.id : null, teile: bezug ? bezug.teile : []});
+        knopf.disabled = true; knopf.textContent = 'In der Chronik gespeichert'; } catch (err) { toast(err.message); }
+      return;
+    }
     const k = ev.target.closest('[data-kib]'); if (!k || box.dataset.ki) return;
     if (!D.claude) D.claude = await api('claude');
     if (!D.claude.eingerichtet) { toast('Claude ist noch nicht eingerichtet: Einstellungen → Claude (KI-Analyse).'); return; }
     const aufgabe = k.dataset.kib, knoepfe = box.querySelectorAll('[data-kib]'), alt = k.innerHTML;
-    if (aufgabe !== 'ueberarbeiten' && $('#m-body').dataset.touched && !confirm('Den bisherigen Brieftext durch einen Entwurf von Claude ersetzen?')) return;
-    box.dataset.ki = '1'; knoepfe.forEach(b => b.disabled = true); k.innerHTML = '<span class="spin"></span>Claude schreibt …';
+    const bew = S.kiBewertung[bewKey];
+    let option = '';
+    if (aufgabe === 'antwort' || aufgabe === 'schreiben') {
+      const wahl = box.querySelector('input[name=m-kio]:checked')?.value;
+      if (wahl === 'eigen') { if (!val('m-kianw').trim()) { toast('Bitte im Feld „Vorgabe“ beschreiben, wie Sie vorgehen möchten.'); $('#m-kianw').focus(); return; } }
+      else if (bew && bew.bewertung && wahl !== undefined) { const o = bew.bewertung.optionen[+wahl]; option = `${o.titel}: ${o.beschreibung}`; }
+      if ($('#m-body').dataset.touched && !confirm('Den bisherigen Brieftext durch einen Entwurf von Claude ersetzen?')) return;
+    }
+    const zweiter = box.querySelector('[data-stufe2]'), war2 = zweiter.disabled;
+    box.dataset.ki = '1'; knoepfe.forEach(b => b.disabled = true);
+    k.innerHTML = `<span class="spin"></span>${aufgabe === 'bewerten' ? 'Claude prüft die Akte …' : 'Claude schreibt …'}`;
     try {
       const r = await api('claude/fragen', {vorgang_id: a.id, dokument_id: bezug ? bezug.dokument_id : null, verlauf: [], aufgabe,
-        anweisung: val('m-kianw'), entwurf: val('m-body'), empfaenger: val('m-emp')});
+        anweisung: val('m-kianw'), entwurf: val('m-body'), empfaenger: val('m-emp'), bewertung: bew ? bew.text : '', option});
       if (!document.body.contains(box)) return;
+      if (aufgabe === 'bewerten') { S.kiBewertung[bewKey] = r; zeigeBewertung(r); $('#m-kibew').scrollIntoView({block: 'nearest'}); throw null; }
       if (r.betreff) $('#m-subj').value = r.betreff;
       $('#m-body').value = r.brieftext || r.text; $('#m-body').dataset.touched = '1'; upd();
       const h = $('#m-kihinweis'); h.hidden = !(r.hinweise || r.kontext); h.innerHTML = (r.hinweise ? `${I('ki')} <b>Hinweise von Claude:</b> ${esc(r.hinweise)}` : '') + kontextHinweis(r.kontext);
-    } catch (err) { toast(err.message); }
+    } catch (err) { if (err) toast(err.message); }
     delete box.dataset.ki; knoepfe.forEach(b => b.disabled = false); k.innerHTML = alt;
+    zweiter.disabled = war2 && !S.kiBewertung[bewKey];
   });
   box.addEventListener('change', ev => { if (ev.target.classList.contains('m-att')) upd(); if (ev.target.id === 'm-sent') $('#m-sentopt').hidden = !ev.target.checked; });
   if (edit) upd(); else vorlage();
