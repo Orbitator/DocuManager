@@ -37,7 +37,7 @@ from mail_import import MailImport, migrate_5, test_mail
 
 ROOT = Path(__file__).resolve().parent
 PORT = 8765
-APP_VERSION = "DocuManager 0.18.0 · Rechtliche Bewertung vor dem Antwortentwurf"
+APP_VERSION = "DocuManager 0.18.1 · Günstigere Claude-Anfragen"
 MAX_UPLOAD = 25 * 1024 * 1024
 MIN_MACOS = "14.0"
 SCHEMA_VERSION = 14
@@ -1162,6 +1162,8 @@ class Handler(BaseHTTPRequestHandler):
                     for doc_id in ergebnis.get("ids", []):
                         self.ins_archiv(doc_id)
                 self.send_json(ergebnis)
+            elif path == "/api/claude/stufe":
+                self.send_json(self.claude.stufe_setzen(json.loads(self.read_body(4000)).get("stufe")))
             elif path == "/api/claude/schluessel":
                 self.send_json(self.claude.schluessel_setzen(json.loads(self.read_body(4000)).get("schluessel")))
             elif path == "/api/claude/fragen":  # Analyse oder Entwurf; kann bis zu einigen Minuten dauern

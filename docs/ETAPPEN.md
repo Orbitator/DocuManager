@@ -151,6 +151,11 @@ Teil 2 (umgesetzt, Schemaversion 7):
   Briefdialog neu aufgeteilt: fast bildschirmfüllend, links kompakte Felder (Vorlage/Datum, Zeichen/Betreff in einer
   Zeile), rechts große Vorschau in echter A4-Aufteilung (Anschrift bei 55 mm, Betreff bei 100 mm, Falzmarken,
   Seitenende), vergrößer- und verkleinerbar.
+- 0.18.1: Kosten gesenkt. Zwischenspeicher-Merker am Ende der Akte statt am Ende der Anfrage: Folgeanfragen zum selben
+  Vorgang binnen 5 Minuten lesen die Akte zu einem Zwanzigstel des Preises (vorher wurde bei jeder Anfrage nur neu
+  geschrieben). Denktiefe je Aufgabe (`AUFWAND`): Zusammenfassen und Fristen niedrig, alles andere mittel. Einstellung
+  „Qualität und Kosten“ (Gründlich = Standard, Ausgewogen, Sparsam; `STUFEN`). Unter jeder Antwort stehen die Kosten der
+  Anfrage und ob die Akte aus dem Zwischenspeicher kam.
 - 0.16: Scannen ohne Dialog. „Scannen“ scannt sofort mit dem zuletzt benutzten Scanner (`Daten/scanner.json`):
   Einzug wenn vorhanden, sonst Glas; beidseitig, wenn möglich; 300 dpi Farbe. Die Seiten werden mit PDFKit zu einem
   komprimierten PDF zusammengefügt (leere Rückseiten fallen weg) und landen im Posteingang bzw. Archiv. Nur ein kleines

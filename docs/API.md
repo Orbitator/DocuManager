@@ -46,6 +46,7 @@ Die bisherigen Schnittstellen (`/api/cases`, Dokumente, Scan, Chat) bleiben unve
 | POST `/api/akte/{id}/eintraege` | `art` (eingang, ausgang, entwurf, nachweis, telefonat, notiz, entscheidung, chat, fehlt), `titel`, `datum`, optional `teile`, `richtung` (von, an, mit), `kontakt_id`, `dokument_id`, `bezug_id`, `text`, `quelle`, `geprueft` |
 | POST `/api/eintraege/{id}` | `titel`, `datum`, `text`, `kontakt_id`, `geprueft`, `teile`, `auch_in_vorgang` |
 | GET `/api/claude` | Ob Claude eingerichtet ist (`eingerichtet`, `endung` des Schlüssels) |
+| POST `/api/claude/stufe` | `stufe` (gruendlich, ausgewogen, sparsam) |
 | POST `/api/claude/schluessel` | `schluessel` (leer = entfernen); Ablage in `Daten/claude_schluessel` |
 | POST `/api/claude/fragen` | `vorgang_id`, `dokument_id` (optional), `verlauf` [{`rolle`: user/assistant, `text`}], `aufgabe` (frage, zusammenfassen, fristen, pruefen, bewerten, antwort, schreiben, ueberarbeiten), optional `anweisung`, `entwurf`, `empfaenger`, `bewertung` (Text), `option`; bei `bewerten` zusätzlich `bewertung` (zusammenfassung, rechtliche_bewertung, fristen, risiken, fehlende_angaben, optionen) → `text`, `kontext` (`eintraege`, `eigene_schreiben`, `dokumente`, `ohne_text`, `gekuerzt`); bei `antwort` zusätzlich `betreff`, `brieftext`, `hinweise` |
 | POST `/api/eintraege/{id}/versand` | `art` (Post, Einschreiben, E-Mail, Fax, Persönlich, Online-Portal), `datum`, `sendungsnummer`, `anschrift_id` oder `empfaenger`, `nachweis_dokument_id` |

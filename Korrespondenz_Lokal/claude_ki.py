@@ -13,7 +13,17 @@ from contextlib import closing
 from pathlib import Path
 
 API = "https://api.anthropic.com/v1/messages"
-MODELL = "claude-opus-5-5"
+MODELL = "claude-opus-5-5"  # gründlichste Stufe
+# Stufen: Modell, Preise in $ je Million Token (Eingabe, Ausgabe, Cache lesen, Cache schreiben 5 Min.)
+STUFEN = {
+    "sparsam": {"modell": "claude-haiku-5-5", "name": "Sparsam", "preise": (0.10, 0.50, 0.01, 0.125)},
+    "ausgewogen": {"modell": "claude-sonnet-5-5", "name": "Ausgewogen", "preise": (2.0, 10.0, 0.10, 2.50)},
+    "gruendlich": {"modell": MODELL, "name": "Gründlich", "preise": (4.0, 20.0, 0.20, 5.0)},
+}
+STANDARD_STUFE = "gruendlich"
+# Denktiefe je Aufgabe: einfache Aufgaben knapp, Bewertung gründlich (Denken kostet Ausgabe-Token)
+AUFWAND = {"zusammenfassen": "low", "fristen": "low", "frage": "medium", "pruefen": "medium", "bewerten": "medium",
+           "antwort": "medium", "schreiben": "medium", "ueberarbeiten": "medium"}
 API_VERSION = "2026-10-21"
 FALLBACK_BETA = "server-side-fallback-2026-07-01"  # bei Ablehnung durch Sicherheitsfilter automatisch Ersatzmodell
 MAX_KONTEXT = 600_000  # Zeichen Aktentext je Anfrage (rund 150 000 Token); darüber wird gekürzt
@@ -146,9 +156,22 @@ class ClaudeKI:
         os.chmod(self._datei, 0o600)
         return self.status()
 
+    def stufe(self):
+        with closing(self.store.connect()) as db:
+            row = db.execute("SELECT wert FROM einstellung WHERE schluessel='claude_stufe'").fetchone()
+        return row[0] if row and row[0] in STUFEN else STANDARD_STUFE
+
+    def stufe_setzen(self, stufe):
+        if stufe not in STUFEN:
+            raise ValueError("Unbekannte Stufe.")
+        with closing(self.store.connect()) as db, db:
+            db.execute("INSERT OR REPLACE INTO einstellung(schluessel,wert) VALUES('claude_stufe',?)", (stufe,))
+        return self.status()
+
     def status(self):
         s = self.schluessel()
-        return {"eingerichtet": bool(s), "endung": s[-4:] if s else None, "modell": MODELL}
+        return {"eingerichtet": bool(s), "endung": s[-4:] if s else None, "stufe": self.stufe(),
+                "stufen": {k: v["name"] for k, v in STUFEN.items()}}
 
     # --- Kontext aus dem Vorgang --------------------------------------------------------
     def kontext(self, vorgang_id, dokument_id=None):
@@ -266,16 +289,21 @@ class ClaudeKI:
             nachrichten.append({"role": "user", "content": auftrag})
         if not nachrichten or nachrichten[-1]["role"] != "user":
             raise ValueError("Bitte eine Frage stellen.")
+        stufe = STUFEN[self.stufe()]
         anfrage = {
-            "model": MODELL,
+            "model": stufe["modell"],
             "max_tokens": 16000,
+            # Zwischenspeicher (Prompt-Caching): Anweisung und Akte bilden einen gleichbleibenden Anfang. Der Merker
+            # sitzt am Ende der Akte, nicht am Ende der wechselnden Frage – so lesen Bewertung, Entwurf und Folgefragen
+            # zum selben Vorgang die Akte binnen 5 Minuten zu einem Zwanzigstel des Preises aus dem Speicher.
             "system": [{"type": "text", "text": SYSTEM},
-                       {"type": "text", "text": uebersicht + "\n\nAKTE (vollständig, älteste zuerst):\n" + akte}],
+                       {"type": "text", "text": uebersicht + "\n\nAKTE (vollständig, älteste zuerst):\n" + akte,
+                        "cache_control": {"type": "ephemeral"}}],
             "messages": nachrichten,
-            "cache_control": {"type": "ephemeral"},  # Folgefragen zum selben Dokument werden günstiger
-            "fallbacks": "default",
-            "output_config": {"effort": "high" if aufgabe in BRIEF_AUFGABEN + ("pruefen", "bewerten") else "medium"},
+            "output_config": {"effort": AUFWAND.get(aufgabe, "medium")},
         }
+        if stufe["modell"] != "claude-haiku-5-5":  # für Haiku gibt es kein Ersatzmodell bei Ablehnung
+            anfrage["fallbacks"] = "default"
         if aufgabe in BRIEF_AUFGABEN:
             anfrage["output_config"]["format"] = {"type": "json_schema", "schema": BRIEF_SCHEMA}
         elif aufgabe == "bewerten":
@@ -286,7 +314,13 @@ class ClaudeKI:
         text = "".join(b.get("text", "") for b in antwort.get("content", []) if b.get("type") == "text").strip()
         if antwort.get("stop_reason") == "max_tokens":
             text += "\n\n[Antwort wurde wegen der Länge abgeschnitten.]"
-        ergebnis = {"text": text, "aufgabe": aufgabe, "nutzung": antwort.get("usage", {}), "kontext": info}
+        nutzung = antwort.get("usage", {})
+        ein, aus, lesen, schreiben = stufe["preise"]
+        kosten = (nutzung.get("input_tokens", 0) * ein + nutzung.get("output_tokens", 0) * aus
+                  + nutzung.get("cache_read_input_tokens", 0) * lesen + nutzung.get("cache_creation_input_tokens", 0) * schreiben) / 1e6
+        info = dict(info, kosten_usd=round(kosten, 4), stufe=stufe["name"],
+                    aus_speicher=nutzung.get("cache_read_input_tokens", 0))
+        ergebnis = {"text": text, "aufgabe": aufgabe, "nutzung": nutzung, "kontext": info}
         if aufgabe in BRIEF_AUFGABEN:
             try:
                 brief = json.loads(text)
@@ -311,7 +345,7 @@ class ClaudeKI:
         daten = json.dumps(anfrage).encode("utf-8")
         req = urllib.request.Request(API, data=daten, method="POST", headers={
             "Content-Type": "application/json", "x-api-key": schluessel, "anthropic-version": API_VERSION,
-            "anthropic-beta": FALLBACK_BETA})
+            **({"anthropic-beta": FALLBACK_BETA} if "fallbacks" in anfrage else {})})
         try:
             with urllib.request.urlopen(req, timeout=600) as res:
                 return json.loads(res.read().decode("utf-8"))
@@ -372,6 +406,15 @@ def test_claude(store):
     r = ki.fragen(v, d, [], "zusammenfassen")
     anfrage, schluessel = gesendet[-1]
     assert schluessel == "sk-ant-test-1234" and anfrage["model"] == MODELL and anfrage["fallbacks"] == "default"
+    assert anfrage["system"][1]["cache_control"] == {"type": "ephemeral"} and "cache_control" not in anfrage
+    assert anfrage["output_config"]["effort"] == "low" and r["kontext"]["kosten_usd"] == round((10 * 4 + 5 * 20) / 1e6, 4)
+    assert ki.stufe_setzen("sparsam")["stufe"] == "sparsam"
+    ki.fragen(v, d, [], "zusammenfassen")
+    assert gesendet[-1][0]["model"] == "claude-haiku-5-5" and "fallbacks" not in gesendet[-1][0]
+    ki.stufe_setzen("ausgewogen")
+    ki.fragen(v, d, [], "zusammenfassen")
+    assert gesendet[-1][0]["model"] == "claude-sonnet-5-5"
+    ki.stufe_setzen("gruendlich")
     assert "180,98" in anfrage["system"][1]["text"] and "[GEWÄHLTES SCHREIBEN]" in anfrage["system"][1]["text"]
     assert "Amtsgericht Forderung TÜV" in anfrage["system"][1]["text"] and r["text"].startswith("Zahlung")
     r = ki.fragen(v, d, [], "ueberarbeiten", anweisung="kürzer", entwurf="Sehr geehrte Damen und Herren, nein.",

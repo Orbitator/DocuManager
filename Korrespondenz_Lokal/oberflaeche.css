@@ -520,3 +520,4 @@ button.heute:hover{background:var(--surface-2,rgba(127,127,127,.18))}
 @media (max-width:1100px){.modal.brief{height:auto;max-height:94vh;overflow:auto}.modal.brief .compose{grid-template-columns:minmax(0,1fr)}.modal.brief .compose>.stack{overflow:visible}.modal.brief .compose .pv{height:70vh;flex:none}}
 .modal.brief .compose>.stack>*{flex-shrink:0}
 .compose .stack label.kio{flex-direction:row;color:var(--fg);font-size:13px;gap:8px}
+.ck-kosten{white-space:nowrap}

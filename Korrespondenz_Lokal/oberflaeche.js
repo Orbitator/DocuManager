@@ -1048,6 +1048,8 @@ function vSettings() {
    <div class="panel stack"><h2>Claude (KI-Analyse)</h2><p style="margin:0">Mit einem eigenen Zugangsschlüssel von Anthropic analysiert Claude Schreiben und entwirft Antworten – direkt im Vorgang über die Schaltfläche „Claude“. Den Schlüssel erstellen Sie unter <b>console.anthropic.com</b> → API Keys (Guthaben nötig; eine Analyse kostet meist wenige Cent).</p>
     ${D.claude && D.claude.eingerichtet ? `<p style="margin:0">${I('check')} Eingerichtet · Schlüssel endet auf <code>…${esc(D.claude.endung)}</code></p><div style="display:flex;gap:8px"><button class="btn" data-act="claude-key">Schlüssel ändern</button><button class="btn ghost" data-act="claude-key-del">Entfernen</button></div>`
       : `<div style="display:flex;gap:8px;flex-wrap:wrap"><input id="claudekey" class="inp" type="password" autocomplete="off" placeholder="sk-ant-…" style="flex:1;min-width:240px"><button class="btn" data-act="claude-key-save">Speichern</button></div>`}
+    ${D.claude && D.claude.eingerichtet ? `<label class="chk" style="flex-direction:column;align-items:flex-start;gap:4px">Qualität und Kosten<select id="claudestufe" class="inp" style="max-width:420px">${[['gruendlich', 'Gründlich – Standard, bestes Ergebnis für Rechtsfragen'], ['ausgewogen', 'Ausgewogen – etwa halber Preis'], ['sparsam', 'Sparsam – sehr günstig, nur für einfache Zusammenfassungen']].map(([k, l]) => `<option value="${k}" ${D.claude.stufe === k ? 'selected' : ''}>${l}</option>`).join('')}</select></label>` : ''}
+    <p class="muted" style="margin:0;font-size:12.5px">Kosten sparen: Die Akte wird nach der ersten Anfrage 5 Minuten zwischengespeichert. Bewertung, Entwurf und Folgefragen kurz hintereinander kosten deshalb nur einen Bruchteil. Unter jeder Antwort steht, was sie gekostet hat.</p>
     <p class="muted" style="margin:0;font-size:12.5px">Übertragen wird nur, wenn Sie Claude fragen: der Text des gewählten Dokuments, gekürzte Texte der übrigen Dokumente und die Chronik des Vorgangs. Der Schlüssel liegt nur auf diesem Mac in <code>Daten/claude_schluessel</code> und ist nicht Teil der Datensicherung.</p></div>
    <div class="panel stack"><h2>Eigene Angaben</h2><p style="margin:0">Ihr Name und Ihre Anschrift, eine Angabe pro Zeile. Die Absendererkennung schlägt diese Angaben nie als Absender vor.</p>
     <textarea id="eigene" class="inp" rows="4">${esc(D.eigene)}</textarea><div><button class="btn" data-act="eigene-save">Speichern</button></div></div>
@@ -1138,7 +1140,8 @@ function kontextHinweis(k) {  // zeigt, welche Teile der Akte Claude vorlagen
   const warn = [];
   if (k.gekuerzt && k.gekuerzt.length) warn.push(`Wegen der Größe der Akte nur gekürzt: ${k.gekuerzt.map(esc).join(', ')}`);
   if (k.ohne_text) warn.push(`${k.ohne_text} Dokument(e) ohne erkannten Text – Inhalt lag Claude nicht vor`);
-  return `<p class="ck-kontext ${warn.length ? 'warn' : ''}">${warn.length ? I('alert') : I('check')} Berücksichtigt: ${teile.join(' · ')}${warn.length ? '. ' + warn.join('. ') + '.' : ' – vollständig.'}</p>`;
+  const kosten = k.kosten_usd !== undefined ? ` <span class="ck-kosten">· ${esc(k.stufe || '')}, Kosten ca. ${k.kosten_usd < 0.01 ? 'unter 1 Cent' : (k.kosten_usd * 100).toFixed(1).replace('.', ',') + ' Cent'}${k.aus_speicher ? ', Akte aus dem Zwischenspeicher' : ''}</span>` : '';
+  return `<p class="ck-kontext ${warn.length ? 'warn' : ''}">${warn.length ? I('alert') : I('check')}<span>Berücksichtigt: ${teile.join(' · ')}${warn.length ? '. ' + warn.join('. ') + '.' : ' – vollständig.'}${kosten}</span></p>`;
 }
 async function claudeDialog(docId, entryId) {
   const a = D.akte;
@@ -1507,6 +1510,7 @@ document.addEventListener('change', async ev => {
   const el = ev.target;
   if (el.dataset.change === 'v-status') await statusSetzen(null, el.value, render);
   if (el.dataset.change === 't-status') await statusSetzen(+el.dataset.id, el.value, render);
+  if (el.id === 'claudestufe') await act(async () => { D.claude = await api('claude/stufe', {stufe: el.value}); }, 'Gespeichert.');
   if (el.id === 'mailflag') await act(() => api('mail/markierung', {markierung: +el.value}), 'Markierung gespeichert.');
   if (el.id === 'fileinp') { const files = [...el.files]; el.value = ''; await importFiles(files, el.dataset.ziel === 'archiv' ? 'archiv' : el.dataset.ziel ? +el.dataset.ziel : null); }
   if (el.id === 'm-ea' && el.value === '__neu') { const name = prompt('Name der neuen Eintragsart (z. B. Besprechung, Ortstermin):'); el.value = 'notiz';
