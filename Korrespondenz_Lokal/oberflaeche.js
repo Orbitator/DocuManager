@@ -286,7 +286,7 @@ function tileHtml(p) {
 }
 const draft = {};  // Eingaben im Posteingang bis zum Zuordnen
 function detailHtml(p) {
-  const v = p.vorschlag, d = draft[p.id] || (draft[p.id] = {fristen: [], titel: p.titel, datum: v.datum || '', kontakt: v.kontakt ? String(v.kontakt.id) : (v.absender ? 'neu' : ''), vorgang: v.vorgaenge[0] ? String(v.vorgaenge[0].vorgang_id) : '', teil: ''});
+  const v = p.vorschlag, d = draft[p.id] || (draft[p.id] = {fristen: [], empfaenger: p.empfaenger || '', titel: p.titel, datum: v.datum || '', kontakt: v.kontakt ? String(v.kontakt.id) : (v.absender ? 'neu' : ''), vorgang: v.vorgaenge[0] ? String(v.vorgaenge[0].vorgang_id) : '', teil: ''});
   const titleSrc = p.titel_quelle === 'Manuell' ? 'manuell geändert' : p.titel_quelle === 'Dateiname' ? 'aus dem Dateinamen' : `erkannt aus: ${p.titel_quelle}${p.titel_seite ? ', Seite ' + p.titel_seite : ''}`;
   const pending = /Wartet|läuft/.test(p.ocr_status);
   if (!pending && !d.frInit) { d.fristen = [...(v.fristen || []).map(f => ({...f, an: true})), ...d.fristen]; d.frInit = true; }
@@ -301,6 +301,9 @@ function detailHtml(p) {
     <label>Absender <small>${v.absender ? 'aus: ' + esc(v.absender.quelle) : v.kontakt ? 'aus Erwähnung im Text' : 'nicht erkannt'}</small><select data-ib="kontakt" data-id="${p.id}"><option value="">– unbekannt –</option>
      ${neu ? `<option value="neu" ${d.kontakt === 'neu' ? 'selected' : ''}>Neu: ${esc(v.absender.name)}</option>` : ''}
      ${D.kontakte.map(k => `<option value="${k.id}" ${d.kontakt === String(k.id) ? 'selected' : ''}>${esc(k.kurzname || k.name)}</option>`).join('')}<option value="__neu">+ Neuer Kontakt …</option></select></label>
+    <label>Empfänger <small>${p.empfaenger ? (D.empfaenger || []).includes(p.empfaenger) ? 'erkannt (zulässiger Empfänger)' : 'aus dem Anschriftenfeld' : 'nicht erkannt'}</small><select data-ib="empfaenger" data-id="${p.id}"><option value="">– unbekannt –</option>
+     ${[...new Set([...(D.empfaenger || []), ...(p.empfaenger ? [p.empfaenger] : []), ...(d.empfaenger ? [d.empfaenger] : [])])].map(e => `<option value="${esc(e)}" ${d.empfaenger === e ? 'selected' : ''}>${esc(e)}</option>`).join('')}
+     <option value="__neu">+ Neuer Empfänger …</option></select></label>
     ${v.referenz ? `<div class="refbox"><small>${esc(v.referenz.bezeichnung)}</small><b class="num">${esc(v.referenz.wert)}</b></div>` : ''}</div>
     ${neu ? `<p class="hint">„${esc(v.absender.name)}“ ist noch nicht im Adressbuch. Beim Zuordnen wird der Kontakt${v.absender.anschrift ? ' mit Anschrift' : ''} angelegt.</p>` : '<p class="hint">Vorschläge aus dem erkannten Text. Bitte prüfen und bei Bedarf ändern.</p>'}</div>
    ${p.seiten.length ? `<details class="ocrd ibsec ibsec-text"><summary>Erkannter Text · ${p.seiten.length} Seite(n)</summary><pre>${esc(p.seiten.map(s => `— Seite ${s.nummer} · ${s.methode === 'ocr' ? 'OCR' : 'Textschicht'} —\n${s.text}`).join('\n\n').slice(0, 8000))}</pre></details>` : ''}
@@ -346,9 +349,9 @@ function followInbox() {  // Solange Texterkennung läuft, Stand nachladen, ohne
 async function assign(id, vorgangId) {
   const p = D.inbox.find(x => x.id === id), d = draft[id] || {};
   const ablage = vorgangId === 'ablage';
-  const body = ablage ? {ablage: true, titel: d.titel, datum: d.datum || null}
+  const body = ablage ? {ablage: true, titel: d.titel, datum: d.datum || null, empfaenger: d.empfaenger ?? null}
     : {vorgang_id: +vorgangId, titel: d.titel, datum: d.datum || null, teile: d.teil ? [+d.teil] : [],
-       fristen: (d.fristen || []).filter(f => f.an && f.faellig_am && f.titel.trim()).map(f => ({titel: f.titel, faellig_am: f.faellig_am, seite: f.seite || null, zitat: f.zitat || null, art: f.zitat ? 'frist' : 'wiedervorlage'}))};
+       empfaenger: d.empfaenger ?? null, fristen: (d.fristen || []).filter(f => f.an && f.faellig_am && f.titel.trim()).map(f => ({titel: f.titel, faellig_am: f.faellig_am, seite: f.seite || null, zitat: f.zitat || null, art: f.zitat ? 'frist' : 'wiedervorlage'}))};
   if (d.kontakt === 'neu' && p.vorschlag.absender) body.neuer_absender = {name: p.vorschlag.absender.name, anschrift: p.vorschlag.absender.anschrift};
   else if (d.kontakt) body.kontakt_id = +d.kontakt;
   const r = await api(`posteingang/${id}/zuordnen`, body);
@@ -1361,6 +1364,12 @@ document.addEventListener('input', ev => {
   const el = ev.target;
   if (el.id === 'm-cfil') { const q = el.value.toLowerCase(); for (const l of document.querySelectorAll('#m-cliste [data-t]')) l.hidden = !l.dataset.t.includes(q); }
   if (el.dataset.ib === 'kontakt' && el.value === '__neu') { neuerKontakt(+el.dataset.id); return; }
+  if (el.dataset.ib === 'empfaenger' && el.value === '__neu') {  // neuer zulässiger Empfänger, gleich gewählt
+    const docId = +el.dataset.id, name = (prompt('Name des neuen Empfängers (z. B. Ihre Firma oder eine Person):') || '').trim();
+    el.value = draft[docId]?.empfaenger || '';
+    if (name) api('empfaenger', {empfaenger: [...(D.empfaenger || []), name]}).then(r => { D.empfaenger = r.empfaenger; if (draft[docId]) draft[docId].empfaenger = name; zeichne(vInbox); toast(`Empfänger „${name}“ angelegt.`); }).catch(e => toast(e.message));
+    return;
+  }
   if (el.dataset.ib) { const d = draft[+el.dataset.id]; if (d) d[el.dataset.ib] = el.value; }
   if (el.dataset.fr) { const f = draft[+el.dataset.id]?.fristen[+el.dataset.i]; if (f) f[el.dataset.fr] = el.type === 'checkbox' ? el.checked : el.value; }
   if (el.id === 'q') search(el.value.trim());

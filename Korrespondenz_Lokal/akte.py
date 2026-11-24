@@ -1051,7 +1051,7 @@ class Akte:
         """Noch nicht zugeordnete Dokumente mit Vorschlägen für Datum, Absender, Referenz und Vorgang."""
         with closing(self.connect()) as db:
             rows = [dict(r) for r in db.execute("""SELECT d.id,d.titel,d.titel_quelle,d.titel_seite,d.dateiname,d.mime,
-                d.dateipfad,d.ocr_status,d.ocr_fehler,d.angelegt_am,d.dokument_datum,d.datei_datum,d.drehung_manuell FROM dokument d
+                d.dateipfad,d.ocr_status,d.ocr_fehler,d.angelegt_am,d.dokument_datum,d.datei_datum,d.drehung_manuell,d.empfaenger FROM dokument d
                 JOIN vorgang v ON v.id=d.vorgang_id AND v.system='posteingang'
                 WHERE d.geloescht_am IS NULL ORDER BY d.id DESC""")]
             for r in rows:
@@ -1205,6 +1205,10 @@ class Akte:
                                      (_text(neu.get("name"), "Absender", 160, True),)).lastrowid
                 self._abteilung(db, kontakt, {"anschrift": neu.get("anschrift")})
             db.execute("UPDATE dokument SET vorgang_id=?, dokument_datum=? WHERE id=?", (vorgang_id, datum, dokument_id))
+            if "empfaenger" in data:  # im Posteingang gewählter Empfänger; eine Änderung gilt als von Hand gesetzt
+                neu_empf = _text(data.get("empfaenger"), "Empfänger", 160)
+                if (neu_empf or None) != (d["empfaenger"] or None):
+                    db.execute("UPDATE dokument SET empfaenger=?, empfaenger_quelle='manuell' WHERE id=?", (neu_empf, dokument_id))
             if titel != d["titel"]:
                 db.execute("UPDATE dokument SET titel=?, titel_seite=NULL, titel_quelle='Manuell' WHERE id=?",
                            (titel, dokument_id))
@@ -2023,6 +2027,12 @@ def test_fristen_ablage(store):  # noqa: C901
         raise AssertionError("Unbekannte Priorität muss abgelehnt werden")
     except ValueError:
         pass
+    # Empfänger beim Zuordnen wählen
+    de, _ = store.import_document(None, "Empf.pdf", b"%PDF-1.4\nEmpfaengertest")
+    akte.zuordnen(de, {"vorgang_id": b, "empfaenger": "Orbit Cross media e.K."})
+    with closing(store.connect()) as db:
+        assert tuple(db.execute("SELECT empfaenger, empfaenger_quelle FROM dokument WHERE id=?", (de,)).fetchone()) == (
+            "Orbit Cross media e.K.", "manuell")
     # Darstellung der Filter wird gespeichert
     assert akte.oberflaeche() == {"filteransicht": "chips"}
     assert akte.oberflaeche_setzen({"filteransicht": "menue"})["filteransicht"] == "menue"

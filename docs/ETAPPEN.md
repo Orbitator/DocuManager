@@ -118,6 +118,9 @@ Teil 2 (umgesetzt, Schemaversion 7):
   `dokument`; `migrate_9` baut die Tabelle ohne sie neu (Zugehörigkeit regelt `dokument_vorgang`). Der Scan-Ordner
   liegt jetzt unter `~/DocuManager Scans` (nicht in „Dokumente“, das macOS für Programme gesondert schützt).
   Fehlermeldungen beim Speichern nennen die Ursache.
+- 0.15.1: Posteingang-Details mit Auswahl **Empfänger** in der Zeile von Dokumentdatum und Absender (zulässige
+  Empfänger, erkannter Empfänger, „+ Neuer Empfänger …“ ergänzt die Liste). Beim Zuordnen wird die Wahl gespeichert;
+  eine Änderung gegenüber der Erkennung gilt als von Hand gesetzt.
 - 0.15: Dokumente kombinieren. Dritter Knopf auf den Posteingang-Kacheln startet die Auswahl; Dokumente in der
   gewünschten Reihenfolge anklicken (nummeriert), „Zu einem PDF kombinieren“. Das PDF entsteht im Browser mit
   pdf-lib (lokal unter `pdflib/`, MIT): PDF-Seiten werden übernommen, Bilder auf A4 eingepasst, Drehungen

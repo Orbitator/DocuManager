@@ -57,7 +57,7 @@ Die bisherigen Schnittstellen (`/api/cases`, Dokumente, Scan, Chat) bleiben unve
 | POST `/api/documents/{id}/verknuepfen` | `vorgang_id` |
 | POST `/api/posteingang/dokumente` | Rohe Datei, Header `X-Dateiname`; landet im Posteingang |
 | POST `/api/posteingang/scan` | Öffnet den Scan-Dialog; Scans landen im Posteingang |
-| POST `/api/posteingang/{id}/zuordnen` | `vorgang_id` oder `ablage: true` (ohne Vorgang ins Archiv), optional `teile`, `titel`, `datum`, `kontakt_id` oder `neuer_absender` (`name`, `anschrift`), `fristen: [{titel, faellig_am, seite, zitat, art}]` |
+| POST `/api/posteingang/{id}/zuordnen` | `vorgang_id` oder `ablage: true` (ohne Vorgang ins Archiv), optional `empfaenger`, `teile`, `titel`, `datum`, `kontakt_id` oder `neuer_absender` (`name`, `anschrift`), `fristen: [{titel, faellig_am, seite, zitat, art}]` |
 | POST `/api/dokumente/{id}/verschieben` | `von_vorgang_id` und `vorgang_id` oder `ablage: true`; verschiebt Dokument, Chronik-Eintrag und Mail-Anlagen |
 | GET `/api/dokumente/{id}/fristen` | Im Text erkannte Fristen mit Datum, Titel, Seite und Zitat |
 | POST `/api/einstellungen` | `eigene_angaben` (eine Angabe pro Zeile) |
