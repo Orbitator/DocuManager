@@ -118,6 +118,9 @@ Teil 2 (umgesetzt, Schemaversion 7):
   `dokument`; `migrate_9` baut die Tabelle ohne sie neu (Zugehörigkeit regelt `dokument_vorgang`). Der Scan-Ordner
   liegt jetzt unter `~/DocuManager Scans` (nicht in „Dokumente“, das macOS für Programme gesondert schützt).
   Fehlermeldungen beim Speichern nennen die Ursache.
+- 0.13: Filter in Vorgänge, Archiv, Chronik und Fristen wahlweise als Schaltflächen untereinander oder als
+  Ausklappmenüs in einer Zeile (`filterBlock()`); umgeschaltet über das kleine Symbol am Ende der Filter, gespeichert
+  in der Datenbank (`einstellung` „oberflaeche“, GET/POST `/api/oberflaeche`) und damit dauerhaft.
 - 0.12.1: Fehler behoben – im Archiv (ebenso Fristen-Filter, Posteingang-Details, Adressbuch-Suche) zeichneten
   Filterklicks nur den Ansichtsinhalt neu und verloren dabei Suche und Import aus der Kopfzeile; jeder weitere Klick
   brach danach ab. Alle Teil-Neuzeichnungen laufen jetzt über `zeichne()`, das die Kopfzeilenwerkzeuge erhält.

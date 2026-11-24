@@ -1066,6 +1066,20 @@ class Akte:
                 r["vorschlag"]["fristen"] = fristen_erkennen(seiten, r["vorschlag"]["datum"], self.today())
             return rows
 
+    def oberflaeche(self):
+        """Einstellungen der Oberfläche, z. B. Darstellung der Filter (chips = untereinander, menue = Ausklappmenüs)."""
+        with closing(self.connect()) as db:
+            row = db.execute("SELECT wert FROM einstellung WHERE schluessel='oberflaeche'").fetchone()
+        return {"filteransicht": "chips", **(json.loads(row[0]) if row else {})}
+
+    def oberflaeche_setzen(self, data):
+        werte = self.oberflaeche()
+        if "filteransicht" in data:
+            werte["filteransicht"] = _choice(data["filteransicht"], ("chips", "menue"), "Filteransicht")
+        with closing(self.connect()) as db, db:
+            db.execute("INSERT OR REPLACE INTO einstellung(schluessel,wert) VALUES('oberflaeche',?)", (json.dumps(werte),))
+        return werte
+
     def empfaenger_liste(self):
         with closing(self.connect()) as db:
             row = db.execute("SELECT wert FROM einstellung WHERE schluessel='empfaenger'").fetchone()
@@ -1543,6 +1557,7 @@ def _route_table():
         ("GET", r"/api/bereiche", lambda a, m, d: {"bereiche": a.bereiche()}),
         ("GET", r"/api/eintragsarten", lambda a, m, d: {"arten": a.eintragsarten()}),
         ("GET", r"/api/empfaenger", lambda a, m, d: {"empfaenger": a.empfaenger_liste()}),
+        ("GET", r"/api/oberflaeche", lambda a, m, d: a.oberflaeche()),
         ("GET", r"/api/kontakte", lambda a, m, d: {"kontakte": a.kontakte()}),
         ("GET", r"/api/kontakte/dubletten", lambda a, m, d: {"dubletten": a.moegliche_dubletten(d.get("name"))}),
         ("GET", r"/api/papierkorb", lambda a, m, d: {"eintraege": a.papierkorb()}),
@@ -1580,6 +1595,7 @@ def _route_table():
         ("POST", r"/api/bereiche/reihenfolge", lambda a, m, d: a.bereiche_sortieren(d.get("namen"))),
         ("POST", r"/api/eintragsarten", lambda a, m, d: {"name": a.eintragsart_anlegen(d.get("name"))}),
         ("POST", r"/api/empfaenger", lambda a, m, d: a.empfaenger_setzen(d.get("empfaenger"))),
+        ("POST", r"/api/oberflaeche", lambda a, m, d: a.oberflaeche_setzen(d)),
         ("POST", r"/api/eintragsarten/entfernen", lambda a, m, d: a.eintragsart_entfernen(d.get("name"))),
         ("POST", r"/api/kontakte", lambda a, m, d: {"id": a.kontakt_anlegen(d)}),
         ("POST", r"/api/kontakte/(\d+)/abteilungen", lambda a, m, d: {"id": a.abteilung_anlegen(i(m[1]), d)}),
@@ -2007,6 +2023,11 @@ def test_fristen_ablage(store):  # noqa: C901
         raise AssertionError("Unbekannte Priorität muss abgelehnt werden")
     except ValueError:
         pass
+    # Darstellung der Filter wird gespeichert
+    assert akte.oberflaeche() == {"filteransicht": "chips"}
+    assert akte.oberflaeche_setzen({"filteransicht": "menue"})["filteransicht"] == "menue"
+    assert akte.oberflaeche()["filteransicht"] == "menue"
+    akte.oberflaeche_setzen({"filteransicht": "chips"})
     # Eigene Eintragsart
     assert akte.eintragsart_anlegen("Ortstermin") == "Ortstermin"
     try:

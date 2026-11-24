@@ -100,6 +100,7 @@ async function loadBase() {
   D.trash = (await api('papierkorb')).eintraege;
   D.arten = (await api('eintragsarten')).arten;
   D.empfaenger = (await api('empfaenger')).empfaenger;
+  if (!D.ui) D.ui = await api('oberflaeche');
 }
 
 // ---------- Navigation ----------
@@ -357,6 +358,17 @@ function sortTh(t, k, label) {
   return `<th aria-sort="${on ? (so.d > 0 ? 'ascending' : 'descending') : 'none'}"><button class="thsort ${on ? 'on' : ''}" data-act="tsort" data-t="${t}" data-k="${k}">${label}<span class="arr" aria-hidden="true">${on ? (so.d > 0 ? '▲' : '▼') : '↕'}</span></button></th>`;
 }
 const cmp = (a, b) => String(a ?? '').localeCompare(String(b ?? ''), 'de', {numeric: true, sensitivity: 'base'});
+// Filter: als Chips untereinander (Zeilen) oder als Ausklappmenüs in einer Zeile; Wahl wird gespeichert.
+// zeilen: [[{lbl, act, aktiv, opt: [[id, label]], neu: [act, label]}], …], extra: z. B. Suchfeld
+function filterBlock(zeilen, extra = '', klein = false) {
+  const menue = (D.ui || {}).filteransicht === 'menue';
+  const schalter = `<button class="iconbtn sm fumsch" data-act="filteransicht" title="${menue ? 'Filter untereinander als Schaltflächen zeigen' : 'Filter als Ausklappmenüs in einer Zeile zeigen'}" aria-label="Filterdarstellung wechseln">${menue ? '☷' : '▾'}</button>`;
+  if (menue) {
+    const sel = g => `<label class="fsel"><span class="lbl">${g.lbl}</span><select data-fsel="${g.act}">${g.opt.map(([id, l]) => `<option value="${esc(id)}" ${String(g.aktiv) === String(id) ? 'selected' : ''}>${esc(l)}</option>`).join('')}${g.neu ? `<option value="__neu" data-neu="${g.neu[0]}">${esc(g.neu[1])}</option>` : ''}</select></label>`;
+    return `<div class="filters fmenue">${zeilen.flat().map(sel).join('')}${extra ? `<span style="flex:1"></span>${extra}` : ''}${schalter}</div>`;
+  }
+  return zeilen.map((zeile, i) => `<div class="filters" ${i ? 'style="margin-top:-6px"' : ''}>${zeile.map((g, j) => `${j ? '<span class="trenner"></span>' : ''}<span class="lbl">${g.lbl}</span>${g.opt.map(([id, l]) => `<button class="fchip ${String(g.aktiv) === String(id) ? 'on' : ''}" data-act="${g.act}" data-id="${esc(id)}" ${klein ? 'style="padding:3px 9px;font-size:12px"' : ''}>${l}</button>`).join('')}${g.neu ? `<button class="fchip" data-act="${g.neu[0]}" style="border-style:dashed">${esc(g.neu[1])}</button>` : ''}`).join('')}${i === zeilen.length - 1 ? `${extra ? `<span style="flex:1"></span>${extra}` : '<span style="flex:1"></span>'}${schalter}` : ''}</div>`).join('');
+}
 const PRIO = {'keine': [0, ''], 'hoch': [1, 'Hoch'], 'sehr hoch': [2, 'Sehr hoch']};
 const prioPill = p => p && p !== 'keine' ? `<span class="prio prio-${p === 'hoch' ? 'hoch' : 'sehrhoch'}">${PRIO[p][1]}</span>` : '<span class="muted">–</span>';
 function vList() {
@@ -381,9 +393,9 @@ function vList() {
    <td style="white-space:nowrap"><button class="iconbtn" data-act="v-edit" data-id="${c.id}" title="Vorgang bearbeiten" aria-label="${esc(c.titel)} bearbeiten">${I('draft')}</button><button class="iconbtn" data-act="v-del" data-id="${c.id}" title="Vorgang löschen" aria-label="${esc(c.titel)} löschen">${I('trash')}</button></td></tr>`;
   const tabelle = items => `<div class="tbl-wrap" style="margin-bottom:16px"><table>${thead}<tbody>${items.map(row).join('')}</tbody></table></div>`;
   return `<div class="head" style="justify-content:space-between"><h1>Vorgänge</h1><button class="btn pri" data-act="new-vorgang">${I('plus')}Neuer Vorgang</button></div>
-  <div class="filters"><span class="lbl">Gruppieren</span>${[['keine','Keine'],['bereich','Bereich'],['status','Status'],['prio','Priorität'],['empfaenger','Empfänger']].map(([k, l]) => `<button class="fchip ${(S.vGroup || 'keine') === k ? 'on' : ''}" data-act="vgroup" data-id="${k}">${l}</button>`).join('')}</div>
-  <div class="filters" style="margin-top:-6px"><span class="lbl">Bereich</span>${bs.map(b => `<button class="fchip ${S.vb === b ? 'on' : ''}" data-act="vb" data-id="${esc(b)}">${b === 'alle' ? 'Alle' : esc(b)}</button>`).join('')}<button class="fchip" data-act="b-add" style="border-style:dashed">+ Bereich</button></div>
-  <div class="filters" style="margin-top:-6px"><span class="lbl">Status</span>${['alle', ...ST_ORDER.filter(s => s !== 'Erledigt')].map(s => `<button class="fchip ${S.vs === s ? 'on' : ''}" data-act="vs" data-id="${esc(s)}">${s === 'alle' ? 'Alle' : esc(stLabel(s))}</button>`).join('')}</div>
+  ${filterBlock([[{lbl: 'Gruppieren', act: 'vgroup', aktiv: S.vGroup || 'keine', opt: [['keine','Keine'],['bereich','Bereich'],['status','Status'],['prio','Priorität'],['empfaenger','Empfänger']]}],
+    [{lbl: 'Bereich', act: 'vb', aktiv: S.vb, opt: bs.map(b => [b, b === 'alle' ? 'Alle' : b]), neu: ['b-add', '+ Bereich']}],
+    [{lbl: 'Status', act: 'vs', aktiv: S.vs, opt: ['alle', ...ST_ORDER.filter(s => s !== 'Erledigt')].map(s => [s, s === 'alle' ? 'Alle' : stLabel(s)])}]])}
   ${!list.length ? '<div class="panel muted">Keine laufenden Vorgänge für diese Filter.</div>' : (S.vGroup || 'keine') === 'keine' ? tabelle(list)
     : groups.map(g => `<div class="agrp"><h3>${esc(g.k)}</h3><span class="muted num">${g.items.length}</span></div>${tabelle(g.items)}`).join('')}
   ${erledigt ? `<p class="muted" style="margin:10px 2px 0;font-size:13px">Erledigte Vorgänge werden hier nicht mehr geführt; ihre Dokumente stehen im <a href="#archiv">Archiv</a>.</p>` : ''}`;
@@ -475,7 +487,7 @@ function chronik() {
   }).join('');
   const types = [['alle','Alle Typen'],['eingang','Eingang'],['ausgang','Versendet'],['entwurf','Entwürfe'],['gespraech','Telefonate & Notizen'],['chat','Chat-Notizen'], ...[...new Set([...(D.arten || []), ...D.akte.eintraege.map(e => e.typ).filter(Boolean)])].map(t => ['typ:' + t, t])];
   return `<div class="stack" style="gap:6px"><div class="chron-h"><h2>Chronik</h2><span style="display:flex;gap:6px"><button class="btn out sm" data-act="compose">${I('draft')}Brief</button><button class="btn out sm" data-act="entry-add">${I('plus')}Eintrag</button><button class="btn out sm" data-act="ref-add">${I('plus')}Referenz</button></span></div>
-   <div style="display:flex;gap:6px;flex-wrap:wrap">${types.map(([k, l]) => `<button class="fchip ${S.ktype === k ? 'on' : ''}" data-act="ktype" data-id="${k}" style="padding:3px 9px;font-size:12px">${l}</button>`).join('')}</div>
+   ${filterBlock([[{lbl: 'Typ', act: 'ktype', aktiv: S.ktype, opt: types}]], '', true)}
    <ul class="chron">${rows || '<li class="muted" style="padding:10px 0">Noch keine Einträge. Dokumente aus dem Posteingang zuordnen oder einen Eintrag anlegen.</li>'}</ul></div>`;
 }
 function preview() {
@@ -754,7 +766,7 @@ function vFristen() {
   const all = D.fristen.filter(f => S.fFilter === 'alle' || f.art === S.fFilter);
   const cnt = k => D.fristen.filter(f => !f.erledigt_am && (k === 'alle' || f.art === k)).length;
   return `<div class="head" style="justify-content:space-between"><h1>Fristen</h1><button class="btn pri" data-act="f-neu">${I('plus')}Neue Frist</button></div><p class="muted" style="margin:6px 0 0">Verbindliche Fristen tragen immer eine Fundstelle. Wiedervorlagen und Aufgaben setzen Sie selbst.</p>
-  <div class="filters"><span class="lbl">Art</span>${[['alle','Alle'],['frist','Verbindliche Fristen'],['wiedervorlage','Wiedervorlagen'],['aufgabe','Aufgaben']].map(([k, l]) => `<button class="fchip ${S.fFilter === k ? 'on' : ''}" data-act="ffilter" data-id="${k}">${l} <span class="num">${cnt(k)}</span></button>`).join('')}</div>
+  ${filterBlock([[{lbl: 'Art', act: 'ffilter', aktiv: S.fFilter, opt: [['alle','Alle'],['frist','Verbindliche Fristen'],['wiedervorlage','Wiedervorlagen'],['aufgabe','Aufgaben']].map(([k, l]) => [k, `${l} (${cnt(k)})`])}]])}
   <div class="panel">${fristList(all, false)}</div>`;
 }
 
@@ -781,11 +793,11 @@ function vArchiv() {
   const thead = `<thead><tr>${sortTh('A','titel','Dokument')}${sortTh('A','datum','Datum')}${sortTh('A','absender','Absender')}${sortTh('A','vorgang','Vorgang')}${sortTh('A','groesse','Größe')}<th><span class="sr">Aktionen</span></th></tr></thead>`;
   return `<h1>Archiv</h1><p class="muted" style="margin:6px 0 0">${D.archiv.length} archivierte Dokumente. Wird ein Vorgang erledigt, verschwindet er aus „Vorgänge“; seine Dokumente stehen hier. ${list.length !== D.archiv.length ? `${list.length} passen zu den Filtern.` : ''}</p>
 
-  <div class="filters"><span class="lbl">Gruppieren</span>${[['vorgang','Vorgang'],['bereich','Bereich'],['typ','Typ'],['absender','Absender'],['empfaenger','Empfänger'],['jahr','Jahr'],['keine','Keine']].map(([k, l]) => `<button class="fchip ${S.aGroup === k ? 'on' : ''}" data-act="agroup" data-id="${k}">${l}</button>`).join('')}
-   <span class="trenner"></span><span class="lbl">Bereich</span>${['alle', ...bereiche].map(b => `<button class="fchip ${S.aBereich === b ? 'on' : ''}" data-act="abereich" data-id="${esc(b)}">${b === 'alle' ? 'Alle' : esc(b)}</button>`).join('')}</div>
-  <div class="filters" style="margin-top:-6px"><span class="lbl">Typ</span>${['alle', ...typen].map(t => `<button class="fchip ${(S.aTyp || 'alle') === t ? 'on' : ''}" data-act="atyp" data-id="${esc(t)}">${t === 'alle' ? 'Alle' : esc(t)}</button>`).join('')}
-   <span class="trenner"></span><span class="lbl">Jahr</span>${['alle', ...jahre].map(j => `<button class="fchip ${S.aJahr === j ? 'on' : ''}" data-act="ajahr" data-id="${j}">${j === 'alle' ? 'Alle' : j}</button>`).join('')}
-   <span style="flex:1"></span><input class="inp" id="atext" type="search" placeholder="Im Archiv filtern" value="${esc(S.aText)}" style="max-width:220px" aria-label="Im Archiv filtern"></div>
+  ${filterBlock([[{lbl: 'Gruppieren', act: 'agroup', aktiv: S.aGroup, opt: [['vorgang','Vorgang'],['bereich','Bereich'],['typ','Typ'],['absender','Absender'],['empfaenger','Empfänger'],['jahr','Jahr'],['keine','Keine']]},
+      {lbl: 'Bereich', act: 'abereich', aktiv: S.aBereich, opt: ['alle', ...bereiche].map(b => [b, b === 'alle' ? 'Alle' : b])}],
+    [{lbl: 'Typ', act: 'atyp', aktiv: S.aTyp || 'alle', opt: ['alle', ...typen].map(t => [t, t === 'alle' ? 'Alle' : t])},
+      {lbl: 'Jahr', act: 'ajahr', aktiv: S.aJahr, opt: ['alle', ...jahre].map(j => [j, j === 'alle' ? 'Alle' : j])}]],
+    `<input class="inp" id="atext" type="search" placeholder="Im Archiv filtern" value="${esc(S.aText)}" style="max-width:220px" aria-label="Im Archiv filtern">`)}
   ${groups.length ? groups.map(g => `${S.aGroup !== 'keine' ? `<div class="agrp"><h3>${esc(g.k)}</h3><span class="muted num">${g.items.length}</span></div>` : ''}<div class="tbl-wrap" style="margin-bottom:16px"><table>${thead}<tbody>${g.items.map(row).join('')}</tbody></table></div>`).join('') : '<div class="panel muted">Keine Dokumente für diese Filter.</div>'}`;
 }
 
@@ -1052,6 +1064,8 @@ document.addEventListener('click', async ev => {
   case 'vw-close': closeViewer(); break;
   case 'tsort': { const k = 'sort' + el.dataset.t, cur = S[k]; S[k] = cur.k === el.dataset.k ? {k: cur.k, d: -cur.d} : {k: el.dataset.k, d: 1}; await render(); break; }
   case 'suche-auf': { const box = el.closest('.search'); box.classList.add('offen'); $('#q').focus(); break; }
+  case 'filteransicht': try { D.ui = await api('oberflaeche', {filteransicht: (D.ui || {}).filteransicht === 'menue' ? 'chips' : 'menue'}); } catch (e) { toast(e.message); }
+    if (S.view === 'akte') paintAkte(); else await render(); break;
   case 'vgroup': S.vGroup = el.dataset.id; await render(); break;
   case 'vb': S.vb = id === null ? 'alle' : String(el.dataset.id); await render(); break;
   case 'vs': S.vs = el.dataset.id; await render(); break;
@@ -1172,6 +1186,11 @@ document.addEventListener('change', async ev => {
   if (el.id === 'm-edatei' && el.files[0]) { const f = el.files[0]; el.value = ''; try { const r = await upload(`cases/${D.akte.id}/documents`, f);
       D.akte.dokumente.unshift({id: r.id, titel: f.name.replace(/\.[^.]+$/, ''), dateiname: f.name}); const sel = $('#m-edok');
       sel.insertAdjacentHTML('afterbegin', `<option value="${r.id}">${esc(f.name)}</option>`); sel.value = String(r.id); toast('Datei hochgeladen; beim Speichern wird sie dem Eintrag zugewiesen.'); } catch (e) { toast(e.message); $('#m-edok').value = ''; } }
+  if (el.dataset.fsel) {  // Ausklappmenü-Filter: wie ein Klick auf die entsprechende Schaltfläche
+    const opt = el.selectedOptions[0], knopf = document.createElement('button');
+    knopf.dataset.act = opt.dataset.neu || el.dataset.fsel; knopf.dataset.id = el.value; knopf.hidden = true;
+    el.after(knopf); knopf.click(); knopf.remove();
+  }
   if (el.classList.contains('madd') && el.value) { const id = el.dataset.multi; multiSetzen(id, [...multiWert(id), el.value]); }
   if (el.id === 'chatinp' && el.files[0]) { const f = el.files[0]; el.value = ''; toast('Export wird gelesen …');
     try { const res = await holen('/api/chat/preview', {method: 'POST', body: f, headers: {'X-Korrespondenz': 'lokal'}}); const r = await res.json(); if (!res.ok) throw new Error(r.error || 'Export nicht lesbar.');

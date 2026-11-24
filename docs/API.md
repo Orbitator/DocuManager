@@ -79,6 +79,7 @@ Die bisherigen Schnittstellen (`/api/cases`, Dokumente, Scan, Chat) bleiben unve
 | GET/POST `/api/empfaenger` | zulässige Empfänger lesen / `empfaenger` (Liste) setzen; ordnet nicht von Hand gesetzte Empfänger neu zu |
 | POST `/api/archiv/scan` | Scan-Dialog; Scans landen direkt im Archiv |
 | POST `/api/mail/abholen` mit `{"ziel": "archiv"}` | E-Mails samt Anlagen direkt im Archiv ablegen |
+| GET/POST `/api/oberflaeche` | Oberflächen-Einstellungen, z. B. `filteransicht`: chips oder menue |
 | POST `/api/beenden` | Beendet die Anwendung |
 | POST `/api/sicherungen/{name}/pruefen` | Prüft Vollständigkeit, Prüfsummen und Datenbank, ohne etwas zu ändern |
 | POST `/api/mail/markierung` | `markierung` 0–6 (Rot, Orange, Gelb, Grün, Blau, Violett, Grau) |
