@@ -739,7 +739,8 @@ async function compose(bezugId, editId, vorschlag) {
         <span><b>${esc(o.titel)}</b>${o.empfohlen ? ' <span class="pill">Empfohlen</span>' : ''}<br>${esc(o.beschreibung)}
         <small>＋ ${esc(o.vorteile)}</small><small>－ ${esc(o.nachteile)}</small></span></label>`).join('')}
         <label class="kio"><input type="radio" name="m-kio" value="eigen"><span><b>Eigene Linie</b><br>Beschreiben Sie Ihr Vorgehen im Feld „Vorgabe“ oben.</span></label></div>`;
-    el.innerHTML += kontextHinweis(r.kontext) + `<div style="display:flex;gap:6px;margin-top:8px"><button type="button" class="btn sm ghost" data-kinotiz>Bewertung als Notiz speichern</button></div>`;
+    el.innerHTML += kontextHinweis(r.kontext) + `<div style="display:flex;gap:6px;margin-top:8px"><button type="button" class="btn sm ghost" data-kinotiz>Bewertung als Notiz speichern</button>
+      <button type="button" class="btn sm ghost" data-kizit title="Zitierte Paragrafen am amtlichen Wortlaut prüfen (ca. 1 Cent)">Zitate prüfen</button></div><div class="ck-zit" hidden></div>`;
     box.querySelector('[data-stufe2]').disabled = false; box.querySelector('[data-stufe2]').title = '';
   };
   if (S.kiBewertung[bewKey]) zeigeBewertung(S.kiBewertung[bewKey]);
@@ -747,6 +748,7 @@ async function compose(bezugId, editId, vorschlag) {
   pvZoom(S.pvZoom || 1);
   box.addEventListener('click', async ev => {
     const zb = ev.target.closest('[data-pvz]'); if (zb) { pvZoom((S.pvZoom || 1) + 0.1 * +zb.dataset.pvz); return; }
+    if (ev.target.closest('[data-kizit]')) { await zitatePruefen(S.kiBewertung[bewKey].text, $('#m-kibew .ck-zit'), ev.target.closest('[data-kizit]')); return; }
     if (ev.target.closest('[data-kinotiz]')) {
       const r = S.kiBewertung[bewKey], knopf = ev.target.closest('[data-kinotiz]');
       try { await api(`akte/${a.id}/eintraege`, {art: 'notiz', titel: 'Rechtliche Bewertung (Claude)' + (bezug ? ' – ' + bezug.titel : ''), text: r.text, bezug_id: bezug ? bezug.id : null, teile: bezug ? bezug.teile : []});
@@ -1131,8 +1133,39 @@ function entryModal(bezugId) {
 // ---------- Claude: Analyse und Textvorschläge ----------
 const CLAUDE_AKTIONEN = [['zusammenfassen', 'Zusammenfassen'], ['fristen', 'Fristen & Pflichten'], ['pruefen', 'Prüfen & Einschätzen'], ['antwort', 'Antwort entwerfen']];
 const CLAUDE_FRAGEN = {zusammenfassen: 'Bitte zusammenfassen.', fristen: 'Welche Fristen und Pflichten ergeben sich?', pruefen: 'Bitte kritisch prüfen und einschätzen.', antwort: 'Bitte eine Antwort entwerfen.'};
-function claudeText(t) {  // knappe Darstellung von Markdown: Absätze, Listen, Fett
-  return esc(t).replace(/\*\*([^*]+)\*\*/g, '<b>$1</b>').replace(/^#{1,4} (.+)$/gm, '<b>$1</b>').replace(/^[-*] /gm, '• ');
+// Zitierte Vorschriften anklickbar machen (gleiche Gesetzesliste wie gesetze.py)
+const NORM_RE = /(?:§§?|Art\.|Artikel)\s*\d+[a-z]?(?:\s*(?:Abs\.|Absatz|S\.|Satz|Nr\.|Ziff\.|lit\.|,|und|bis|–|-|\/)\s*\d+[a-z]?)*\s*(?:ff?\.\s*)?(?:HeizkostenV|KraftStG|SGB VIII|SGB III|SGB VII|SGB XII|ErbStG|BetrKV|EntgFG|SGB II|SGB IV|SGB VI|SGB IX|SGB XI|EGBGB|EGZPO|FamFG|VwVfG|GrStG|PflVG|GmbHG|PAngV|BauGB|TDDDG|KSchG|ArbGG|TzBfG|BUrlG|MiLoG|SGB I|SGB V|SGB X|InsO|JVEG|VwGO|VwZG|EStG|UStG|StGB|StPO|OWiG|StVG|StVO|BDSG|EnWG|GewO|BEEG|BKGG|WoGG|IfSG|BGB|ZPO|GVG|ZVG|GKG|RVG|FGO|VVG|HGB|UWG|WEG|TKG|SGG|GG|AO)(?![A-Za-zÄÖÜäöü])/g;
+const normLinks = h => h.replace(NORM_RE, z => `<button type="button" class="norm" data-act="norm" data-z="${z}" title="Gesetzestext anzeigen">${z}</button>`);
+function claudeText(t) {  // knappe Darstellung von Markdown: Absätze, Listen, Fett, Gesetzeszitate als Verweis
+  return normLinks(esc(t).replace(/\*\*([^*]+)\*\*/g, '<b>$1</b>').replace(/^#{1,4} (.+)$/gm, '<b>$1</b>').replace(/^[-*] /gm, '• '));
+}
+async function normZeigen(zitat) {  // Gesetzestext im Seitenfenster, ohne den offenen Dialog zu schließen
+  let p = $('#normpop');
+  if (!p) { p = document.createElement('aside'); p.id = 'normpop'; p.setAttribute('aria-label', 'Gesetzestext'); document.body.append(p); }
+  p.hidden = false; p.innerHTML = `<div class="np-kopf"><b>${esc(zitat)}</b><button type="button" class="iconbtn" data-act="norm-zu" aria-label="Schließen">✕</button></div><p class="muted">Wird geladen …</p>`;
+  try {
+    const r = await api('gesetze', {text: zitat});
+    p.innerHTML = `<div class="np-kopf"><b>${esc(zitat)}</b><button type="button" class="iconbtn" data-act="norm-zu" aria-label="Schließen">✕</button></div>` + (r.vorschriften.map(v => `<section>
+      <h4>${esc(v.titel || v.norm + ' ' + v.gesetz)} <span class="muted">${esc(v.gesetz)}</span></h4>
+      ${v.fehler ? `<p class="kiwarn">${esc(v.fehler)}</p>` : v.absaetze.map(a => `<p class="${v.absatz && a.startsWith('(' + v.absatz + ')') ? 'np-treffer' : ''}">${esc(a)}</p>`).join('')}
+      ${v.veraltet ? '<p class="muted">Gespeicherter Stand, aktueller Abruf nicht möglich.</p>' : ''}
+      <a href="${esc(v.url)}" target="_blank" rel="noopener">Auf gesetze-im-internet.de öffnen</a></section>`).join('') || '<p class="muted">Keine Vorschrift erkannt.</p>')
+      + '<p class="muted np-quelle">Quelle: gesetze-im-internet.de (Bundesministerium der Justiz). Amtlicher Wortlaut, ohne Rechtsprechung.</p>';
+  } catch (e) { p.querySelector('.muted').textContent = e.message; }
+}
+function zitatErgebnis(r) {  // Ergebnis der Gegenprüfung
+  const sym = {passt: ['✓', 'ok'], teilweise: ['!', 'teil'], 'passt nicht': ['✗', 'falsch'], unklar: ['?', 'teil']};
+  const fehlt = r.vorschriften.filter(v => v.fehler);
+  return `<div class="zitpruef"><b>Zitate am Gesetzestext geprüft</b>${r.pruefungen.map(p => `<div class="zp ${(sym[p.ergebnis] || sym.unklar)[1]}">
+    <span class="zp-sym">${(sym[p.ergebnis] || sym.unklar)[0]}</span><span>${normLinks(esc(p.vorschrift))} – <b>${esc(p.ergebnis)}</b>: ${esc(p.begruendung)}</span></div>`).join('')}
+    ${fehlt.length ? `<p class="muted">Nicht abrufbar: ${fehlt.map(v => esc(v.norm + ' ' + v.gesetz)).join(', ')}</p>` : ''}
+    ${r.kosten_usd !== undefined ? `<p class="muted">Kosten ca. ${r.kosten_usd < 0.01 ? 'unter 1 Cent' : (r.kosten_usd * 100).toFixed(1).replace('.', ',') + ' Cent'}</p>` : ''}</div>`;
+}
+async function zitatePruefen(text, ziel, knopf) {
+  const alt = knopf.innerHTML; knopf.disabled = true; knopf.innerHTML = '<span class="spin"></span>Prüfe Zitate …';
+  try { const r = await api('claude/zitate', {text}); ziel.innerHTML = zitatErgebnis(r); ziel.hidden = false; }
+  catch (e) { toast(e.message); }
+  knopf.disabled = false; knopf.innerHTML = alt;
 }
 function kontextHinweis(k) {  // zeigt, welche Teile der Akte Claude vorlagen
   if (!k) return '';
@@ -1168,7 +1201,9 @@ async function claudeDialog(docId, entryId) {
       : `<div class="ck-antwort"><div class="ck-text">${claudeText(n.text)}</div><div class="ck-knoepfe">
           <button class="btn sm ghost" data-ckn="notiz" data-i="${i}">Als Notiz speichern</button>
           <button class="btn sm ghost" data-ckn="brief" data-i="${i}">${I('draft')}Als Brief übernehmen</button>
-          <button class="btn sm ghost" data-ckn="kopie" data-i="${i}">Kopieren</button></div>${kontextHinweis(n.kontext)}</div>`).join('')
+          <button class="btn sm ghost" data-ckn="kopie" data-i="${i}">Kopieren</button>
+          ${NORM_RE.test(n.text) && !(NORM_RE.lastIndex = 0) ? `<button class="btn sm ghost" data-ckn="zitate" data-i="${i}">Zitate prüfen</button>` : ''}</div>
+          <div class="ck-zit" data-zit="${i}" ${n.zitate ? '' : 'hidden'}>${n.zitate || ''}</div>${kontextHinweis(n.kontext)}</div>`).join('')
       + (box.dataset.laeuft ? '<div class="ck-antwort muted"><span class="spin"></span> Claude denkt nach … (kann bis zu einer Minute dauern)</div>' : '');
     feld.scrollTop = feld.scrollHeight;
   };
@@ -1192,6 +1227,7 @@ async function claudeDialog(docId, entryId) {
     if (k) fragen(k.dataset.ck);
     if (!n) return;
     const m = verlauf[+n.dataset.i];
+    if (n.dataset.ckn === 'zitate') { const ziel = feld.querySelector(`[data-zit="${n.dataset.i}"]`); await zitatePruefen(m.text, ziel, n); m.zitate = ziel.innerHTML; return; }
     if (n.dataset.ckn === 'kopie') { try { await navigator.clipboard.writeText(m.text); toast('Kopiert.'); } catch (_) { toast('Kopieren nicht möglich.'); } }
     else if (n.dataset.ckn === 'notiz') {
       try { await api(`akte/${a.id}/eintraege`, {art: 'notiz', titel: ('Claude: ' + (verlauf[+n.dataset.i - 1]?.anzeige || 'Analyse') + (d ? ' – ' + d.titel : '')).slice(0, 190), text: m.text, bezug_id: e ? e.id : null, teile: e ? e.teile : []});
@@ -1492,6 +1528,8 @@ document.addEventListener('click', async ev => {
     chatModal((r.notes || []).map(n => `${n.rolle === 'user' ? 'Ich' : 'ChatGPT'}: ${n.text}`).join('\n\n').slice(0, 19000), `ChatGPT-Verlauf „${t ? t.titel : el.dataset.id}“`); break; }
   case 'backup': toast('Sicherung wird erstellt …'); try { const r = await api('sicherungen', {}); toast(r.pruefung.ok ? `Sicherung erstellt und geprüft: ${r.pruefung.anzahl.vorgang} Vorgänge, ${r.pruefung.dateien} Dateien.` : 'Sicherung erstellt, Prüfung meldet Fehler: ' + r.pruefung.fehler.join('; ')); await render(); } catch (e) { toast(e.message); } break;
   case 'backup-check': { const r = await api(`sicherungen/${el.dataset.name}/pruefen`, {}); toast(r.ok ? `In Ordnung: ${r.anzahl.vorgang} Vorgänge, ${r.anzahl.dokument} Dokumente, ${r.dateien} Dateien.` : 'Fehler: ' + r.fehler.join('; ')); break; }
+  case 'norm': normZeigen(el.dataset.z); break;
+  case 'norm-zu': $('#normpop').hidden = true; break;
   case 'claude': claudeDialog(el.dataset.doc ? +el.dataset.doc : null, el.dataset.entry ? +el.dataset.entry : null); break;
   case 'claude-key': D.claude.eingerichtet = false; await render(); $('#claudekey')?.focus(); break;
   case 'claude-key-save': await act(async () => { D.claude = await api('claude/schluessel', {schluessel: val('claudekey')}); }, 'Zugangsschlüssel gespeichert.'); break;

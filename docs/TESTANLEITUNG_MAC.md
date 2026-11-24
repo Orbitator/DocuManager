@@ -199,6 +199,13 @@ Erst wenn Schritt 2 bis 4 funktionieren. Die bisherige Anwendung vorher beenden.
    Erwartet: Die kleine Absenderzeile und die vollständige Empfängeranschrift sind im Fenster zu sehen.
 3. Bei längeren Briefen: Seite 2 beginnt mit einem Rand oben.
 
+## 15. Gesetzestexte (ab 0.19)
+
+1. Im Briefdialog **1 · Analysieren & bewerten**. In der Bewertung sind Paragrafen wie „§ 362 Abs. 1 BGB“ unterstrichen.
+2. Einen anklicken. Erwartet: Rechts öffnet sich ein Fenster mit dem Gesetzestext, der zitierte Absatz ist gelb markiert.
+   Erscheint „nicht abrufbar“, bitte den genauen Paragrafen melden.
+3. **Zitate prüfen**. Erwartet: Je Vorschrift ein grünes ✓, oranges ! oder rotes ✗ mit kurzer Begründung.
+
 ## Rückmeldung
 
 Bitte mitteilen:

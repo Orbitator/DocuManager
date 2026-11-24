@@ -128,6 +128,17 @@ def brieftext_saeubern(text):
     return re.sub(r"\n{3,}", "\n\n", text).strip()
 
 
+PRUEF_SCHEMA = {
+    "type": "object",
+    "properties": {"pruefungen": {"type": "array", "items": {"type": "object", "properties": {
+        "vorschrift": {"type": "string", "description": "z. B. „§ 362 BGB“"},
+        "ergebnis": {"type": "string", "enum": ["passt", "teilweise", "passt nicht", "unklar"]},
+        "begruendung": {"type": "string", "description": "Ein bis zwei Sätze: was die Vorschrift regelt und ob die Aussage davon gedeckt ist"}},
+        "required": ["vorschrift", "ergebnis", "begruendung"], "additionalProperties": False}}},
+    "required": ["pruefungen"], "additionalProperties": False,
+}
+
+
 class ClaudeKI:
     def __init__(self, store, akte, senden=None):
         self.store = store
@@ -341,6 +352,48 @@ class ClaudeKI:
                 pass
         return ergebnis
 
+    def zitate_pruefen(self, text, gesetze):
+        """Gegenprüfung: Stimmen die zitierten Vorschriften mit ihrem amtlichen Wortlaut überein? Geschickt wird nur
+        der geprüfte Text und der Wortlaut der zitierten Vorschriften, nicht die Akte – daher günstig."""
+        schluessel = self.schluessel()
+        if not schluessel:
+            raise ValueError("Claude ist noch nicht eingerichtet: Zugangsschlüssel unter Einstellungen → Claude eintragen.")
+        normen = gesetze.fuer_text(text)
+        if not normen:
+            raise ValueError("Im Text sind keine Vorschriften aus Bundesgesetzen zitiert.")
+        belegt = [n for n in normen if n.get("absaetze")]
+        if not belegt:
+            return {"vorschriften": normen, "pruefungen": [], "kontext": {}}
+        wortlaut = "\n\n".join(f"<vorschrift name=\"{n['norm']} {n['gesetz']}\" titel=\"{n.get('titel', '')}\">\n"
+                                + "\n".join(n["absaetze"]) + "\n</vorschrift>" for n in belegt)
+        stufe = STUFEN[self.stufe()]
+        anfrage = {
+            "model": stufe["modell"], "max_tokens": 8000,
+            "system": "Du prüfst juristische Texte auf korrekte Gesetzeszitate. Antworte auf Deutsch, knapp und genau.",
+            "messages": [{"role": "user", "content":
+                          "Prüfe für jede unten im amtlichen Wortlaut mitgelieferte Vorschrift, ob die Aussagen im Text, "
+                          "die sich auf sie stützen, vom Wortlaut gedeckt sind (richtiger Paragraf, richtiger Absatz, "
+                          "passender Regelungsinhalt). „passt nicht“ heißt: falsche Vorschrift zitiert oder Aussage "
+                          "widerspricht dem Wortlaut; nenne dann, welche Vorschrift gemeint sein dürfte.\n\n"
+                          f"<text>\n{str(text)[:30000]}\n</text>\n\n{wortlaut}"}],
+            "output_config": {"effort": "low", "format": {"type": "json_schema", "schema": PRUEF_SCHEMA}},
+        }
+        if stufe["modell"] != "claude-haiku-5-5":
+            anfrage["fallbacks"] = "default"
+        antwort = self.senden(anfrage, schluessel)
+        if antwort.get("stop_reason") == "refusal":
+            raise ValueError("Claude hat die Prüfung abgelehnt.")
+        roh = "".join(b.get("text", "") for b in antwort.get("content", []) if b.get("type") == "text")
+        try:
+            pruefungen = json.loads(roh)["pruefungen"]
+        except (json.JSONDecodeError, KeyError, TypeError):
+            raise ValueError("Die Prüfung konnte nicht ausgewertet werden. Bitte erneut versuchen.") from None
+        nutzung = antwort.get("usage", {})
+        ein, aus, lesen, schreiben = stufe["preise"]
+        kosten = (nutzung.get("input_tokens", 0) * ein + nutzung.get("output_tokens", 0) * aus
+                  + nutzung.get("cache_read_input_tokens", 0) * lesen + nutzung.get("cache_creation_input_tokens", 0) * schreiben) / 1e6
+        return {"vorschriften": normen, "pruefungen": pruefungen, "kosten_usd": round(kosten, 4)}
+
     def _http(self, anfrage, schluessel):
         daten = json.dumps(anfrage).encode("utf-8")
         req = urllib.request.Request(API, data=daten, method="POST", headers={
@@ -468,5 +521,22 @@ def test_claude(store):
     akte_text = gesendet[-1][0]["system"][1]["text"]
     assert "SCHLUSSKLAUSEL-ALT" not in akte_text and "ENDE-MEINES-BRIEFS" in akte_text and "180,98 € bis zum 15.12" in akte_text
     assert r["kontext"]["gekuerzt"] == ["Erste Mahnung"]
+    # Zitate prüfen: nur Text und Wortlaut gehen hinaus, nicht die Akte
+    from gesetze import Gesetze
+    seite = ('<span class="jnenbez">&#167; 362</span><span class="jnentitel">Erl&ouml;schen durch Leistung</span>'
+             '<div class="jurAbsatz">(1) Das Schuldverhältnis erlischt durch Leistung.</div>').encode("iso-8859-1")
+    g = Gesetze(store.data / "Gesetze", lambda url: (seite, "text/html; charset=iso-8859-1"))
+    vorher = len(gesendet)
+    ki.senden = lambda anfrage, s: (gesendet.append((anfrage, s)) or {"stop_reason": "end_turn", "usage": {"input_tokens": 100, "output_tokens": 50},
+        "content": [{"type": "text", "text": json.dumps({"pruefungen": [{"vorschrift": "§ 362 BGB", "ergebnis": "passt", "begruendung": "Erfüllung."}]})}]})
+    r = ki.zitate_pruefen("Die Forderung ist nach § 362 Abs. 1 BGB erloschen.", g)
+    anfrage = gesendet[-1][0]
+    assert len(gesendet) == vorher + 1 and "Schuldverhältnis erlischt" in anfrage["messages"][0]["content"]
+    assert "AKTE" not in json.dumps(anfrage) and r["pruefungen"][0]["ergebnis"] == "passt" and r["kosten_usd"] > 0
+    try:
+        ki.zitate_pruefen("Ohne Paragrafen.", g)
+        raise AssertionError("ohne Zitat darf nichts gesendet werden")
+    except ValueError:
+        assert len(gesendet) == vorher + 1
     ki.schluessel_setzen("")
     assert not ki.status()["eingerichtet"]

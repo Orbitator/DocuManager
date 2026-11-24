@@ -156,6 +156,12 @@ Teil 2 (umgesetzt, Schemaversion 7):
   geschrieben). Denktiefe je Aufgabe (`AUFWAND`): Zusammenfassen und Fristen niedrig, alles andere mittel. Einstellung
   „Qualität und Kosten“ (Gründlich = Standard, Ausgewogen, Sparsam; `STUFEN`). Unter jeder Antwort stehen die Kosten der
   Anfrage und ob die Akte aus dem Zwischenspeicher kam.
+- 0.19.0: **Gesetzestexte** (`gesetze.py`). Zitierte Vorschriften aus Bundesgesetzen (BGB, ZPO, GG, VwVfG, AO, VVG,
+  SGB I–XII u. a., Liste `GESETZE`) werden in Bewertungen und Antworten anklickbar; ein Seitenfenster zeigt den
+  amtlichen Wortlaut von gesetze-im-internet.de, der zitierte Absatz ist hervorgehoben. Abgerufene Vorschriften liegen
+  in `Daten/Gesetze/` und werden nach 30 Tagen erneuert; ohne Netz gilt der gespeicherte Stand. **Zitate prüfen**
+  schickt nur den Text und den Wortlaut der zitierten Vorschriften (nicht die Akte) an Claude und meldet je Vorschrift
+  passt / teilweise / passt nicht / unklar mit Begründung (ca. 1 Cent). Rechtsprechung und Landesrecht sind nicht enthalten.
 - 0.16: Scannen ohne Dialog. „Scannen“ scannt sofort mit dem zuletzt benutzten Scanner (`Daten/scanner.json`):
   Einzug wenn vorhanden, sonst Glas; beidseitig, wenn möglich; 300 dpi Farbe. Die Seiten werden mit PDFKit zu einem
   komprimierten PDF zusammengefügt (leere Rückseiten fallen weg) und landen im Posteingang bzw. Archiv. Nur ein kleines

@@ -33,11 +33,12 @@ from export import (akte_zip, brief_html, sicherung_erstellen, sicherung_pruefen
                     wiederherstellen_laufend)
 from chat_sync import ChatSync, MAX_EXPORT, test_chat_sync
 from claude_ki import ClaudeKI, test_claude
+from gesetze import Gesetze, test_gesetze
 from mail_import import MailImport, migrate_5, test_mail
 
 ROOT = Path(__file__).resolve().parent
 PORT = 8765
-APP_VERSION = "DocuManager 0.18.1 · Günstigere Claude-Anfragen"
+APP_VERSION = "DocuManager 0.19.0 · Gesetzestexte und Zitatprüfung"
 MAX_UPLOAD = 25 * 1024 * 1024
 MIN_MACOS = "14.0"
 SCHEMA_VERSION = 14
@@ -886,6 +887,7 @@ class Handler(BaseHTTPRequestHandler):
     mail_lock = Lock()
     restore_lock = Lock()
     claude = None
+    gesetze = None
     server_ref = None
     scanordner = None
     scanner = None
@@ -1162,6 +1164,12 @@ class Handler(BaseHTTPRequestHandler):
                     for doc_id in ergebnis.get("ids", []):
                         self.ins_archiv(doc_id)
                 self.send_json(ergebnis)
+            elif path == "/api/gesetze":  # Wortlaut der in einem Text zitierten Vorschriften
+                text = str(json.loads(self.read_body(200_000)).get("text") or "")
+                self.send_json({"vorschriften": self.gesetze.fuer_text(text)})
+            elif path == "/api/claude/zitate":  # Gegenprüfung der Zitate am amtlichen Wortlaut
+                text = str(json.loads(self.read_body(200_000)).get("text") or "")
+                self.send_json(self.claude.zitate_pruefen(text, self.gesetze))
             elif path == "/api/claude/stufe":
                 self.send_json(self.claude.stufe_setzen(json.loads(self.read_body(4000)).get("stufe")))
             elif path == "/api/claude/schluessel":
@@ -1464,6 +1472,7 @@ def self_test(ocr=None, image=None):
         test_fristen_ablage(store)
         test_dateien(store)
         test_claude(store)
+        test_gesetze(store.data)
         test_mail(store)
         test_chatnotiz(store)
         test_export(store)
@@ -1671,6 +1680,7 @@ def main():
     Handler.scanner.ins_archiv = lambda doc_id: Handler.ins_archiv(Handler, doc_id)
     Handler.mail = MailImport(Handler.store)
     Handler.claude = ClaudeKI(Handler.store, Handler.akte)
+    Handler.gesetze = Gesetze(Handler.store.data / "Gesetze")
     Handler.scanordner = ScanOrdner(Handler.store, SCAN_ORDNER)
     try:
         server = LocalServer(("127.0.0.1", PORT), Handler)
