@@ -271,6 +271,9 @@ function tileState(p) {
   if (p.vorschlag.vorgaenge.length) return ['ok', 'Vorschlag bereit'];
   return ['warn', 'Zuordnen'];
 }
+// Kachel: Datum des Dokuments (aus dem Text, sonst Erstellungsdatum der Datei); nur ersatzweise das Importdatum
+const kachelDatum = p => { const d = p.dokument_datum || p.vorschlag?.datum;
+  return d ? `<span title="Dokumentdatum${p.vorschlag?.datum_quelle ? ' – ' + esc(p.vorschlag.datum_quelle) : ''}">${dt(d)}</span>` : `<span class="muted" title="Kein Datum im Dokument gefunden">importiert ${dt(p.angelegt_am)}</span>`; };
 function tileHtml(p) {
   const [cls, lbl] = tileState(p);
   const lines = (p.seiten[0]?.text || '').split('\n').filter(Boolean).slice(0, 9);
@@ -282,7 +285,7 @@ function tileHtml(p) {
   return `<div class="tile ${S.ibSel === p.id && !S.kombi ? 'on' : ''} ${nr ? 'kombi-an' : ''} ${S.kombi && !kombinierbar(p) ? 'kombi-nein' : ''}" id="it-${p.id}" role="button" tabindex="0" data-act="ib-open" data-id="${p.id}" aria-pressed="${S.ibSel === p.id}" aria-label="${esc(p.titel)}">
    <span class="tprev">${prev}${nr ? `<span class="knr">${nr}</span>` : ''}<span class="tacts"><button class="tbtn" data-act="tile-kombi" data-id="${p.id}" title="Mit anderen Dokumenten zu einem PDF kombinieren" aria-label="${esc(p.titel)} kombinieren">${I('stapel')}</button><button class="tbtn" data-act="tile-view" data-id="${p.id}" title="Bildschirmfüllend ansehen" aria-label="${esc(p.titel)} ansehen">${I('lupe')}</button><button class="tbtn del" data-act="tile-del" data-id="${p.id}" title="Löschen (in den Papierkorb)" aria-label="${esc(p.titel)} löschen">${I('trash')}</button></span></span>
    <span class="tname" title="${esc(p.dateiname)}">${esc(p.titel)}</span>
-   <span class="tmeta num">${groesse(p.groesse)} · ${dt(p.angelegt_am)}</span><span class="pill ${cls} tstate">${lbl}</span></div>`;
+   <span class="tmeta num">${groesse(p.groesse)} · ${kachelDatum(p)}</span><span class="pill ${cls} tstate">${lbl}</span></div>`;
 }
 const draft = {};  // Eingaben im Posteingang bis zum Zuordnen
 function detailHtml(p) {

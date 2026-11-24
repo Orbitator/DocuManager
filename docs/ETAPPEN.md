@@ -118,6 +118,8 @@ Teil 2 (umgesetzt, Schemaversion 7):
   `dokument`; `migrate_9` baut die Tabelle ohne sie neu (Zugehörigkeit regelt `dokument_vorgang`). Der Scan-Ordner
   liegt jetzt unter `~/DocuManager Scans` (nicht in „Dokumente“, das macOS für Programme gesondert schützt).
   Fehlermeldungen beim Speichern nennen die Ursache.
+- 0.15.2: Posteingang-Kacheln zeigen das Dokumentdatum (aus dem Text, sonst Erstellungsdatum der Datei; Quelle als
+  Hinweis beim Darüberfahren). Nur ohne beides erscheint „importiert …“.
 - 0.15.1: Posteingang-Details mit Auswahl **Empfänger** in der Zeile von Dokumentdatum und Absender (zulässige
   Empfänger, erkannter Empfänger, „+ Neuer Empfänger …“ ergänzt die Liste). Beim Zuordnen wird die Wahl gespeichert;
   eine Änderung gegenüber der Erkennung gilt als von Hand gesetzt.

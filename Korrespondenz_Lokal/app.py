@@ -36,7 +36,7 @@ from mail_import import MailImport, migrate_5, test_mail
 
 ROOT = Path(__file__).resolve().parent
 PORT = 8765
-APP_VERSION = "DocuManager 0.15.1 · Empfänger im Posteingang"
+APP_VERSION = "DocuManager 0.15.2 · Dokumentdatum auf den Kacheln"
 MAX_UPLOAD = 25 * 1024 * 1024
 MIN_MACOS = "14.0"
 SCHEMA_VERSION = 13
