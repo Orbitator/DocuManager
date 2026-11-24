@@ -1153,7 +1153,8 @@ document.addEventListener('click', async ev => {
   case 'imp-file': $('#impmenu').hidden = true; $('#fileinp').dataset.ziel = S.view === 'archiv' ? 'archiv' : ''; $('#fileinp').click(); break;
   case 'arch-import': $('#fileinp').dataset.ziel = 'archiv'; $('#fileinp').click(); break;
   case 'doc-add': $('#fileinp').dataset.ziel = String(D.akte.id); $('#fileinp').click(); break;
-  case 'imp-scan': $('#impmenu').hidden = true; scan(S.view === 'archiv'); break;
+  case 'imp-scan': $('#impmenu').hidden = true; scan(S.view === 'archiv', true); break;
+  case 'imp-scan-dialog': $('#impmenu').hidden = true; scan(S.view === 'archiv', false); break;
   case 'scan-folder': $('#impmenu').hidden = true; try { const r = await api('scanordner/oeffnen', {}); toast(`Ordner „${r.pfad.split('/').pop()}“ (in Ihrem Benutzerordner) geöffnet. Was Sie dort hineinscannen oder ablegen, kommt automatisch in den Posteingang.`); } catch (e) { toast(e.message); } break;
   case 'ib-open': if (S.kombi) { const p = D.inbox.find(x => x.id === id); if (!kombinierbar(p)) { toast('Kombinieren geht nur mit PDFs und Bildern.'); break; }
       S.kombi = S.kombi.includes(id) ? S.kombi.filter(x => x !== id) : [...S.kombi, id]; zeichne(vInbox); break; } S.ibSel = S.ibSel === id ? null : id; zeichne(vInbox); if (S.ibSel) $('#it-' + S.ibSel)?.scrollIntoView({behavior: 'smooth', block: 'nearest'}); break;
@@ -1424,10 +1425,10 @@ async function mailHolen(insArchiv) {
     if (location.hash !== '#posteingang') location.hash = 'posteingang'; else await render();
   } catch (e) { toast(e.message); }
 }
-async function scan(insArchiv) {
+async function scan(insArchiv, direkt) {
   try {
-    const job = await api(insArchiv ? 'archiv/scan' : 'posteingang/scan', {});
-    toast('Scannen Sie im macOS-Dialog und wählen Sie dort „Scans übernehmen“.');
+    const job = await api(insArchiv ? 'archiv/scan' : 'posteingang/scan', {direkt: !!direkt});
+    toast(direkt ? 'Scanner wird gestartet … Das Dokument landet danach von selbst im ' + (insArchiv ? 'Archiv.' : 'Posteingang.') : 'Scannen Sie im Scan-Dialog; der Scan wird danach automatisch übernommen.');
     let r; do { await new Promise(res => setTimeout(res, 1200)); r = await api(`scans/${job.id}/poll`, {}); } while (r.state === 'open');
     if (r.state === 'digitale-bilder') {
       modal('Scannen mit „Digitale Bilder“', `<ol style="margin:0;padding-left:20px;line-height:1.6"><li>In „Digitale Bilder“ links den Scanner wählen.</li>

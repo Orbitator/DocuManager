@@ -36,7 +36,7 @@ from mail_import import MailImport, migrate_5, test_mail
 
 ROOT = Path(__file__).resolve().parent
 PORT = 8765
-APP_VERSION = "DocuManager 0.15.3 · Scannen: beschreibbarer Ordner, Digitale Bilder"
+APP_VERSION = "DocuManager 0.16 · Scannen ohne Dialog"
 MAX_UPLOAD = 25 * 1024 * 1024
 MIN_MACOS = "14.0"
 SCHEMA_VERSION = 13
@@ -754,15 +754,15 @@ class Scanner:
         self.ins_archiv = None
         self.lock = Lock()  # Der Server bedient Anfragen parallel; ein Scanauftrag zur Zeit.
 
-    def start(self, case_id, archiv=False):
+    def start(self, case_id, archiv=False, direkt=False):
         with self.lock:
-            return self._start(case_id, archiv)
+            return self._start(case_id, archiv, direkt)
 
     def finish(self, job_id):
         with self.lock:
             return self._finish(job_id)
 
-    def _start(self, case_id, archiv=False):
+    def _start(self, case_id, archiv=False, direkt=False):
         if self.job and self.job["result"] is None:
             self._finish(self.job["id"])
             if self.job["result"] is None:
@@ -791,7 +791,9 @@ class Scanner:
         logs.mkdir(parents=True, exist_ok=True)
         output = open(logs / "scanner.log", "ab")  # Ausgabe des Scandialogs für die Fehlersuche
         try:
-            process = subprocess.Popen([str(binary), str(folder), str(SCAN_ORDNER)], stdin=subprocess.DEVNULL,
+            # direkt: ohne Dialog mit dem gemerkten Scanner scannen (Daten/scanner.json), sonst Scan-Dialog
+            process = subprocess.Popen([str(binary), str(folder), str(SCAN_ORDNER), str(self.store.data / "scanner.json"),
+                                        "direkt" if direkt else "dialog"], stdin=subprocess.DEVNULL,
                                        stdout=output, stderr=subprocess.STDOUT)
         except OSError:
             output.close()
@@ -1151,10 +1153,10 @@ class Handler(BaseHTTPRequestHandler):
             elif path == "/api/mail/markierung":
                 self.mail.markierung_setzen(int(json.loads(self.read_body(4000))["markierung"]))
                 self.send_json({"ok": True})
-            elif path == "/api/posteingang/scan":
-                self.send_json({"id": self.scanner.start(None)}, 201)
-            elif path == "/api/archiv/scan":  # Scans direkt ins Archiv
-                self.send_json({"id": self.scanner.start(None, archiv=True)}, 201)
+            elif path in ("/api/posteingang/scan", "/api/archiv/scan"):  # Archiv: Scans direkt ins Archiv
+                daten = json.loads(self.read_body(4000)) if self.headers.get("Content-Length", "0") != "0" else {}
+                self.send_json({"id": self.scanner.start(None, archiv=path == "/api/archiv/scan",
+                                                         direkt=bool(daten.get("direkt")))}, 201)
             elif match := re.fullmatch(r"/api/cases/(\d+)/scan", path):
                 self.send_json({"id": self.scanner.start(int(match[1]))}, 201)
             elif match := re.fullmatch(r"/api/scans/([0-9a-f]{32})/poll", path):
@@ -1296,9 +1298,14 @@ class ScanOrdner:
 
 
 def build_scanner():
-    return build_helper("korrespondenz-scanner", ROOT / "scanner.m",
-                        ["/usr/bin/clang", "-fobjc-arc", "-O2", f"-mmacosx-version-min={MIN_MACOS}",
-                         "-framework", "Cocoa", "-framework", "Quartz", "-framework", "ImageCaptureCore"], 120)
+    befehl = ["/usr/bin/clang", "-fobjc-arc", "-O2", f"-mmacosx-version-min={MIN_MACOS}",
+              "-framework", "Cocoa", "-framework", "Quartz", "-framework", "ImageCaptureCore"]
+    neu = build_helper("korrespondenz-scanner", ROOT / "scanner.m", befehl, 120)
+    if neu or not (ROOT / "scanner_alt.m").is_file():
+        return neu
+    # Rückfall: Lässt sich der neue Helfer nicht bauen, bleibt wenigstens der bewährte Scan-Dialog nutzbar.
+    log.warning("Neuer Scan-Helfer nicht baubar, nutze den bisherigen Scan-Dialog.")
+    return build_helper("korrespondenz-scanner-alt", ROOT / "scanner_alt.m", befehl, 120)
 
 
 def test_dateien(store):

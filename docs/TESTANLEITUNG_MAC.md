@@ -147,6 +147,15 @@ Erst wenn Schritt 2 bis 4 funktionieren. Die bisherige Anwendung vorher beenden.
    zeigt die Anleitung zum Ordner „DocuManager Scans“.
 5. Bei Problemen den Inhalt von `~/DocuManager/Daten/Logs/scanner.log` schicken.
 
+## 10a. Scannen ohne Dialog (ab 0.16)
+
+1. Einmal **Dokument importieren → Scannen mit Einstellungen …**, Ihren Scanner wählen (wird gemerkt) und scannen.
+   Erwartet: Der Scan wird nach wenigen Sekunden ohne „Scans übernehmen“ in den Posteingang übernommen.
+2. Mehrere Blätter in den Einzug legen, **Dokument importieren → Scannen**. Erwartet: kleines Fenster „Scanne mit …“,
+   danach ein PDF mit allen Seiten im Posteingang, ohne weitere Fragen.
+3. Falls stattdessen der Dialog erscheint: Der Grund steht unten im Dialog. Bitte mitteilen, mit dem Inhalt von
+   `~/DocuManager/Daten/Logs/scanner.log`.
+
 ## 11. Automatische Drehung
 
 1. Einen Brief verkehrt herum (auf dem Kopf) scannen oder ein solches PDF importieren. Bereits vorhandene

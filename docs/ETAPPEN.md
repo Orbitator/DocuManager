@@ -118,6 +118,11 @@ Teil 2 (umgesetzt, Schemaversion 7):
   `dokument`; `migrate_9` baut die Tabelle ohne sie neu (Zugehörigkeit regelt `dokument_vorgang`). Der Scan-Ordner
   liegt jetzt unter `~/DocuManager Scans` (nicht in „Dokumente“, das macOS für Programme gesondert schützt).
   Fehlermeldungen beim Speichern nennen die Ursache.
+- 0.16: Scannen ohne Dialog. „Scannen“ scannt sofort mit dem zuletzt benutzten Scanner (`Daten/scanner.json`):
+  Einzug wenn vorhanden, sonst Glas; beidseitig, wenn möglich; 300 dpi Farbe. Die Seiten werden mit PDFKit zu einem
+  komprimierten PDF zusammengefügt (leere Rückseiten fallen weg) und landen im Posteingang bzw. Archiv. Nur ein kleines
+  Fortschrittsfenster; bei Problemen öffnet sich der Dialog. „Scannen mit Einstellungen …“ öffnet den Dialog, der jetzt
+  ebenfalls automatisch übernimmt. Lässt sich der neue Helfer nicht bauen, wird `scanner_alt.m` verwendet.
 - 0.15.3: Scannen repariert. Der Scan-Dialog schrieb in einen versteckten Programmordner mit Rechten 0700; der
   Scan-Dienst von macOS meldete „The selected folder is not writable“. Zwischenablage jetzt `~/Pictures/DocuManager
   Scans/Scan-…` (0755), danach Übernahme und Aufräumen wie bisher. „Digitale Bilder öffnen“ gibt den Scanner frei und
