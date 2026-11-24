@@ -141,6 +141,9 @@ Teil 2 (umgesetzt, Schemaversion 7):
   bei 49 mm, Empfängeranschrift ab 55 mm (im Sichtfenster DIN lang/C5/C4, 45–90 mm), Informationsblock rechts,
   Betreff bei 100 mm, Falzmarken bei 105/210 mm und Lochmarke bei 148,5 mm, Raum für die Unterschrift; Folgeseiten mit
   oberem Rand. Claude liefert den Brieftext ohne Markdown, von der Anrede bis zum Namen; Reste werden entfernt.
+- 0.17.3: Claude direkt im Briefdialog: „Antwort entwerfen“ (bzw. „Schreiben entwerfen“ ohne Bezugsschreiben) und
+  „Text überarbeiten“, jeweils mit optionaler Vorgabe; Grundlage ist die ganze Akte, der Empfänger aus dem Dialog und
+  beim Überarbeiten der eigene Entwurf. Aufgaben `schreiben` und `ueberarbeiten` mit strukturierter Antwort.
 - 0.16: Scannen ohne Dialog. „Scannen“ scannt sofort mit dem zuletzt benutzten Scanner (`Daten/scanner.json`):
   Einzug wenn vorhanden, sonst Glas; beidseitig, wenn möglich; 300 dpi Farbe. Die Seiten werden mit PDFKit zu einem
   komprimierten PDF zusammengefügt (leere Rückseiten fallen weg) und landen im Posteingang bzw. Archiv. Nur ein kleines

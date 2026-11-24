@@ -37,7 +37,7 @@ from mail_import import MailImport, migrate_5, test_mail
 
 ROOT = Path(__file__).resolve().parent
 PORT = 8765
-APP_VERSION = "DocuManager 0.17.2 · Druckfertiger Brief nach DIN 5008"
+APP_VERSION = "DocuManager 0.17.3 · Claude im Briefdialog"
 MAX_UPLOAD = 25 * 1024 * 1024
 MIN_MACOS = "14.0"
 SCHEMA_VERSION = 14
@@ -1167,7 +1167,8 @@ class Handler(BaseHTTPRequestHandler):
             elif path == "/api/claude/fragen":  # Analyse oder Entwurf; kann bis zu einigen Minuten dauern
                 daten = json.loads(self.read_body(200_000))
                 self.send_json(self.claude.fragen(int(daten["vorgang_id"]), int(daten["dokument_id"]) if daten.get("dokument_id") else None,
-                                                  daten.get("verlauf") or [], daten.get("aufgabe") or "frage"))
+                                                  daten.get("verlauf") or [], daten.get("aufgabe") or "frage",
+                                                  daten.get("anweisung") or "", daten.get("entwurf") or "", daten.get("empfaenger") or ""))
             elif path == "/api/beenden":  # Anwendung ohne Terminal beenden
                 self.send_json({"ok": True})
                 if self.server_ref:

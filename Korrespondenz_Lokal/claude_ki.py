@@ -42,6 +42,15 @@ AUFGABEN = {
                "offene Punkte aus früheren Schreiben auf. Nenne in den Hinweisen, auf welche früheren Schreiben du dich stützt.",
 }
 
+AUFGABEN["schreiben"] = ("Entwirf ein neues Schreiben in diesem Vorgang an den unten genannten Empfänger, passend zum "
+                         "Stand der Akte. Berücksichtige den gesamten bisherigen Schriftverkehr, beziehe dich auf frühere "
+                         "Schreiben mit Datum und bleibe bei dem, was ich bereits geschrieben habe.")
+AUFGABEN["ueberarbeiten"] = ("Überarbeite meinen Briefentwurf: sprachlich klar, höflich und bestimmt, sachlich richtig im "
+                             "Abgleich mit der Akte (Daten, Beträge, Aktenzeichen, frühere Schreiben). Behalte meine Aussagen "
+                             "und Absicht bei, ergänze Fehlendes und fülle Platzhalter, wo die Akte die Angabe enthält. In den "
+                             "Hinweisen nenne kurz, was du geändert hast.")
+BRIEF_AUFGABEN = ("antwort", "schreiben", "ueberarbeiten")
+
 BRIEF_SCHEMA = {
     "type": "object",
     "properties": {
@@ -182,7 +191,7 @@ class ClaudeKI:
         return row[0] if row else ""
 
     # --- Anfrage ------------------------------------------------------------------------
-    def fragen(self, vorgang_id, dokument_id, verlauf, aufgabe="frage"):
+    def fragen(self, vorgang_id, dokument_id, verlauf, aufgabe="frage", anweisung="", entwurf="", empfaenger=""):
         """verlauf: Liste von {rolle: "user"|"assistant", text}. Die letzte Nachricht ist die neue Frage
         (bei aufgabe != "frage" wird sie aus AUFGABEN ergänzt)."""
         schluessel = self.schluessel()
@@ -199,7 +208,16 @@ class ClaudeKI:
                 raise ValueError("Verlauf: ungültige Nachricht.")
             nachrichten.append({"role": n["rolle"], "content": str(n["text"])[:20000]})
         if aufgabe != "frage":
-            nachrichten.append({"role": "user", "content": AUFGABEN[aufgabe]})
+            auftrag = AUFGABEN[aufgabe]
+            if aufgabe == "ueberarbeiten":
+                if not str(entwurf).strip():
+                    raise ValueError("Zum Überarbeiten zuerst einen Brieftext eingeben.")
+                auftrag += f"\n\n<mein_entwurf>\n{str(entwurf)[:20000]}\n</mein_entwurf>"
+            if str(empfaenger).strip():
+                auftrag += f"\n\nEmpfänger des Briefs:\n{str(empfaenger)[:500]}"
+            if str(anweisung).strip():
+                auftrag += f"\n\nMeine Vorgaben dazu: {str(anweisung)[:2000]}"
+            nachrichten.append({"role": "user", "content": auftrag})
         if not nachrichten or nachrichten[-1]["role"] != "user":
             raise ValueError("Bitte eine Frage stellen.")
         anfrage = {
@@ -210,9 +228,9 @@ class ClaudeKI:
             "messages": nachrichten,
             "cache_control": {"type": "ephemeral"},  # Folgefragen zum selben Dokument werden günstiger
             "fallbacks": "default",
-            "output_config": {"effort": "high" if aufgabe in ("antwort", "pruefen") else "medium"},
+            "output_config": {"effort": "high" if aufgabe in BRIEF_AUFGABEN + ("pruefen",) else "medium"},
         }
-        if aufgabe == "antwort":
+        if aufgabe in BRIEF_AUFGABEN:
             anfrage["output_config"]["format"] = {"type": "json_schema", "schema": BRIEF_SCHEMA}
         antwort = self.senden(anfrage, schluessel)
         if antwort.get("stop_reason") == "refusal":
@@ -221,7 +239,7 @@ class ClaudeKI:
         if antwort.get("stop_reason") == "max_tokens":
             text += "\n\n[Antwort wurde wegen der Länge abgeschnitten.]"
         ergebnis = {"text": text, "aufgabe": aufgabe, "nutzung": antwort.get("usage", {}), "kontext": info}
-        if aufgabe == "antwort":
+        if aufgabe in BRIEF_AUFGABEN:
             try:
                 brief = json.loads(text)
                 brief["brieftext"] = brieftext_saeubern(brief["brieftext"])
@@ -294,6 +312,11 @@ def test_claude(store):
     assert schluessel == "sk-ant-test-1234" and anfrage["model"] == MODELL and anfrage["fallbacks"] == "default"
     assert "180,98" in anfrage["system"][1]["text"] and "[GEWÄHLTES SCHREIBEN]" in anfrage["system"][1]["text"]
     assert "Amtsgericht Forderung TÜV" in anfrage["system"][1]["text"] and r["text"].startswith("Zahlung")
+    r = ki.fragen(v, d, [], "ueberarbeiten", anweisung="kürzer", entwurf="Sehr geehrte Damen und Herren, nein.",
+                  empfaenger="Amtsgericht Rostock")
+    letzte = gesendet[-1][0]["messages"][-1]["content"]
+    assert "<mein_entwurf>" in letzte and "kürzer" in letzte and "Amtsgericht Rostock" in letzte
+    assert gesendet[-1][0]["output_config"]["format"]["type"] == "json_schema"
     r = ki.fragen(v, d, [], "antwort")
     assert gesendet[-1][0]["output_config"]["format"]["type"] == "json_schema"
     assert r["betreff"] == "Ihre Forderung" and r["brieftext"].startswith("Sehr geehrte")

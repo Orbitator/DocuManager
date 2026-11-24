@@ -651,9 +651,13 @@ async function compose(bezugId, editId, vorschlag) {
     <label>Empfänger<textarea id="m-emp" rows="4">${esc(b.empfaenger || (ziele[0] ? ziele[0].text : ''))}</textarea></label>
     <div class="two"><label>Ihr Zeichen<input id="m-zeichen" value="${esc(b.zeichen || (ref ? ref.wert : ''))}"></label><label>Datum<input id="m-bdat" value="${esc(b.datum || dt(isoHeute()))}"></label></div>
     <label>Betreff<input id="m-subj" value="${esc(b.betreff || '')}"></label>
+    <div class="ck-brief"><span class="ck-brief-t">${I('ki')}Claude</span>
+     <input id="m-kianw" placeholder="Vorgabe (optional), z. B. „Widerspruch, Zahlung ablehnen“ oder „kürzer und freundlicher“">
+     <button type="button" class="btn sm" data-kib="${bezug ? 'antwort' : 'schreiben'}">${bezug ? 'Antwort entwerfen' : 'Schreiben entwerfen'}</button>
+     <button type="button" class="btn sm ghost" data-kib="ueberarbeiten">Text überarbeiten</button></div>
     <label>Brieftext<textarea id="m-body">${esc(edit ? edit.text || '' : '')}</textarea></label>
     ${anl.length ? `<label>Anlagen</label><div class="stack" style="gap:4px">${anl.map(e => `<label class="chk"><input type="checkbox" class="m-att" value="${esc(e.titel)}" ${(b.anlagen || []).includes(e.titel) ? 'checked' : ''}>${esc(e.titel)} vom ${dt(e.ereignis_datum)}</label>`).join('')}</div>` : ''}
-    ${vorschlag && vorschlag.hinweise ? `<p class="notecard" style="margin:0;font-size:13px">${I('ki')} <b>Hinweise von Claude:</b> ${esc(vorschlag.hinweise)}</p>` : ''}
+    <div class="notecard" id="m-kihinweis" style="margin:0;font-size:13px" ${vorschlag && vorschlag.hinweise ? '' : 'hidden'}>${vorschlag && vorschlag.hinweise ? `${I('ki')} <b>Hinweise von Claude:</b> ${esc(vorschlag.hinweise)}` : ''}</div>
     ${edit && edit.versendet_als ? '' : `<div class="stack" style="gap:4px"><label class="chk"><input type="checkbox" id="m-print">Nach dem Speichern drucken</label>
      <label class="chk"><input type="checkbox" id="m-sent">Als versendet in der Chronik erfassen</label>
      <span id="m-sentopt" class="two" hidden><label>Versandart<select id="m-sva">${VERSAND.map(v => `<option>${v}</option>`).join('')}</select></label><label>Versanddatum<input id="m-svd" type="date" value="${isoHeute()}"></label></span></div>`}
@@ -706,6 +710,23 @@ async function compose(bezugId, editId, vorschlag) {
     }
     else if (ev.target.id === 'm-to') { const z = ziele.find(x => x.k === ev.target.value); $('#m-emp').value = z ? z.text : ''; if (!$('#m-body').dataset.touched && $('#m-tpl')) vorlage(); else upd(); }
     else { if (ev.target.id === 'm-body') ev.target.dataset.touched = '1'; upd(); }
+  });
+  box.addEventListener('click', async ev => {
+    const k = ev.target.closest('[data-kib]'); if (!k || box.dataset.ki) return;
+    if (!D.claude) D.claude = await api('claude');
+    if (!D.claude.eingerichtet) { toast('Claude ist noch nicht eingerichtet: Einstellungen → Claude (KI-Analyse).'); return; }
+    const aufgabe = k.dataset.kib, knoepfe = box.querySelectorAll('[data-kib]'), alt = k.innerHTML;
+    if (aufgabe !== 'ueberarbeiten' && $('#m-body').dataset.touched && !confirm('Den bisherigen Brieftext durch einen Entwurf von Claude ersetzen?')) return;
+    box.dataset.ki = '1'; knoepfe.forEach(b => b.disabled = true); k.innerHTML = '<span class="spin"></span>Claude schreibt …';
+    try {
+      const r = await api('claude/fragen', {vorgang_id: a.id, dokument_id: bezug ? bezug.dokument_id : null, verlauf: [], aufgabe,
+        anweisung: val('m-kianw'), entwurf: val('m-body'), empfaenger: val('m-emp')});
+      if (!document.body.contains(box)) return;
+      if (r.betreff) $('#m-subj').value = r.betreff;
+      $('#m-body').value = r.brieftext || r.text; $('#m-body').dataset.touched = '1'; upd();
+      const h = $('#m-kihinweis'); h.hidden = !(r.hinweise || r.kontext); h.innerHTML = (r.hinweise ? `${I('ki')} <b>Hinweise von Claude:</b> ${esc(r.hinweise)}` : '') + kontextHinweis(r.kontext);
+    } catch (err) { toast(err.message); }
+    delete box.dataset.ki; knoepfe.forEach(b => b.disabled = false); k.innerHTML = alt;
   });
   box.addEventListener('change', ev => { if (ev.target.classList.contains('m-att')) upd(); if (ev.target.id === 'm-sent') $('#m-sentopt').hidden = !ev.target.checked; });
   if (edit) upd(); else vorlage();

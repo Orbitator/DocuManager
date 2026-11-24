@@ -483,3 +483,6 @@ button.heute:hover{background:var(--surface-2,rgba(127,127,127,.18))}
 .ck-kontext{margin:8px 0 0;font-size:12px;color:var(--muted);display:flex;gap:6px;align-items:flex-start}
 .ck-kontext .i{width:14px;height:14px;flex:none;margin-top:1px}
 .ck-kontext.warn{color:#a15c00}
+.ck-brief{display:flex;gap:6px;align-items:center;flex-wrap:wrap;padding:8px 10px;border:1px solid var(--line);border-radius:10px;background:var(--surface)}
+.ck-brief-t{flex:1;display:flex;gap:4px;align-items:center;font-weight:600;font-size:13px}
+.ck-brief input{flex:1 1 100%;order:3;font:inherit;font-size:13px;padding:6px 8px;border:1px solid var(--line);border-radius:7px;background:var(--surface);color:var(--fg)}
