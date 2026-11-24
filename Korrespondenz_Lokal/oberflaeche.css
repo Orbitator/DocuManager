@@ -462,3 +462,8 @@ button.heute:hover{background:var(--surface-2,rgba(127,127,127,.18))}
 .tbtn:hover{transform:scale(1.08)}
 .tbtn.del:hover{background:#d93a3a;color:#fff;border-color:#d93a3a}
 .toastknopf{margin-left:10px;padding:3px 10px;border-radius:6px;border:1px solid currentColor;background:transparent;color:inherit;font:inherit;font-weight:600;cursor:pointer}
+.kombibar{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin:0 0 14px;padding:10px 14px;border-radius:10px;background:var(--accent-soft,rgba(91,108,255,.12));border:1px solid var(--accent-line,var(--line))}
+.kombibar svg{width:16px;height:16px;vertical-align:-3px;margin-right:6px}
+.tile.kombi-an{border-color:var(--accent);box-shadow:0 0 0 2px var(--accent-soft,rgba(91,108,255,.3))}
+.tile.kombi-nein{opacity:.45}
+.knr{position:absolute;top:6px;left:6px;z-index:2;display:grid;place-items:center;min-width:26px;height:26px;padding:0 6px;border-radius:999px;background:var(--accent,#3341c9);color:#fff;font-weight:700;font-size:13px;box-shadow:0 1px 4px rgba(0,0,0,.25)}

@@ -59,6 +59,8 @@ Die Prüfung auf dem Mac mit echter Texterkennung beschreibt [docs/TESTANLEITUNG
 
 `Korrespondenz_Lokal/pdfjs/`: pdf.js 3.11.174 von Mozilla (Apache-2.0, Lizenztext liegt bei), lokal ausgeliefert für die Seitenansicht.
 
+`Korrespondenz_Lokal/pdflib/`: pdf-lib 1.17.1 (MIT, Lizenztext liegt bei), lokal ausgeliefert zum Kombinieren von Dokumenten.
+
 ## Daten
 
 Alle Daten liegen in `Daten/` neben `app.py` – nach der Installation als Programm also in `~/DocuManager/Daten/`, sonst in `Korrespondenz_Lokal/Daten/`. Sie sind von Git ausgeschlossen.

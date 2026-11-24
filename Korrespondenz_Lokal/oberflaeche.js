@@ -44,6 +44,7 @@ const P = {
   mail:'<rect x="3" y="5" width="18" height="14" rx="2"/><path d="m3 7 9 6 9-6"/>',
   move:'<path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><path d="M9 13h7M13 10l3 3-3 3"/>',
   info:'<circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8h.01"/>',
+  stapel:'<rect x="7" y="3" width="13" height="15" rx="1.5"/><path d="M4 7v12.5A1.5 1.5 0 0 0 5.5 21H16"/>',
   lupe:'<circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/>',
   rotl:'<path d="M4 12a8 8 0 1 0 2.3-5.6M4 4v5h5"/>',
   rotr:'<path d="M20 12a8 8 0 1 1-2.3-5.6M20 4v5h-5"/>',
@@ -277,8 +278,9 @@ function tileHtml(p) {
   const bereit = !/Wartet|läuft/.test(p.ocr_status || '');
   const prev = p.mime === 'message/rfc822' || !bereit ? text
     : `${text}<img class="thumb" src="/api/documents/${p.id}/vorschaubild?v=${encodeURIComponent(p.ocr_status + (p.seiten[0]?.drehung || 0))}" alt="" loading="lazy" onerror="this.remove()">`;
-  return `<div class="tile ${S.ibSel === p.id ? 'on' : ''}" id="it-${p.id}" role="button" tabindex="0" data-act="ib-open" data-id="${p.id}" aria-pressed="${S.ibSel === p.id}" aria-label="${esc(p.titel)}">
-   <span class="tprev">${prev}<span class="tacts"><button class="tbtn" data-act="tile-view" data-id="${p.id}" title="Bildschirmfüllend ansehen" aria-label="${esc(p.titel)} ansehen">${I('lupe')}</button><button class="tbtn del" data-act="tile-del" data-id="${p.id}" title="Löschen (in den Papierkorb)" aria-label="${esc(p.titel)} löschen">${I('trash')}</button></span></span>
+  const nr = S.kombi ? S.kombi.indexOf(p.id) + 1 : 0;
+  return `<div class="tile ${S.ibSel === p.id && !S.kombi ? 'on' : ''} ${nr ? 'kombi-an' : ''} ${S.kombi && !kombinierbar(p) ? 'kombi-nein' : ''}" id="it-${p.id}" role="button" tabindex="0" data-act="ib-open" data-id="${p.id}" aria-pressed="${S.ibSel === p.id}" aria-label="${esc(p.titel)}">
+   <span class="tprev">${prev}${nr ? `<span class="knr">${nr}</span>` : ''}<span class="tacts"><button class="tbtn" data-act="tile-kombi" data-id="${p.id}" title="Mit anderen Dokumenten zu einem PDF kombinieren" aria-label="${esc(p.titel)} kombinieren">${I('stapel')}</button><button class="tbtn" data-act="tile-view" data-id="${p.id}" title="Bildschirmfüllend ansehen" aria-label="${esc(p.titel)} ansehen">${I('lupe')}</button><button class="tbtn del" data-act="tile-del" data-id="${p.id}" title="Löschen (in den Papierkorb)" aria-label="${esc(p.titel)} löschen">${I('trash')}</button></span></span>
    <span class="tname" title="${esc(p.dateiname)}">${esc(p.titel)}</span>
    <span class="tmeta num">${groesse(p.groesse)} · ${dt(p.angelegt_am)}</span><span class="pill ${cls} tstate">${lbl}</span></div>`;
 }
@@ -319,7 +321,9 @@ function vInbox() {
   if (S.ibSel && !D.inbox.some(p => p.id === S.ibSel)) S.ibSel = null;
   const sel = D.inbox.find(p => p.id === S.ibSel);
   return `<div class="head" style="justify-content:space-between"><h1>Posteingang</h1><button class="btn" data-act="mail-get">${I('mail')}Aus Mail holen</button></div><p class="muted" style="margin:6px 0 16px">${D.inbox.length ? `${D.inbox.length} ${D.inbox.length === 1 ? 'Dokument wartet' : 'Dokumente warten'} auf Zuordnung. Ein Klick auf ein Dokument öffnet die Details.` : 'Alles einsortiert.'} Dateien können Sie auch auf das Fenster ziehen.</p>
-  <div class="ibgrid ${sel ? 'has-sel' : ''}" role="list">${D.inbox.map(p => tileHtml(p) + (p === sel ? `<section class="ibdetail" id="ibdetail" aria-label="Details">${detailHtml(p)}</section>` : '')).join('')}</div>`;
+  ${S.kombi ? `<div class="kombibar"><span>${I('stapel')}<b>Kombinieren:</b> Dokumente in der gewünschten Reihenfolge anklicken (PDFs und Bilder). <b class="num">${S.kombi.length}</b> ausgewählt.</span>
+    <span style="display:flex;gap:8px"><button class="btn pri sm" data-act="kombi-los" ${S.kombi.length < 2 ? 'disabled' : ''}>Zu einem PDF kombinieren</button><button class="btn sm" data-act="kombi-ab">Abbrechen</button></span></div>` : ''}
+  <div class="ibgrid ${sel && !S.kombi ? 'has-sel' : ''}" role="list">${D.inbox.map(p => tileHtml(p) + (p === sel ? `<section class="ibdetail" id="ibdetail" aria-label="Details">${detailHtml(p)}</section>` : '')).join('')}</div>`;
 }
 let followTimer = null;
 function followInbox() {  // Solange Texterkennung läuft, Stand nachladen, ohne laufende Eingaben zu stören
@@ -755,6 +759,46 @@ function vEmpfang() {
    <label class="chk"><input type="checkbox" id="em-notiz" ${e.nachrichten.length ? 'checked' : 'disabled'}>Chatverlauf als Chat-Notiz im Vorgang speichern <span class="muted" style="font-size:12px">(nur mit Vorgang)</span></label>
    <div style="display:flex;gap:8px"><button class="btn pri" data-act="em-los">Übernehmen</button><button class="btn ghost" data-act="em-verwerfen">Verwerfen</button></div></div>`;
 }
+// ---------- Dokumente kombinieren (pdf-lib, im Browser) ----------
+const kombinierbar = p => !!p && (p.mime === 'application/pdf' || /^image\//.test(p.mime || ''));
+const skripte = {};
+function skriptLaden(src, name) {
+  if (window[name]) return Promise.resolve(window[name]);
+  return skripte[src] || (skripte[src] = new Promise((ok, fehler) => { const s = document.createElement('script'); s.src = src; s.onload = () => ok(window[name]); s.onerror = () => fehler(new Error('Bibliothek nicht ladbar')); document.head.append(s); }));
+}
+async function alsPng(bytes, mime) {  // Bildformate, die pdf-lib nicht direkt einbettet (z. B. TIFF, WebP)
+  const bild = await createImageBitmap(new Blob([bytes], {type: mime || 'image/tiff'}));
+  const c = document.createElement('canvas'); c.width = bild.width; c.height = bild.height; c.getContext('2d').drawImage(bild, 0, 0);
+  return new Uint8Array(await (await new Promise(r => c.toBlob(r, 'image/png'))).arrayBuffer());
+}
+async function kombinieren(ids, titel) {
+  const {PDFDocument, degrees} = await skriptLaden('/pdflib/pdf-lib.min.js', 'PDFLib');
+  const ziel = await PDFDocument.create();
+  for (const id of ids) {
+    const p = D.inbox.find(x => x.id === id), rot = (p && p.drehung_manuell) || 0;
+    const res = await holen(`/api/documents/${id}/original`); if (!res.ok) throw new Error(`„${p ? p.titel : id}“ nicht lesbar`);
+    const bytes = new Uint8Array(await res.arrayBuffer()), typ = res.headers.get('content-type') || p.mime;
+    if (bytes[0] === 0x25 && bytes[1] === 0x50 && bytes[2] === 0x44 && bytes[3] === 0x46) {  // %PDF
+      const quelle = await PDFDocument.load(bytes, {ignoreEncryption: true});
+      for (const seite of await ziel.copyPages(quelle, quelle.getPageIndices())) {
+        if (rot) seite.setRotation(degrees((seite.getRotation().angle + rot) % 360));
+        ziel.addPage(seite);
+      }
+    } else {  // Bild auf eine A4-Seite (hoch oder quer) einpassen
+      const bild = bytes[0] === 0xFF && bytes[1] === 0xD8 ? await ziel.embedJpg(bytes) : bytes[0] === 0x89 && bytes[1] === 0x50 ? await ziel.embedPng(bytes) : await ziel.embedPng(await alsPng(bytes, typ));
+      const quer = bild.width > bild.height, B = quer ? 842 : 595, H = quer ? 595 : 842, f = Math.min(B / bild.width, H / bild.height);
+      const seite = ziel.addPage([B, H]);
+      seite.drawImage(bild, {x: (B - bild.width * f) / 2, y: (H - bild.height * f) / 2, width: bild.width * f, height: bild.height * f});
+      if (rot) seite.setRotation(degrees(rot));
+    }
+  }
+  ziel.setTitle(titel);
+  const datei = new File([await ziel.save()], titel.replace(/[\\/:*?"<>|]+/g, '-').slice(0, 120) + '.pdf', {type: 'application/pdf'});
+  const r = await upload('posteingang/dokumente', datei);
+  await api(`documents/${r.id}/title`, {title: titel});
+  for (const id of ids) await api(`dokument/${id}/loeschen`, {});
+  return r.id;
+}
 async function alsDatei(d) {
   if (!d.umwandeln) return new File([d.daten], d.name, {type: d.mime || ''});
   const bild = await createImageBitmap(new Blob([d.daten], {type: d.mime || 'image/webp'}));
@@ -1105,8 +1149,24 @@ document.addEventListener('click', async ev => {
   case 'doc-add': $('#fileinp').dataset.ziel = String(D.akte.id); $('#fileinp').click(); break;
   case 'imp-scan': $('#impmenu').hidden = true; scan(S.view === 'archiv'); break;
   case 'scan-folder': $('#impmenu').hidden = true; try { const r = await api('scanordner/oeffnen', {}); toast(`Ordner „${r.pfad.split('/').pop()}“ (in Ihrem Benutzerordner) geöffnet. Was Sie dort hineinscannen oder ablegen, kommt automatisch in den Posteingang.`); } catch (e) { toast(e.message); } break;
-  case 'ib-open': S.ibSel = S.ibSel === id ? null : id; zeichne(vInbox); if (S.ibSel) $('#it-' + S.ibSel)?.scrollIntoView({behavior: 'smooth', block: 'nearest'}); break;
+  case 'ib-open': if (S.kombi) { const p = D.inbox.find(x => x.id === id); if (!kombinierbar(p)) { toast('Kombinieren geht nur mit PDFs und Bildern.'); break; }
+      S.kombi = S.kombi.includes(id) ? S.kombi.filter(x => x !== id) : [...S.kombi, id]; zeichne(vInbox); break; } S.ibSel = S.ibSel === id ? null : id; zeichne(vInbox); if (S.ibSel) $('#it-' + S.ibSel)?.scrollIntoView({behavior: 'smooth', block: 'nearest'}); break;
   case 'ib-close': S.ibSel = null; zeichne(vInbox); break;
+  case 'tile-kombi': { const p = D.inbox.find(x => x.id === id);
+    if (!kombinierbar(p)) { toast('Kombinieren geht nur mit PDFs und Bildern.'); break; }
+    if (!S.kombi) { S.kombi = [id]; S.ibSel = null; } else if (!S.kombi.includes(id)) S.kombi.push(id); else S.kombi = S.kombi.filter(x => x !== id);
+    zeichne(vInbox); break; }
+  case 'kombi-ab': S.kombi = null; zeichne(vInbox); break;
+  case 'kombi-los': { const ids = [...S.kombi], erstes = D.inbox.find(x => x.id === ids[0]);
+    modal('Zu einem PDF kombinieren', `<p style="margin:0">${ids.length} Dokumente werden in dieser Reihenfolge zu einem PDF zusammengefügt:</p>
+      <ol style="margin:0;padding-left:20px">${ids.map(i => `<li>${esc(D.inbox.find(x => x.id === i)?.titel || '')}</li>`).join('')}</ol>
+      <label>Titel des neuen Dokuments<input id="m-kt" maxlength="160" value="${esc(erstes ? erstes.titel : 'Kombiniertes Dokument')}"></label>
+      <p class="muted" style="margin:0;font-size:12.5px">Die einzelnen Dokumente kommen danach in den Papierkorb und lassen sich von dort wiederherstellen.</p>`, async () => {
+      const titel = val('m-kt').trim() || 'Kombiniertes Dokument'; closeModal();
+      try { toast('Dokumente werden kombiniert …'); const neu = await kombinieren(ids, titel); S.kombi = null; S.ibSel = null; await render();
+        toast(`„${titel}“ erstellt (${ids.length} Teile).`, 'Rückgängig', async () => { for (const i of ids) await api(`dokument/${i}/wiederherstellen`, {}); await api(`dokument/${neu}/loeschen`, {}); toast('Kombinieren rückgängig gemacht.'); await render(); }); }
+      catch (e) { toast('Kombinieren fehlgeschlagen: ' + e.message); }
+      return false; }, 'Kombinieren'); break; }
   case 'tile-view': { const p = D.inbox.find(x => x.id === id); openViewer(id, p ? p.titel : 'Dokument'); break; }
   case 'tile-del': {  // ohne Rückfrage: in den Papierkorb, mit „Rückgängig“ in der Meldung
     const p = D.inbox.find(x => x.id === id);

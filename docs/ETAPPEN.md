@@ -118,6 +118,11 @@ Teil 2 (umgesetzt, Schemaversion 7):
   `dokument`; `migrate_9` baut die Tabelle ohne sie neu (Zugehörigkeit regelt `dokument_vorgang`). Der Scan-Ordner
   liegt jetzt unter `~/DocuManager Scans` (nicht in „Dokumente“, das macOS für Programme gesondert schützt).
   Fehlermeldungen beim Speichern nennen die Ursache.
+- 0.15: Dokumente kombinieren. Dritter Knopf auf den Posteingang-Kacheln startet die Auswahl; Dokumente in der
+  gewünschten Reihenfolge anklicken (nummeriert), „Zu einem PDF kombinieren“. Das PDF entsteht im Browser mit
+  pdf-lib (lokal unter `pdflib/`, MIT): PDF-Seiten werden übernommen, Bilder auf A4 eingepasst, Drehungen
+  berücksichtigt. Das neue Dokument läuft durch die Texterkennung, die Teile kommen in den Papierkorb; „Rückgängig“
+  in der Meldung stellt sie wieder her. Nur PDFs und Bilder lassen sich kombinieren.
 - 0.14.1: Posteingang-Kacheln mit zwei kleinen Knöpfen im Vorschaubild: Lupe (bildschirmfüllende Seitenansicht) und
   Papierkorb (ohne Rückfrage, Meldung mit „Rückgängig“). Die Kachel ist dafür kein `<button>` mehr, sondern ein
   per Maus und Tastatur bedienbares Element mit `role="button"`.

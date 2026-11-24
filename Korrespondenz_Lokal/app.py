@@ -36,7 +36,7 @@ from mail_import import MailImport, migrate_5, test_mail
 
 ROOT = Path(__file__).resolve().parent
 PORT = 8765
-APP_VERSION = "DocuManager 0.14.1 · Löschen und Lupe auf den Kacheln"
+APP_VERSION = "DocuManager 0.15 · Dokumente kombinieren, Löschen und Lupe auf Kacheln"
 MAX_UPLOAD = 25 * 1024 * 1024
 MIN_MACOS = "14.0"
 SCHEMA_VERSION = 13
@@ -940,6 +940,7 @@ class Handler(BaseHTTPRequestHandler):
                   "/chat_notizen.js": ("chat_notizen.js", "text/javascript; charset=utf-8"),
                   "/pdfjs/pdf.min.js": ("pdfjs/pdf.min.js", "text/javascript; charset=utf-8"),
                   "/chatgpt_lesezeichen.js": ("chatgpt_lesezeichen.js", "text/javascript; charset=utf-8"),
+                  "/pdflib/pdf-lib.min.js": ("pdflib/pdf-lib.min.js", "text/javascript; charset=utf-8"),
                   "/pdfjs/pdf.worker.min.js": ("pdfjs/pdf.worker.min.js", "text/javascript; charset=utf-8")}
         if path in static:
             name, mime = static[path]

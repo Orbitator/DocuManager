@@ -1051,7 +1051,7 @@ class Akte:
         """Noch nicht zugeordnete Dokumente mit Vorschlägen für Datum, Absender, Referenz und Vorgang."""
         with closing(self.connect()) as db:
             rows = [dict(r) for r in db.execute("""SELECT d.id,d.titel,d.titel_quelle,d.titel_seite,d.dateiname,d.mime,
-                d.dateipfad,d.ocr_status,d.ocr_fehler,d.angelegt_am,d.dokument_datum,d.datei_datum FROM dokument d
+                d.dateipfad,d.ocr_status,d.ocr_fehler,d.angelegt_am,d.dokument_datum,d.datei_datum,d.drehung_manuell FROM dokument d
                 JOIN vorgang v ON v.id=d.vorgang_id AND v.system='posteingang'
                 WHERE d.geloescht_am IS NULL ORDER BY d.id DESC""")]
             for r in rows:
