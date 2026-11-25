@@ -206,6 +206,15 @@ Erst wenn Schritt 2 bis 4 funktionieren. Die bisherige Anwendung vorher beenden.
    Erscheint „nicht abrufbar“, bitte den genauen Paragrafen melden.
 3. **Zitate prüfen**. Erwartet: Je Vorschrift ein grünes ✓, oranges ! oder rotes ✗ mit kurzer Begründung.
 
+## 16. ChatGPT über Export (ab 0.23)
+
+1. **Einstellungen → KI für Analyse und Texte → ChatGPT** wählen.
+2. Vorgang öffnen, Schreiben anklicken, **ChatGPT** → Aufgabe „Analysieren und rechtlich bewerten“ → **ZIP herunterladen**.
+3. In ChatGPT (Browser oder App) neuen Chat öffnen, ZIP hineinziehen, **Auftrag kopieren** und einfügen.
+4. Antwort von ChatGPT kopieren, im DocuManager-Fenster einfügen, **Übernehmen**. Erwartet: „Analyse gespeichert“.
+5. In ChatGPT um den Brief bitten. Die Antwort einfügen. Erwartet: Der Briefdialog öffnet sich mit Betreff und Text.
+6. Bitte melden, falls ChatGPT das ZIP nicht öffnen kann (dann Akte.md und die PDFs einzeln hochladen).
+
 ## Rückmeldung
 
 Bitte mitteilen:

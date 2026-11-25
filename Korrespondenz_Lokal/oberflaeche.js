@@ -78,6 +78,8 @@ function wvVorschlag(text, ab) {  // füllt die Felder der Erinnerung im geöffn
   $('#m-wvhint').textContent = r.zitat ? `Aus dem Brief erkannt: „${r.zitat}“. Die Erinnerung erscheint ab dem gewählten Tag in der Übersicht.` : 'Keine Frist im Brieftext gefunden – Vorschlag: 14 Tage. Bitte anpassen.';
   return r;
 }
+const kiChat = () => !!(D.claude && D.claude.anbieter === 'chatgpt');  // ChatGPT über Export statt Claude direkt
+const kiName = () => kiChat() ? 'ChatGPT' : 'Claude';
 const dringend = s => (s || '').includes('!');  // Status mit Ausrufezeichen gilt als dringend (Übersicht, Hervorhebung)
 const zuletzt = c => [c.zuletzt || '', c.angelegt_am || ''].map(x => x.replace(' ', 'T')).sort().pop();  // letzte Aktivität
 const statusPill = s => `<span class="pill ${ST_PILL[s] || ''}">${esc(stLabel(s))}</span>`;
@@ -121,6 +123,7 @@ async function loadBase() {
   Object.assign(D, {cases: c.cases, statuses: c.statuses, groups: c.groups, ocr: c.ocr, version: c.version});
   if (c.statuses && c.statuses.length) ST_ORDER = c.statuses;
   D.inbox = (await api('posteingang')).dokumente;
+  try { D.claude = await api('claude'); } catch (_) { /* KI-Einstellung optional */ }
   D.trash = (await api('papierkorb')).eintraege;
   D.arten = (await api('eintragsarten')).arten;
   D.empfaenger = (await api('empfaenger')).empfaenger;
@@ -527,7 +530,7 @@ function chronik() {
       <div class="row2"><span>${k[0]}${wer}</span>${badges.join('')}</div>${chips || acts ? `<div class="row3">${chips}${acts}</div>` : ''}</div></li>`;
   }).join('');
   const types = [['alle','Alle Typen'],['eingang','Eingang'],['ausgang','Versendet'],['entwurf','Entwürfe'],['gespraech','Telefonate & Notizen'],['chat','Chat-Notizen'], ...[...new Set([...(D.arten || []), ...D.akte.eintraege.map(e => e.typ).filter(Boolean)])].map(t => ['typ:' + t, t])];
-  return `<div class="stack" style="gap:6px"><div class="chron-h"><h2>Chronik</h2><span style="display:flex;gap:6px"><button class="btn out sm" data-act="claude" title="Den ganzen Vorgang mit Claude besprechen">${I('ki')}Claude</button><button class="btn out sm" data-act="compose">${I('draft')}Brief</button><button class="btn out sm" data-act="entry-add">${I('plus')}Eintrag</button><button class="btn out sm" data-act="ref-add">${I('plus')}Referenz</button></span></div>
+  return `<div class="stack" style="gap:6px"><div class="chron-h"><h2>Chronik</h2><span style="display:flex;gap:6px"><button class="btn out sm" data-act="claude" title="Den ganzen Vorgang mit ${kiName()} besprechen">${I('ki')}${kiName()}</button><button class="btn out sm" data-act="compose">${I('draft')}Brief</button><button class="btn out sm" data-act="entry-add">${I('plus')}Eintrag</button><button class="btn out sm" data-act="ref-add">${I('plus')}Referenz</button></span></div>
    ${filterBlock([[{lbl: 'Typ', act: 'ktype', aktiv: S.ktype, opt: types}]], '', true)}
    <ul class="chron">${rows || '<li class="muted" style="padding:10px 0">Noch keine Einträge. Dokumente aus dem Posteingang zuordnen oder einen Eintrag anlegen.</li>'}</ul></div>`;
 }
@@ -557,7 +560,7 @@ function preview() {
     ${mail ? '<span class="muted" style="font-size:13px">E-Mail</span>' : `<span class="seg" role="group" aria-label="Ansicht"><button class="${modus === 'original' ? 'on' : ''}" data-act="pv-mode" data-id="original">Original</button><button class="${modus === 'text' ? 'on' : ''}" data-act="pv-mode" data-id="text">Text</button></span>`}
     <span class="pvname" title="${esc(d.dateiname || '')}">${esc(d.dateiname || '')}${d.gedreht ? ` <span class="pill grey" title="Automatisch aufrecht gedreht. Das Original bleibt unverändert.">gedreht</span>` : ''}</span>
     <span class="sp"></span>
-    <button class="btn sm" data-act="claude" data-doc="${d.id}" data-entry="${e.id}" title="Schreiben mit Claude analysieren oder eine Antwort entwerfen lassen">${I('ki')}Claude</button>
+    <button class="btn sm" data-act="claude" data-doc="${d.id}" data-entry="${e.id}" title="Schreiben mit ${kiName()} analysieren oder eine Antwort entwerfen lassen">${I('ki')}${kiName()}</button>
     <button class="iconbtn ${S.pvInfo ? 'on' : ''}" data-act="pv-info" title="Dokumentdetails" aria-label="Dokumentdetails" aria-pressed="${!!S.pvInfo}">${I('info')}</button>
     ${mail ? '' : `<button class="iconbtn" data-act="ocr-retry" data-doc="${d.id}" title="Text neu erkennen" aria-label="Text neu erkennen">${I('refresh')}</button>`}
     ${mail ? '' : `<button class="iconbtn" data-act="drehen" data-grad="-90" data-doc="${d.id}" title="90° nach links drehen" aria-label="90 Grad nach links drehen">${I('rotl')}</button><button class="iconbtn" data-act="drehen" data-grad="90" data-doc="${d.id}" title="90° nach rechts drehen" aria-label="90 Grad nach rechts drehen">${I('rotr')}</button>`}
@@ -679,13 +682,16 @@ async function compose(bezugId, editId, vorschlag) {
     <label>Empfänger<textarea id="m-emp" rows="5" class="cz-emp">${esc(b.empfaenger || (ziele[0] ? ziele[0].text : ''))}</textarea></label>
     <div class="cz-zeile"><label class="cz-schmal">Ihr Zeichen<input id="m-zeichen" value="${esc(b.zeichen || (ref ? ref.wert : ''))}"></label>
      <label>Betreff<input id="m-subj" value="${esc(b.betreff || '')}"></label></div>
-    <div class="ck-brief"><span class="ck-brief-t">${I('ki')}Claude</span>
+    <div class="ck-brief"><span class="ck-brief-t">${I('ki')}${kiName()}</span>
      <button type="button" class="btn sm ghost" data-kiext title="Einschätzung eines Anwalts, einer Beratungsstelle oder einer anderen KI als Grundlage für Analyse und Brief">＋ Einschätzung einbeziehen</button>
-     <button type="button" class="btn sm" data-kib="bewerten">1 · Analysieren &amp; bewerten</button>
+     ${kiChat() ? `<button type="button" class="btn sm" data-gptzip title="ZIP mit Auftrag, Akte und Originalen herunterladen und in ChatGPT hochladen">1 · ZIP für ChatGPT</button>
+     <button type="button" class="btn sm ghost" data-gptkopie title="Auftrag in die Zwischenablage, um ihn in ChatGPT einzufügen">Auftrag kopieren</button>
+     <a class="btn sm ghost" href="https://chatgpt.com/" target="_blank" rel="noopener">ChatGPT öffnen</a>`
+     : `<button type="button" class="btn sm" data-kib="bewerten">1 · Analysieren &amp; bewerten</button>
      <button type="button" class="btn sm" data-kib="${bezug ? 'antwort' : 'schreiben'}" data-stufe2 disabled title="Zuerst analysieren und eine Option wählen">2 · ${bezug ? 'Antwort' : 'Schreiben'} entwerfen</button>
-     <button type="button" class="btn sm ghost" data-kib="ueberarbeiten">Text überarbeiten</button>
+     <button type="button" class="btn sm ghost" data-kib="ueberarbeiten">Text überarbeiten</button>`}
      <input id="m-kianw" placeholder="Vorgabe (optional), z. B. „Ton freundlicher“ oder „Ratenzahlung über 3 Monate anbieten“">
-     <select id="m-kialt" hidden title="Gespeicherte Entwürfe von Claude zu diesem Schreiben"></select></div>
+     <select id="m-kialt" hidden title="Gespeicherte Entwürfe von Claude oder ChatGPT zu diesem Schreiben"></select></div>
     <div id="m-kiext" class="kiext" hidden>
      <p style="margin:0"><b>Einschätzung von anderer Stelle</b> – wird in der Chronik gespeichert und bei jeder Analyse und jedem Entwurf zu diesem Vorgang berücksichtigt.</p>
      <div class="cz-zeile"><label>Von wem?<input id="m-exq" maxlength="80" placeholder="z. B. Rechtsanwalt Müller, Verbraucherzentrale, ChatGPT"></label>
@@ -694,10 +700,12 @@ async function compose(bezugId, editId, vorschlag) {
      ${a.dokumente.length ? `<label>oder ein Dokument dieses Vorgangs<select id="m-exdok"><option value="">– kein Dokument –</option>${a.dokumente.map(d => `<option value="${d.id}">${esc(d.titel)}</option>`).join('')}</select></label>` : ''}
      <div style="display:flex;gap:6px"><button type="button" class="btn sm pri" data-kiexsave>Einbeziehen</button><button type="button" class="btn sm ghost" data-kiext>Abbrechen</button></div></div>
     <div id="m-kiexliste" class="ck-datum" style="text-align:left"></div>
+    ${kiChat() ? `<div class="kiext"><label style="color:var(--fg)">2 · Antwort aus ChatGPT hier einfügen<textarea id="m-gpttext" rows="4" placeholder="Die ganze Antwort einfügen – der Brief wird an BETREFF / BRIEFTEXT / HINWEISE erkannt."></textarea></label>
+     <div><button type="button" class="btn sm pri" data-gptuebernehmen>In den Brief übernehmen</button></div></div>` : ''}
     <div id="m-kibew" class="kibew" hidden></div>
     <label>Brieftext<textarea id="m-body" class="cz-body">${esc(edit ? edit.text || '' : '')}</textarea></label>
     ${anl.length ? `<label>Anlagen</label><div class="stack" style="gap:4px">${anl.map(e => `<label class="chk"><input type="checkbox" class="m-att" value="${esc(e.titel)}" ${(b.anlagen || []).includes(e.titel) ? 'checked' : ''}>${esc(e.titel)} vom ${dt(e.ereignis_datum)}</label>`).join('')}</div>` : ''}
-    <div class="notecard" id="m-kihinweis" style="margin:0;font-size:13px" ${vorschlag && vorschlag.hinweise ? '' : 'hidden'}>${vorschlag && vorschlag.hinweise ? `${I('ki')} <b>Hinweise von Claude:</b> ${esc(vorschlag.hinweise)}` : ''}</div>
+    <div class="notecard" id="m-kihinweis" style="margin:0;font-size:13px" ${vorschlag && vorschlag.hinweise ? '' : 'hidden'}>${vorschlag && vorschlag.hinweise ? `${I('ki')} <b>Hinweise von ${kiName()}:</b> ${esc(vorschlag.hinweise)}` : ''}</div>
     ${edit && edit.versendet_als ? '' : `<div class="stack" style="gap:4px"><label class="chk"><input type="checkbox" id="m-print">Nach dem Speichern drucken</label>
      <label class="chk"><input type="checkbox" id="m-sent">Als versendet in der Chronik erfassen</label>
      <label class="chk"><input type="checkbox" id="m-wv">Erinnerung an die Antwort setzen</label>
@@ -789,7 +797,7 @@ async function compose(bezugId, editId, vorschlag) {
     if (r.erstellt_am) el.insertAdjacentHTML('afterbegin', `<p class="ck-datum" style="text-align:left">Gespeicherte Bewertung vom ${dt(r.erstellt_am.slice(0, 10))}, ${r.erstellt_am.slice(11, 16)} Uhr – „1 · Analysieren“ erstellt eine neue.</p>`);
     el.innerHTML += kontextHinweis(r.kontext) + `<div style="display:flex;gap:6px;margin-top:8px"><button type="button" class="btn sm ghost" data-kinotiz>Bewertung als Notiz speichern</button>
       <button type="button" class="btn sm ghost" data-kizit title="Zitierte Paragrafen am amtlichen Wortlaut prüfen (ca. 1 Cent)">Zitate prüfen</button></div><div class="ck-zit" ${r.zitate ? '' : 'hidden'}>${r.zitate ? zitatErgebnis(r.zitate) : ''}</div>`;
-    box.querySelector('[data-stufe2]').disabled = false; box.querySelector('[data-stufe2]').title = '';
+    const st2 = box.querySelector('[data-stufe2]'); if (st2) { st2.disabled = false; st2.title = ''; }
   };
   const einschaetzungen = () => {  // bereits einbezogene Einschätzungen dieses Vorgangs anzeigen
     const liste = a.eintraege.filter(e => e.typ === 'Einschätzung (extern)');
@@ -808,7 +816,7 @@ async function compose(bezugId, editId, vorschlag) {
       entwuerfe.push(...alle.filter(g => g.daten && g.daten.brieftext));
       if (entwuerfe.length && document.body.contains(box)) {
         const sel = $('#m-kialt'); sel.hidden = false;
-        sel.innerHTML = `<option value="">Frühere Entwürfe von Claude (${entwuerfe.length}) …</option>` + entwuerfe.map((g, i) =>
+        sel.innerHTML = `<option value="">Frühere KI-Entwürfe (${entwuerfe.length}) …</option>` + entwuerfe.map((g, i) =>
           `<option value="${i}">${dt(g.erstellt_am.slice(0, 10))} ${g.erstellt_am.slice(11, 16)} · ${esc((g.daten.betreff || '').slice(0, 60))}</option>`).join('');
       }
     } catch (_) { /* ohne Ablage weiter */ }
@@ -817,6 +825,21 @@ async function compose(bezugId, editId, vorschlag) {
   pvZoom(S.pvZoom || 1);
   box.addEventListener('click', async ev => {
     const zb = ev.target.closest('[data-pvz]'); if (zb) { pvZoom((S.pvZoom || 1) + 0.1 * +zb.dataset.pvz); return; }
+    if (ev.target.closest('[data-gptzip]')) { location.href = gptUrl(a.id, {dokument_id: bezug ? bezug.dokument_id : '', aufgabe: bezug ? 'antwort' : 'schreiben', vorgabe: val('m-kianw'), bewertung_id: S.kiBewertung[bewKey]?.id || ''}); return; }
+    if (ev.target.closest('[data-gptkopie]')) { await gptKopieren(a.id, {dokument_id: bezug ? bezug.dokument_id : null, aufgabe: bezug ? 'antwort' : 'schreiben', vorgabe: val('m-kianw'), bewertung_id: S.kiBewertung[bewKey]?.id || null}); return; }
+    if (ev.target.closest('[data-gptuebernehmen]')) {
+      try {
+        const r = await api('chatgpt/uebernehmen', {vorgang_id: a.id, dokument_id: bezug ? bezug.dokument_id : null, aufgabe: 'antwort', text: val('m-gpttext')});
+        if (r.brieftext) {
+          if ($('#m-body').dataset.touched && !confirm('Den bisherigen Brieftext durch den Brief aus ChatGPT ersetzen?')) return;
+          if (r.betreff) $('#m-subj').value = r.betreff; $('#m-body').value = r.brieftext; $('#m-body').dataset.touched = '1'; upd();
+          const h = $('#m-kihinweis'); h.hidden = !r.hinweise; h.innerHTML = r.hinweise ? `${I('ki')} <b>Hinweise von ChatGPT:</b> ${esc(r.hinweise)}` : '';
+          $('#m-gpttext').value = ''; toast('Brief aus ChatGPT übernommen und gespeichert.');
+        } else { S.kiBewertung[bewKey] = {id: r.id, text: r.text}; zeigeBewertung(S.kiBewertung[bewKey]); $('#m-gpttext').value = '';
+          toast('Kein Brief erkannt (Markierungen BETREFF/BRIEFTEXT fehlen). Als Analyse gespeichert – sie geht ins nächste ZIP mit.'); }
+      } catch (err) { toast(err.message); }
+      return;
+    }
     if (ev.target.closest('[data-kiext]')) { const p = $('#m-kiext'); p.hidden = !p.hidden; if (!p.hidden) $('#m-exq').focus(); return; }
     if (ev.target.closest('[data-kiexsave]')) {
       const quelle = val('m-exq').trim(), text = val('m-ext').trim(), dok = $('#m-exdok') ? val('m-exdok') : '';
@@ -862,7 +885,7 @@ async function compose(bezugId, editId, vorschlag) {
       if (aufgabe === 'bewerten') { S.kiBewertung[bewKey] = r; zeigeBewertung(r); $('#m-kibew').scrollIntoView({block: 'nearest'}); throw null; }
       if (r.betreff) $('#m-subj').value = r.betreff;
       $('#m-body').value = r.brieftext || r.text; $('#m-body').dataset.touched = '1'; upd();
-      const h = $('#m-kihinweis'); h.hidden = !(r.hinweise || r.kontext); h.innerHTML = (r.hinweise ? `${I('ki')} <b>Hinweise von Claude:</b> ${esc(r.hinweise)}` : '') + kontextHinweis(r.kontext);
+      const h = $('#m-kihinweis'); h.hidden = !(r.hinweise || r.kontext); h.innerHTML = (r.hinweise ? `${I('ki')} <b>Hinweise von ${kiName()}:</b> ${esc(r.hinweise)}` : '') + kontextHinweis(r.kontext);
     } catch (err) { if (err) toast(err.message); }
     delete box.dataset.ki; knoepfe.forEach(b => b.disabled = false); k.innerHTML = alt;
     zweiter.disabled = war2 && !S.kiBewertung[bewKey];
@@ -1148,6 +1171,9 @@ function vSettings() {
     <p class="muted" style="margin:0;font-size:12.5px">Benutzung: Chat in ChatGPT im Browser öffnen (nicht in der ChatGPT-App), Lesezeichen anklicken, im DocuManager-Fenster Vorgang und Dateien wählen. Klappt das Ziehen nicht: „Adresse kopieren“, ein beliebiges Lesezeichen anlegen und dessen Adresse durch die kopierte ersetzen.</p></div>
    <div class="panel stack"><h2>Zulässige Empfänger</h2><p style="margin:0">Für wen Post ankommt, z. B. Ihre Firma und Sie persönlich, ein Name pro Zeile. Die Erkennung ordnet jedes Schreiben dem Empfänger zu, der im Anschriftenfeld steht; im Archiv lässt sich danach gruppieren.</p>
     <textarea id="empflist" class="inp" rows="3" placeholder="Orbit Cross media e.K.&#10;Sven Muster">${esc((D.empfaenger || []).join('\n'))}</textarea><div><button class="btn" data-act="empf-save">Speichern</button></div></div>
+   <div class="panel stack"><h2>KI für Analyse und Texte</h2>
+    <label class="radio"><input type="radio" name="kianbieter" value="claude" ${kiChat() ? '' : 'checked'}><span><b>Claude</b> – direkt in DocuManager (eigener Zugangsschlüssel, siehe unten). Analyse und Entwurf per Knopfdruck.</span></label>
+    <label class="radio"><input type="radio" name="kianbieter" value="chatgpt" ${kiChat() ? 'checked' : ''}><span><b>ChatGPT</b> – über Export: DocuManager erstellt je Vorgang ein ZIP mit Auftrag, Akte und Originalen. Sie laden es in ChatGPT hoch, arbeiten dort und fügen die Antwort wieder ein. Kein Schlüssel nötig, es gilt Ihr ChatGPT-Abo.</span></label></div>
    <div class="panel stack"><h2>Claude (KI-Analyse)</h2><p style="margin:0">Mit einem eigenen Zugangsschlüssel von Anthropic analysiert Claude Schreiben und entwirft Antworten – direkt im Vorgang über die Schaltfläche „Claude“. Den Schlüssel erstellen Sie unter <b>console.anthropic.com</b> → API Keys (Guthaben nötig; eine Analyse kostet meist wenige Cent).</p>
     ${D.claude && D.claude.eingerichtet ? `<p style="margin:0">${I('check')} Eingerichtet · Schlüssel endet auf <code>…${esc(D.claude.endung)}</code></p><div style="display:flex;gap:8px"><button class="btn" data-act="claude-key">Schlüssel ändern</button><button class="btn ghost" data-act="claude-key-del">Entfernen</button></div>`
       : `<div style="display:flex;gap:8px;flex-wrap:wrap"><input id="claudekey" class="inp" type="password" autocomplete="off" placeholder="sk-ant-…" style="flex:1;min-width:240px"><button class="btn" data-act="claude-key-save">Speichern</button></div>`}
@@ -1354,6 +1380,58 @@ async function claudeDialog(docId, entryId) {
     }
   });
   box.addEventListener('keydown', ev => { if (ev.target.id === 'ck-frage' && ev.key === 'Enter' && (ev.metaKey || ev.ctrlKey)) fragen('frage'); });
+}
+// ---------- ChatGPT über Export ----------
+const gptUrl = (vorgang, p) => `/api/akte/${vorgang}/chatgpt.zip?` + new URLSearchParams(Object.entries(p).map(([k, v]) => [k, v ?? ''])).toString();
+async function gptKopieren(vorgang, p) {
+  let text = '';
+  try { text = (await api(`akte/${vorgang}/chatgpt/auftrag`, p)).auftrag; await navigator.clipboard.writeText(text); toast('Auftrag kopiert. In ChatGPT einfügen.'); }
+  catch (_) {  // Zwischenablage gesperrt: Text zum manuellen Kopieren anzeigen
+    const box = document.createElement('div'); box.id = 'normpop';
+    box.innerHTML = `<div class="np-kopf"><b>Auftrag für ChatGPT</b><button type="button" class="iconbtn" data-act="norm-zu">✕</button></div><p class="muted">Mit ⌘A markieren und ⌘C kopieren.</p><textarea style="width:100%;height:80%">${esc(text)}</textarea>`;
+    $('#normpop')?.remove(); document.body.append(box); box.querySelector('textarea').select();
+  }
+}
+async function chatgptDialog(docId, entryId) {
+  const a = D.akte, d = docId ? a.dokumente.find(x => x.id === docId) : null, e = entryId ? a.eintraege.find(x => x.id === entryId) : null;
+  let alle = [];
+  try { alle = (await api('claude/verlauf', {vorgang_id: a.id, dokument_id: docId})).ergebnisse.filter(g => docId || !g.dokument_id); } catch (_) { /* leer */ }
+  const bewertung = () => alle.find(g => g.aufgabe === 'bewerten');
+  modal('ChatGPT · ' + (d ? d.titel : a.titel), `<div class="claude">
+    <ol class="gpt-schritte"><li>Aufgabe wählen und <b>ZIP herunterladen</b>.</li><li>In ChatGPT einen neuen Chat öffnen, das ZIP hineinziehen und den <b>Auftrag einfügen</b> (er liegt auch als erste Datei im ZIP). Dort analysieren, nachfragen, Brief erstellen lassen.</li><li>Die Antwort von ChatGPT unten <b>einfügen und übernehmen</b>.</li></ol>
+    <div class="cz-zeile"><label>Aufgabe<select id="g-auf"><option value="bewerten">Analysieren und rechtlich bewerten</option>${e && e.art === 'eingang' || d ? '<option value="antwort">Antwort entwerfen</option>' : '<option value="schreiben">Schreiben entwerfen</option>'}<option value="frage">Eigene Frage</option></select></label></div>
+    <label>Vorgabe oder Frage (optional)<input id="g-vor" placeholder="z. B. „Ist die Forderung verjährt?“ oder „Ratenzahlung anbieten“"></label>
+    <div style="display:flex;gap:6px;flex-wrap:wrap"><button type="button" class="btn pri" data-g="zip">1 · ZIP herunterladen</button><button type="button" class="btn" data-g="kopie">Auftrag kopieren</button><a class="btn ghost" href="https://chatgpt.com/" target="_blank" rel="noopener">ChatGPT öffnen</a></div>
+    <label>3 · Antwort aus ChatGPT einfügen<textarea id="g-text" rows="8" placeholder="Die ganze Antwort einfügen. Briefe werden an BETREFF / BRIEFTEXT / HINWEISE erkannt, alles andere als Analyse gespeichert."></textarea></label>
+    <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center"><button type="button" class="btn pri" data-g="ueber">Übernehmen</button><label class="chk"><input type="checkbox" id="g-notiz">zusätzlich als Notiz in die Chronik</label></div>
+    <div id="g-verlauf"></div></div>`, null, '', 'wide');
+  const box = document.querySelector('.modal');
+  const param = () => ({dokument_id: docId || '', aufgabe: val('g-auf'), vorgabe: val('g-vor'), bewertung_id: val('g-auf') !== 'bewerten' && bewertung() ? bewertung().id : ''});
+  const liste = () => {
+    const gpt = alle.filter(g => g.stufe === 'ChatGPT');
+    $('#g-verlauf').innerHTML = gpt.length ? `<h3 style="margin:8px 0 4px;font-size:14px">Bisher aus ChatGPT übernommen</h3>` + gpt.map((g, i) => `<details class="gpt-alt"><summary>${dt(g.erstellt_am.slice(0, 10))} ${g.erstellt_am.slice(11, 16)} · ${esc(g.daten && g.daten.betreff ? 'Brief: ' + g.daten.betreff : g.frage || 'Analyse')}</summary>
+      <div class="ck-text">${claudeText(g.antwort)}</div><div style="display:flex;gap:6px;margin-top:6px">${g.daten && g.daten.brieftext ? `<button type="button" class="btn sm" data-g="brief" data-i="${i}">${I('draft')}Als Brief übernehmen</button>` : ''}<button type="button" class="btn sm ghost" data-g="weg" data-i="${i}">Entfernen</button></div></details>`).join('') : '';
+  };
+  liste();
+  const briefOeffnen = g => { closeModal(); compose(e && e.art === 'eingang' ? e.id : null, null, {betreff: g.daten.betreff, brieftext: g.daten.brieftext, hinweise: g.daten.hinweise}); };
+  box.addEventListener('click', async ev => {
+    const k = ev.target.closest('[data-g]'); if (!k) return;
+    const gpt = alle.filter(g => g.stufe === 'ChatGPT');
+    if (k.dataset.g === 'zip') location.href = gptUrl(a.id, param());
+    else if (k.dataset.g === 'kopie') await gptKopieren(a.id, param());
+    else if (k.dataset.g === 'brief') briefOeffnen(gpt[+k.dataset.i]);
+    else if (k.dataset.g === 'weg') { try { await api(`claude/ergebnisse/${gpt[+k.dataset.i].id}/loeschen`, {}); alle = alle.filter(g => g !== gpt[+k.dataset.i]); liste(); } catch (err) { toast(err.message); } }
+    else if (k.dataset.g === 'ueber') {
+      try {
+        const text = val('g-text'), r = await api('chatgpt/uebernehmen', {vorgang_id: a.id, dokument_id: docId, aufgabe: val('g-auf'), text, frage: val('g-vor')});
+        if ($('#g-notiz').checked) await api(`akte/${a.id}/eintraege`, {art: 'notiz', titel: ('ChatGPT: ' + (r.betreff ? 'Brief „' + r.betreff + '“' : val('g-vor') || 'Analyse') + (d ? ' – ' + d.titel : '')).slice(0, 190), text, bezug_id: e ? e.id : null, teile: e ? e.teile : []});
+        if (r.brieftext) { toast('Brief erkannt und gespeichert.'); briefOeffnen({daten: r}); return; }
+        alle.unshift({id: r.id, stufe: 'ChatGPT', aufgabe: r.aufgabe, frage: val('g-vor') || 'Analyse aus ChatGPT', antwort: r.text, daten: null, erstellt_am: new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 16).replace('T', ' ')});
+        $('#g-text').value = ''; liste(); toast('Analyse gespeichert. Sie geht in das nächste ZIP und in den Briefdialog mit.');
+        if ($('#g-notiz').checked) await render();
+      } catch (err) { toast(err.message); }
+    }
+  });
 }
 function versandModal(e) {
   const a = D.akte, k = D.kontakte.find(x => x.id === e.kontakt_id);
@@ -1666,7 +1744,7 @@ document.addEventListener('click', async ev => {
   case 'backup-check': { const r = await api(`sicherungen/${el.dataset.name}/pruefen`, {}); toast(r.ok ? `In Ordnung: ${r.anzahl.vorgang} Vorgänge, ${r.anzahl.dokument} Dokumente, ${r.dateien} Dateien.` : 'Fehler: ' + r.fehler.join('; ')); break; }
   case 'norm': normZeigen(el.dataset.z); break;
   case 'norm-zu': $('#normpop').hidden = true; break;
-  case 'claude': claudeDialog(el.dataset.doc ? +el.dataset.doc : null, el.dataset.entry ? +el.dataset.entry : null); break;
+  case 'claude': (kiChat() ? chatgptDialog : claudeDialog)(el.dataset.doc ? +el.dataset.doc : null, el.dataset.entry ? +el.dataset.entry : null); break;
   case 'claude-key': D.claude.eingerichtet = false; await render(); $('#claudekey')?.focus(); break;
   case 'claude-key-save': await act(async () => { D.claude = await api('claude/schluessel', {schluessel: val('claudekey')}); }, 'Zugangsschlüssel gespeichert.'); break;
   case 'claude-key-del': await act(async () => { D.claude = await api('claude/schluessel', {schluessel: ''}); }, 'Zugangsschlüssel entfernt.'); break;
@@ -1684,6 +1762,7 @@ document.addEventListener('change', async ev => {
   const el = ev.target;
   if (el.dataset.change === 'v-status') await statusSetzen(null, el.value, render);
   if (el.dataset.change === 't-status') await statusSetzen(+el.dataset.id, el.value, render);
+  if (el.name === 'kianbieter') { await act(async () => { D.claude = await api('ki/anbieter', {anbieter: el.value}); }, el.value === 'chatgpt' ? 'ChatGPT über Export gewählt.' : 'Claude gewählt.'); return; }
   if (el.id === 'claudestufe') await act(async () => { D.claude = await api('claude/stufe', {stufe: el.value}); }, 'Gespeichert.');
   if (el.id === 'mailflag') await act(() => api('mail/markierung', {markierung: +el.value}), 'Markierung gespeichert.');
   if (el.id === 'fileinp') { const files = [...el.files]; el.value = ''; await importFiles(files, el.dataset.ziel === 'archiv' ? 'archiv' : el.dataset.ziel ? +el.dataset.ziel : null); }

@@ -544,3 +544,6 @@ button.norm{font:inherit;color:var(--accent,#2f4bd0);background:none;border:0;pa
 .dringend-panel h2{display:flex;align-items:center;gap:6px;color:var(--crit)}
 .dringend-panel .mini li{gap:8px}.dringend-panel .pill{white-space:nowrap}
 .st-dringend{color:var(--crit)}
+.gpt-schritte{margin:0;padding-left:20px;font-size:13.5px;display:flex;flex-direction:column;gap:3px}
+.gpt-alt{border:1px solid var(--line);border-radius:8px;padding:6px 10px;margin-bottom:6px;background:var(--surface)}.gpt-alt summary{cursor:pointer;font-size:13px}
+.compose .kiext textarea{min-height:0}

@@ -38,7 +38,7 @@ from mail_import import MailImport, migrate_5, test_mail
 
 ROOT = Path(__file__).resolve().parent
 PORT = 8765
-APP_VERSION = "DocuManager 0.22.0 · Erinnerung an Antworten"
+APP_VERSION = "DocuManager 0.23.0 · Wahl der KI, ChatGPT über Export"
 MAX_UPLOAD = 25 * 1024 * 1024
 MIN_MACOS = "14.0"
 SCHEMA_VERSION = 16
@@ -908,6 +908,16 @@ class Handler(BaseHTTPRequestHandler):
     restore_lock = Lock()
     claude = None
     gesetze = None
+
+    def _chatgpt(self, vorgang_id, daten):
+        """Paket für ChatGPT aus Abfrage- oder JSON-Angaben: dokument_id, aufgabe, vorgabe, bewertung_id."""
+        from chatgpt_paket import paket
+        dok = int(daten["dokument_id"]) if str(daten.get("dokument_id") or "").isdigit() else None
+        bewertung = ""
+        if str(daten.get("bewertung_id") or "").isdigit():
+            treffer = [g for g in self.claude.verlauf(vorgang_id) if g["id"] == int(daten["bewertung_id"])]
+            bewertung = treffer[0]["antwort"] if treffer else ""
+        return paket(self.claude, vorgang_id, dok, str(daten.get("aufgabe") or "bewerten"), str(daten.get("vorgabe") or "")[:2000], bewertung)
     server_ref = None
     scanordner = None
     scanner = None
@@ -1010,6 +1020,13 @@ class Handler(BaseHTTPRequestHandler):
             self.send_json({"pfad": str(ordner), "zuletzt": self.scanordner.zuletzt if self.scanordner else None})
         elif path == "/api/mail":
             self.send_json(self.mail.status())
+        elif match := re.fullmatch(r"/api/akte/(\d+)/chatgpt\.zip", path):  # Paket für ChatGPT
+            try:
+                name, inhalt, _ = self._chatgpt(int(match[1]), dict(parse_qsl(urlsplit(self.path).query)))
+            except ValueError as error:
+                self.send_json({"error": str(error)}, 404)
+                return
+            self.send_bytes(200, "application/zip", inhalt, "attachment; filename*=" + encode_rfc2231(name, "utf-8"))
         elif match := re.fullmatch(r"/api/akte/(\d+)/export", path):
             query = dict(parse_qsl(urlsplit(self.path).query))
             auswahl = None if query.get("docs", "alle") == "alle" else {int(x) for x in query["docs"].split(",") if x.isdigit()}
@@ -1195,6 +1212,15 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_json({"ergebnisse": self.claude.verlauf(int(daten["vorgang_id"]), daten.get("dokument_id"), daten.get("aufgabe"))})
             elif match := re.fullmatch(r"/api/claude/ergebnisse/(\d+)/loeschen", path):
                 self.send_json(self.claude.ergebnis_loeschen(int(match[1])))
+            elif path == "/api/ki/anbieter":
+                self.send_json(self.claude.anbieter_setzen(json.loads(self.read_body(4000)).get("anbieter")))
+            elif path == "/api/chatgpt/uebernehmen":  # eingefügte Antwort aus ChatGPT
+                daten = json.loads(self.read_body(400_000))
+                self.send_json(self.claude.uebernehmen(int(daten["vorgang_id"]), int(daten["dokument_id"]) if daten.get("dokument_id") else None,
+                                                       daten.get("aufgabe") or "bewerten", daten.get("text"), daten.get("frage") or ""))
+            elif match := re.fullmatch(r"/api/akte/(\d+)/chatgpt/auftrag", path):  # Auftragstext zum Kopieren
+                daten = json.loads(self.read_body(20000))
+                self.send_json({"auftrag": self._chatgpt(int(match[1]), daten)[2]})
             elif path == "/api/claude/stufe":
                 self.send_json(self.claude.stufe_setzen(json.loads(self.read_body(4000)).get("stufe")))
             elif path == "/api/claude/schluessel":

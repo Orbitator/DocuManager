@@ -194,6 +194,13 @@ Teil 2 (umgesetzt, Schemaversion 7):
   mit `erinnern_am` und Bezug auf den Brief (`eintrag_id`, `migrate_16`). Übersicht: Kennzahl „Erinnerungen“, Panel
   „Fristen und Erinnerungen“ zeigt auch weiter entfernte Antworttage ab dem Erinnerungsdatum. Fristzeile: 🔔, Hinweis
   „Neuer Eingang am … – Antwort da?“ und nach Ablauf ohne Eingang „nachfassen?“. Fristdialog mit „Erinnern ab“.
+- 0.23.0: **Wahl der KI** (Einstellungen → KI für Analyse und Texte; `einstellung.ki_anbieter`). „ChatGPT“ arbeitet ohne
+  Schnittstelle (`chatgpt_paket.py`): je Vorgang ein ZIP mit „00 Auftrag – zuerst lesen.md“ (Rolle, Stand, Aufgabe,
+  Vorgabe, ggf. bisherige Bewertung, Pflichtformat für Briefe mit === BETREFF / BRIEFTEXT / HINWEISE / ENDE ===),
+  „Akte.md“ (dieselbe Aufbereitung wie für Claude: Stand, Volltexte D…, Faktenregister, Chronik) und den Originalen
+  (Dokumente/D<Nr> …). Rückweg: Antwort einfügen; Briefe werden erkannt und in den Briefdialog übernommen, sonst als
+  Analyse gespeichert (`ki_ergebnis`, Stufe „ChatGPT“), optional als Notiz. Briefdialog im ChatGPT-Modus: ZIP, Auftrag
+  kopieren, ChatGPT öffnen, Antwort einfügen. Der Knopf im Vorgang heißt je nach Wahl „Claude“ oder „ChatGPT“.
 - 0.16: Scannen ohne Dialog. „Scannen“ scannt sofort mit dem zuletzt benutzten Scanner (`Daten/scanner.json`):
   Einzug wenn vorhanden, sonst Glas; beidseitig, wenn möglich; 300 dpi Farbe. Die Seiten werden mit PDFKit zu einem
   komprimierten PDF zusammengefügt (leere Rückseiten fallen weg) und landen im Posteingang bzw. Archiv. Nur ein kleines

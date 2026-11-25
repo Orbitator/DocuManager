@@ -51,6 +51,10 @@ Die bisherigen Schnittstellen (`/api/cases`, Dokumente, Scan, Chat) bleiben unve
 | POST `/api/claude/verlauf` | `vorgang_id`, optional `dokument_id`, `aufgabe` → `ergebnisse` (neueste zuerst; `frage`, `antwort`, `daten`, `kontext`, `zitate`, `erstellt_am`) |
 | POST `/api/claude/ergebnisse/{id}/loeschen` | gespeichertes Ergebnis entfernen |
 | GET/POST `/api/statusliste` | `statuses` (Reihenfolge), optional `umbenennen` {alt: neu}; feste Werte bleiben |
+| POST `/api/ki/anbieter` | `anbieter` (claude, chatgpt) |
+| GET `/api/akte/{id}/chatgpt.zip` | `dokument_id`, `aufgabe`, `vorgabe`, `bewertung_id` → ZIP mit Auftrag, Akte.md, Originalen |
+| POST `/api/akte/{id}/chatgpt/auftrag` | dieselben Angaben → `auftrag` (Text zum Einfügen) |
+| POST `/api/chatgpt/uebernehmen` | `vorgang_id`, `dokument_id`, `aufgabe`, `text`, `frage` → Brief erkannt (`betreff`, `brieftext`, `hinweise`) oder Analyse gespeichert |
 | POST `/api/claude/stufe` | `stufe` (gruendlich, ausgewogen, sparsam) |
 | POST `/api/claude/schluessel` | `schluessel` (leer = entfernen); Ablage in `Daten/claude_schluessel` |
 | POST `/api/claude/fragen` | `vorgang_id`, `dokument_id` (optional), `verlauf` [{`rolle`: user/assistant, `text`}], `aufgabe` (frage, zusammenfassen, fristen, pruefen, bewerten, antwort, schreiben, ueberarbeiten), optional `anweisung`, `entwurf`, `empfaenger`, `bewertung` (Text), `option`; bei `bewerten` zusätzlich `bewertung` (zusammenfassung, rechtliche_bewertung, fristen, risiken, fehlende_angaben, optionen) → `text`, `kontext` (`eintraege`, `eigene_schreiben`, `dokumente`, `ohne_text`, `gekuerzt`); bei `antwort` zusätzlich `betreff`, `brieftext`, `hinweise` |

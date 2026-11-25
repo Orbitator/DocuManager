@@ -232,7 +232,36 @@ class ClaudeKI:
     def status(self):
         s = self.schluessel()
         return {"eingerichtet": bool(s), "endung": s[-4:] if s else None, "stufe": self.stufe(),
-                "stufen": {k: v["name"] for k, v in STUFEN.items()}}
+                "stufen": {k: v["name"] for k, v in STUFEN.items()}, "anbieter": self.anbieter()}
+
+    # --- Wahl der KI: Claude direkt oder ChatGPT über Export/Einfügen ------------------------
+    def anbieter(self):
+        with closing(self.store.connect()) as db:
+            row = db.execute("SELECT wert FROM einstellung WHERE schluessel='ki_anbieter'").fetchone()
+        return row[0] if row and row[0] in ("claude", "chatgpt") else "claude"
+
+    def anbieter_setzen(self, anbieter):
+        if anbieter not in ("claude", "chatgpt"):
+            raise ValueError("Unbekannter Anbieter.")
+        with closing(self.store.connect()) as db, db:
+            db.execute("INSERT OR REPLACE INTO einstellung(schluessel,wert) VALUES('ki_anbieter',?)", (anbieter,))
+        return self.status()
+
+    def uebernehmen(self, vorgang_id, dokument_id, aufgabe, text, frage=""):
+        """Antwort aus ChatGPT übernehmen: Brief erkennen, sonst als Analyse speichern (Verlauf wie bei Claude)."""
+        from chatgpt_paket import auswerten
+        text = str(text or "").strip()
+        if not text:
+            raise ValueError("Bitte die Antwort aus ChatGPT einfügen.")
+        self.akte.akte(vorgang_id)  # prüft, dass es den Vorgang gibt
+        brief = auswerten(text)
+        aufgabe = "antwort" if brief else (aufgabe if aufgabe in ("bewerten", "frage", "zusammenfassen", "pruefen") else "bewerten")
+        ergebnis = {"text": text[:100000], "aufgabe": aufgabe, "kontext": {"stufe": "ChatGPT"}}
+        if brief:
+            ergebnis.update(brief)
+        ergebnis["id"] = self._speichern(vorgang_id, dokument_id, "chatgpt", aufgabe,
+                                         frage or ("Brief aus ChatGPT" if brief else "Analyse aus ChatGPT"), ergebnis, "ChatGPT")
+        return ergebnis
 
     # --- Kontext aus dem Vorgang --------------------------------------------------------
     def kontext(self, vorgang_id, dokument_id=None):
@@ -662,6 +691,15 @@ def test_claude(store):
     akte.statusliste_setzen(["Offen", "Verhandlung", "Schreiben verfassen", "Schreiben abgeschickt", "Erledigt"],
                             {"Klage eingereicht": "Verhandlung"})
     assert akte.akte(v)["status"] == "Verhandlung"
+    # ChatGPT über Export: Paket, Auftrag, Übernahme der Antwort
+    from chatgpt_paket import test_chatgpt
+    test_chatgpt(ki, v, d)
+    assert ki.anbieter() == "claude" and ki.anbieter_setzen("chatgpt")["anbieter"] == "chatgpt"
+    r = ki.uebernehmen(v, d, "antwort", "=== BETREFF ===\nWiderspruch\n=== BRIEFTEXT ===\nSehr geehrte Damen und Herren,\n\nnein.\n=== ENDE ===")
+    assert r["betreff"] == "Widerspruch" and ki.verlauf(v, d)[0]["daten"]["brieftext"].endswith("nein.")
+    r = ki.uebernehmen(v, d, "bewerten", "Die Forderung ist unbegründet, weil …")
+    assert r["aufgabe"] == "bewerten" and ki.verlauf(v, d, "bewerten")[0]["stufe"] == "ChatGPT"
+    ki.anbieter_setzen("claude")
     # Erinnerung: Wiedervorlage zum Brief mit Erinnerungsdatum, Hinweis auf späteren Eingang
     import time
     brief = akte.eintrag_anlegen(v, {"art": "entwurf", "titel": "Aufforderung", "datum": "2026-11-24", "text": "Antwort binnen 10 Tagen."})
@@ -687,7 +725,7 @@ def test_claude(store):
     ki.senden = lambda anfrage, s: (gesendet.append((anfrage, s)) or {"stop_reason": "end_turn", "usage": {"input_tokens": 100, "output_tokens": 50},
         "content": [{"type": "text", "text": json.dumps({"pruefungen": [{"vorschrift": "§ 362 BGB", "ergebnis": "passt", "begruendung": "Erfüllung."}]})}]})
     r = ki.zitate_pruefen("Die Forderung ist nach § 362 Abs. 1 BGB erloschen.", g, gespeichert["id"])
-    assert ki.verlauf(v, d, "bewerten")[0]["zitate"]["pruefungen"][0]["ergebnis"] == "passt"
+    assert next(g for g in ki.verlauf(v, d, "bewerten") if g["id"] == gespeichert["id"])["zitate"]["pruefungen"][0]["ergebnis"] == "passt"
     anfrage = gesendet[-1][0]
     assert len(gesendet) == vorher + 1 and "Schuldverhältnis erlischt" in anfrage["messages"][0]["content"]
     assert "AKTE" not in json.dumps(anfrage) and r["pruefungen"][0]["ergebnis"] == "passt" and r["kosten_usd"] > 0
