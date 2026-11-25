@@ -1,0 +1,2 @@
+pdf-lib 1.17.1 (Andrew Dillon, MIT), UMD-Build aus dem npm-Paket pdf-lib.
+Wird lokal ausgeliefert, um Dokumente im Browser zu einem PDF zu kombinieren.

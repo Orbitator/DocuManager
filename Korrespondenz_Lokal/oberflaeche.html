@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Korrespondenz</title>
+<link rel="stylesheet" href="/oberflaeche.css">
+</head>
+<body>
+<div class="app">
+  <aside class="side">
+    <div class="brand"><svg class="i" viewBox="0 0 24 24"><path d="M3 13l3-8h12l3 8v6a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1z"/><path d="M3 13h5l1 3h6l1-3h5"/></svg>Korrespondenz</div>
+    <nav class="nav" id="nav" aria-label="Hauptmenü"></nav>
+    <div class="side-foot">
+      <a class="btn ghost" href="#papierkorb" id="trashlink">Papierkorb</a>
+      <a class="btn ghost" href="#einstellungen">Einstellungen</a>
+      <button class="btn ghost" data-act="beenden" style="justify-content:flex-start">Beenden</button>
+      <small id="version"></small>
+    </div>
+  </aside>
+  <div class="main">
+    <div id="parkplatz" hidden><span id="werkzeuge">
+      <div class="search"><button class="iconbtn" data-act="suche-auf" title="Dokumente und Akten suchen" aria-label="Suchen"><svg class="i" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg></button>
+        <svg class="i" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+        <input id="q" type="search" placeholder="Dokumente und Aktenzeichen suchen" autocomplete="off" aria-label="Suche">
+        <div class="results" id="results" hidden></div>
+      </div>
+      <div class="imp"><button class="btn pri" data-act="import" aria-haspopup="menu" aria-expanded="false" id="impbtn">Dokument importieren <svg class="i" viewBox="0 0 24 24" style="width:16px;height:16px"><path d="m6 9 6 6 6-6"/></svg></button>
+        <div class="impmenu" id="impmenu" role="menu" hidden>
+          <button role="menuitem" data-act="imp-file"><b>Datei auswählen …</b><small>PDF, Bild, Word (.docx) oder E-Mail (.eml) bis 25 MB</small></button>
+          <button role="menuitem" data-act="imp-scan"><b>Scannen</b><small>Sofort mit dem gewohnten Scanner, ohne Dialog</small></button>
+          <button role="menuitem" data-act="imp-scan-dialog"><b>Scannen mit Einstellungen …</b><small>Scan-Dialog von macOS</small></button>
+          <button role="menuitem" data-act="scan-folder"><b>Scan-Ordner öffnen</b><small>Für „Digitale Bilder“ und Scanner-Software</small></button>
+          <button role="menuitem" data-act="mail-get"><b>Aus Apple Mail holen</b><small>E-Mails mit der Markierung „Erfasster Beleg“</small></button>
+        </div></div>
+    </span></div>
+      <input type="file" id="fileinp" multiple accept=".pdf,.jpg,.jpeg,.png,.tif,.tiff,.docx,.eml" hidden>
+      <input type="file" id="chatinp" accept=".zip,.json,application/zip,application/json" hidden>
+      <input type="file" id="restoreinp" accept=".zip,application/zip" hidden>
+    <main class="view" id="view"><p class="muted">Wird geladen …</p></main>
+  </div>
+</div>
+<div id="modalroot"></div>
+<div id="selpop" hidden>
+  <button data-act="sel" data-k="frist">Als Frist</button>
+  <button data-act="sel" data-k="ref">Als Aktenzeichen</button>
+  <button data-act="sel" data-k="datum">Als Dokumentdatum</button>
+  <button data-act="sel" data-k="notiz">Als Notiz</button>
+</div>
+<div id="viewer" hidden role="dialog" aria-modal="true" aria-label="Originalansicht"></div>
+<div id="toast" hidden role="status"></div>
+<script src="/oberflaeche.js"></script>
+</body>
+</html>

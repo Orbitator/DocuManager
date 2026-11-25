@@ -1,0 +1,918 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="description" content="Klickbarer Prototyp einer lokalen Korrespondenzverwaltung mit Beispieldaten für Muster-Kfz und Musterfirma.">
+<title>Korrespondenz · Klickprototyp</title>
+<style>
+:root{color-scheme:light;--ink:#1a2031;--muted:#535d70;--line:#dfe3ec;--blue:#2746ad;--blue-bg:#eef1ff;--rail:#f6f6f9;--white:#fff;--red:#9b2935;--red-bg:#fff2f2;--sand:#f9f4e7;--shadow:0 8px 28px #18264716;--radius:10px}
+*{box-sizing:border-box}
+body{margin:0;color:var(--ink);font:16px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;background:#f7f8fb}
+button,input,select,textarea{font:inherit;color:inherit}
+button{cursor:pointer;background:var(--white);border:1px solid var(--line);border-radius:8px;padding:.42rem .7rem;line-height:1.35}
+button:hover{border-color:var(--blue);color:var(--blue)}
+button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible,summary:focus-visible{outline:2px solid var(--blue);outline-offset:2px}
+button:disabled{opacity:.45;cursor:default}
+input,select,textarea{background:var(--white);border:1px solid #cbd1df;border-radius:8px;padding:.5rem .65rem;width:100%}
+textarea{min-height:95px;resize:vertical}
+h1,h2,h3,p{margin:0}
+h1{font-size:clamp(1.65rem,3vw,2.5rem);letter-spacing:-.035em;line-height:1.14}
+h2{font-size:1.18rem;letter-spacing:-.01em}
+h3{font-size:1rem}
+small,.muted{color:var(--muted)}
+small{font-size:.82rem}
+.primary{background:var(--blue);color:#fff;border-color:var(--blue);font-weight:650}
+.primary:hover{background:#203b90;color:#fff}
+.quiet{background:transparent;border-color:transparent;color:var(--blue)}
+.pill{display:inline-flex;align-items:center;gap:.25rem;border-radius:6px;padding:.16rem .42rem;background:var(--blue-bg);color:var(--blue);font-size:.8rem;font-weight:600}
+.pill.warn{background:var(--red-bg);color:var(--red)}
+.shell{display:grid;grid-template-columns:205px minmax(0,1fr);min-height:100dvh}
+aside{position:sticky;top:0;height:100dvh;background:var(--rail);border-right:1px solid var(--line);padding:22px 13px;display:flex;flex-direction:column;gap:26px}
+.brand{display:flex;align-items:center;gap:.55rem;padding:0 .35rem;font-size:1.13rem;font-weight:760;letter-spacing:-.035em}
+.brand b{color:var(--blue);font-size:1.42rem}
+nav{display:grid;gap:5px}
+nav button{display:flex;align-items:center;gap:.5rem;text-align:left;background:transparent;border-color:transparent;white-space:nowrap;font-size:.94rem}
+nav button span:first-child{width:1.28rem;text-align:center}
+nav button[aria-current]{background:#e6ebfc;color:#203a99;font-weight:670}
+nav button small{margin-left:auto}
+aside>small{margin:auto .45rem 0}
+main{min-width:0;background:var(--white)}
+.top{display:flex;gap:.7rem;align-items:center;padding:13px clamp(14px,2.5vw,32px);border-bottom:1px solid var(--line);background:#fbfcfe}
+.top form{flex:1;position:relative}
+.top input{padding-left:2.05rem}
+.search-icon{position:absolute;left:.7rem;top:.45rem;color:var(--muted)}
+.page-head{padding:22px clamp(14px,2.5vw,32px) 0}
+.crumb{font-size:.83rem;margin-bottom:7px;color:var(--muted)}
+.crumb button{font-size:inherit;padding:0;border:0;color:var(--blue)}
+.contacts,.tabs,.segments,.tools,.actions,.row-head,.due-head{display:flex;align-items:center;flex-wrap:wrap;gap:7px}
+.contacts{margin:13px 0 9px}
+.contacts button{background:#f7f9ff;border-color:#dbe2f7;color:#2b438d;font-size:.85rem;padding:.28rem .5rem}
+.tabs{gap:1rem;margin-top:9px}
+.tabs button{border:0;border-bottom:3px solid transparent;border-radius:0;padding:.65rem 0}
+.tabs button[aria-pressed="true"]{border-bottom-color:var(--blue);color:var(--blue);font-weight:670}
+.work{display:grid;grid-template-columns:minmax(0,1.07fr) minmax(0,.93fr);border-top:1px solid var(--line);align-items:start}
+.case-panel,.reader{min-width:0;padding:18px clamp(14px,2.3vw,30px) 28px}
+.reader{border-left:1px solid var(--line);position:sticky;top:0;max-height:100dvh;overflow:auto;background:#fcfdff}
+.segments{gap:6px;margin-bottom:7px}
+.segments button{font-size:.86rem}
+.segments button[aria-pressed="true"]{background:var(--blue-bg);border-color:#aab8f1;color:#203a99;font-weight:650}
+.scope-person{display:block;margin-bottom:13px}
+.due-list{display:grid;gap:8px;margin:0 0 17px}
+.due{border:1px solid #e9dfc6;border-radius:var(--radius);background:var(--sand);padding:9px 11px}
+.due.deadline{border-color:#edc8cc;background:var(--red-bg)}
+.due.done{background:#f1f7f2;border-color:#d7e7da}
+.due-head{justify-content:space-between;gap:4px}
+.due.deadline .due-head{color:var(--red)}
+.due p{font-size:.89rem}
+.due .actions{margin-top:6px}
+.due button,.row-action button,.reader .tools button{font-size:.82rem;padding:.29rem .48rem}
+.due .source{padding:0;color:var(--red);text-decoration:underline;background:transparent;border:0;text-align:left}
+.section-head{display:flex;justify-content:space-between;align-items:center;gap:7px;flex-wrap:wrap;margin:0 0 9px}
+.section-head select{width:auto;max-width:100%;font-size:.85rem}
+.section-head button{font-size:.85rem}
+.month{margin:13px 0 5px;color:var(--muted);font-size:.8rem;font-weight:700}
+.timeline{display:grid;gap:5px}
+.event{position:relative;border:1px solid var(--line);border-radius:8px;background:#fff}
+.event.selected{border-color:#92a8ef;background:#f1f4ff}
+.event-main{display:grid;grid-template-columns:31px minmax(0,1fr);align-items:start;gap:9px;width:100%;border:0;border-radius:7px;background:transparent;text-align:left;padding:8px 9px}
+.event-main:hover{background:#f4f6fe}
+.event-icon{display:grid;place-items:center;background:#eaf1f8;color:#234778;border-radius:7px;width:30px;height:30px;font-size:1rem;font-weight:680}
+.event-icon.out{background:#e7f3ec;color:#246345}
+.event-icon.draft{background:#fff1cf;color:#694a04}
+.event-icon.Note,.event-icon.Phone,.event-icon.Decision{background:#edeaf9;color:#5b4380}
+.event strong{font-size:.94rem;overflow-wrap:anywhere}
+.event small{display:block;overflow-wrap:anywhere}
+.row-head{gap:5px}
+.row-head small{margin-left:auto;white-space:nowrap}
+.row-action{padding:0 10px 8px 49px;display:flex;gap:7px;align-items:center;flex-wrap:wrap}
+.reader-head{display:flex;justify-content:space-between;align-items:flex-start;gap:9px;margin-bottom:10px}
+.reader-head .pill{white-space:nowrap}
+details{border:1px solid var(--line);border-radius:8px;background:#fff;margin:8px 0}
+summary{padding:.45rem .6rem;cursor:pointer;font-size:.88rem;font-weight:650}
+.meta{display:grid;grid-template-columns:auto minmax(0,1fr);gap:4px 12px;padding:0 .65rem .65rem;margin:0;font-size:.84rem}
+.meta dt{color:var(--muted)}
+.meta dd{margin:0;overflow-wrap:anywhere}
+.meta button{font-size:inherit;padding:0;border:0;color:var(--blue)}
+.reader .tools{margin:8px 0}
+.viewer{border-radius:var(--radius);padding:clamp(10px,2vw,22px);background:#eaedf5;border:1px solid #e1e5ef;margin-top:8px}
+.paper{background:#fff;border:1px solid #dde1ec;box-shadow:var(--shadow);min-height:342px;padding:clamp(16px,3vw,37px);font:1rem/1.6 Georgia,serif;cursor:text;overflow-wrap:anywhere;user-select:text}
+.paper small{font:0.8rem/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
+.paper h3{font-size:1.3rem;line-height:1.25;margin:18px 0 13px}
+.paper p{margin-top:9px}
+mark{background:#dce5ff;color:#152d85;padding:.04rem .12rem}
+.selection{background:var(--blue-bg);border:1px solid #c8d1f5;border-radius:8px;padding:.55rem;margin:8px 0}
+.selection[hidden]{display:none}
+.selection .tools{margin:5px 0 0}
+.selection small{display:block;overflow-wrap:anywhere}
+details.text-help{margin-top:11px}
+.text-help p{font-size:.84rem;padding:0 .65rem .65rem}
+.notice,.empty{font-size:.9rem;border:1px solid var(--line);border-radius:8px;padding:11px;background:#f7f8fc;color:var(--muted)}
+.notice{margin:8px 0}
+.list-page{padding:25px clamp(14px,3vw,37px)}
+.list-page h1{margin-bottom:14px}
+.cards{display:grid;gap:8px;max-width:850px}
+.card{padding:11px 13px;border:1px solid var(--line);border-radius:8px;background:#fff;text-align:left;display:block;width:100%}
+.card small{display:block}
+.mobile-back{display:none}
+dialog{width:min(520px,calc(100% - 24px));max-height:calc(100% - 24px);overflow:auto;border:1px solid var(--line);border-radius:14px;padding:19px;box-shadow:var(--shadow);color:var(--ink)}
+dialog::backdrop{background:#1a234263}
+dialog header{display:flex;justify-content:space-between;gap:8px;align-items:center;margin-bottom:10px}
+dialog p,dialog label{display:block;margin:8px 0}
+dialog footer{display:flex;justify-content:flex-end;gap:7px;margin-top:12px;flex-wrap:wrap}
+.toast{position:fixed;bottom:14px;right:14px;max-width:calc(100vw - 28px);background:#223155;color:#fff;padding:9px 12px;border-radius:8px;box-shadow:var(--shadow);z-index:5}
+.toast:empty{display:none}
+@media(max-width:1060px){.shell{grid-template-columns:165px minmax(0,1fr)}.case-panel,.reader{padding-inline:13px}}
+@media(max-width:780px){.shell{display:block}aside{position:static;height:auto;padding:7px 10px;gap:5px;border-right:0;border-bottom:1px solid var(--line)}nav{display:flex;overflow-x:auto;gap:2px}nav button{font-size:.86rem;padding:.36rem .46rem}nav button span:first-child{display:none}aside>small{display:none}.top{gap:5px}.top .primary{font-size:.83rem}.page-head{padding-top:16px}.work{display:block}.reader{display:none;position:static;max-height:none;border:0}.mobile-preview .case-panel,.mobile-preview .page-head{display:none}.mobile-preview .reader{display:block}.mobile-back{display:inline-block;margin-bottom:10px}.paper{min-height:295px}body:has(.mobile-preview) aside{display:none}}
+@media(max-width:430px){.search-icon{display:none}.top input{padding-left:.45rem;font-size:.82rem}.top .primary{white-space:nowrap;padding:.46rem}.tabs{gap:.65rem}.tabs button{font-size:.9rem}.row-head small{margin-left:0}.segments button{font-size:.8rem;padding:.32rem .45rem}}
+@media(prefers-reduced-motion:reduce){*{scroll-behavior:auto!important}}
+
+main:has(#local-view) .top{padding-block:8px}
+#local-view{padding-top:12px}
+#local-view .case-list-heading{display:flex;justify-content:space-between;align-items:center;gap:.6rem;margin-bottom:9px}
+#local-view .case-list-heading h1{margin:0;font-size:clamp(1.45rem,2.4vw,2rem)}
+.case-list-heading .primary{white-space:nowrap}
+.case-filters{display:grid;gap:6px;margin-bottom:10px}
+.case-filters-secondary{display:flex;gap:8px 16px;justify-content:space-between;flex-wrap:wrap;align-items:center}
+.case-filter-row{display:flex;align-items:flex-start;gap:7px;min-width:0}
+.case-filter-label{min-width:3.6rem;padding:.3rem 0;color:var(--muted);font-size:.88rem}
+.case-chips{display:flex;flex-wrap:wrap;gap:5px}
+.case-chips button{border-radius:999px;padding:.29rem .62rem;line-height:1.25;font-size:.87rem}
+.case-chips button[aria-pressed=true]{background:var(--blue);border-color:var(--blue);color:#fff}
+.case-sort{display:flex;align-items:center;gap:5px;color:var(--muted);white-space:nowrap;font-size:.87rem;margin-left:auto}
+.case-sort select{width:auto;border-radius:999px;padding:.3rem .55rem;font-size:inherit}
+.case-feedback{font-size:.87rem;margin:5px 0;color:var(--muted)}
+.case-feedback:empty,#local-case-form[hidden]{display:none}
+#local-case-form{max-width:650px;margin:0 0 10px}
+#local-case-form label{display:block;margin-bottom:5px}
+.case-results-full{grid-template-columns:minmax(0,1fr)}
+.case-results-full .cards{max-width:none}
+.local-case-row.card{display:flex;gap:10px;align-items:center;justify-content:space-between}
+.local-case-row[aria-pressed=true]{border-color:#92a8ef;background:#f1f4ff}
+.case-due-label{white-space:nowrap}
+.case-due-form{display:flex;align-items:flex-end;flex-wrap:wrap;gap:5px}
+@media(max-width:780px){
+  .case-filters-secondary{justify-content:flex-start}
+  .case-sort{margin-left:calc(3.6rem + 7px)}
+  .case-due-label{white-space:normal}
+}
+</style>
+</head>
+<body>
+<div class="shell">
+  <aside aria-label="Hauptnavigation">
+    <div class="brand"><b aria-hidden="true">▣</b> Korrespondenz</div>
+    <nav id="nav"></nav>
+    <small>Klickprototyp · Beispieldaten</small>
+  </aside>
+  <main id="main">
+    <div class="top">
+      <form id="search-form" role="search"><span class="search-icon" aria-hidden="true">⌕</span><input id="search" type="search" aria-label="Dokumente und Aktenzeichen suchen" placeholder="Dokumente und Aktenzeichen suchen"></form>
+      <button class="primary" data-action="import">+ Dokument importieren</button>
+    </div>
+    <div id="view"></div>
+  </main>
+</div>
+<dialog id="dialog"></dialog>
+<div id="toast" class="toast" role="status" aria-live="polite"></div>
+<script>
+'use strict';
+const contacts = {
+  insurer: { name:'Muster-Versicherung', dept:'Kfz-Schadenservice', person:'Kontakt Versicherung', address:'Musterweg 10, 00000 Musterstadt', mail:'schaden@versicherung.example' },
+  expert: { name:'Muster-Gutachtenbüro', dept:'Kfz-Gutachten', person:'Kontakt Gutachten', address:'Beispielstraße 8, 00000 Musterstadt', mail:'gutachten@muster.example' },
+  court: { name:'Registergericht Musterstadt', dept:'Handelsregister', address:'Musteranschrift · Musterstadt', mail:'register@gericht.example' },
+  office: { name:'Muster-Registerbehörde', dept:'Offenlegung', address:'Musteranschrift · Beispielstadt', mail:'offenlegung@behoerde.example' },
+  tax: { name:'Finanzamt', dept:'Veranlagung', address:'Musteranschrift · Musterstadt', mail:'veranlagung@finanzamt.example' }
+};
+const documentData = {
+  letter:{ title:'Schreiben der Versicherung', contact:'insurer', date:'2026-11-18', received:'2026-11-19', ocr:'Text erkannt', line:'Aktenzeichen: KFZ-2026-1842', pages:[
+    ['Ihr Schadenfall', 'Guten Tag,', 'wir haben Ihre Unterlagen zum Frontschaden geprüft. Für die weitere Bearbeitung benötigen wir noch eine ergänzende Stellungnahme und einen Nachweis zur Reparatur.'],
+    ['Nachzureichende Unterlagen', 'Bitte reichen Sie Ihre Stellungnahme bis zum 04.12.2026 ein.', 'Den Reparaturnachweis benötigen wir bis zum 11.12.2026. Bitte beantworten Sie die Fragen zur Belegliste bis zum 15.12.2026.', 'Geben Sie bei Rückfragen das Aktenzeichen KFZ-2026-1842 an.']
+  ]},
+  draft:{ title:'Antwortentwurf', contact:'insurer', date:'2026-11-20', ocr:'Digitaler Text', pages:[['Stellungnahme zum Frontschaden','Guten Tag,','hiermit nehme ich Bezug auf Ihr Schreiben vom 18.11.2026. Die ergänzenden Unterlagen sind beigefügt.']] },
+  report:{ title:'Gutachten', contact:'expert', date:'2026-11-10', received:'2026-11-10', ocr:'OCR fehlgeschlagen', pages:[['Gutachten zum Fahrzeugschaden','Musteransicht eines gescannten Gutachtens. Der Text steht für die Suche in diesem Beispiel nicht zur Verfügung.']] },
+  rear:{ title:'Bestätigung zum Heckschaden', contact:'insurer', date:'2026-11-16', received:'2026-11-17', ocr:'Text erkannt', line:'Schaden-Nr.: KFZ-2026-1857', pages:[['Ihr Heckschaden','Wir bestätigen den Eingang Ihrer Schadensmeldung. Bitte bewahren Sie die Fotos der Beschädigung auf.']] },
+  court:{ title:'Hinweis des Registergerichts', contact:'court', date:'2026-11-19', received:'2026-11-20', ocr:'Text erkannt', line:'Aktenzeichen: HRB 18420', pages:[
+    ['Handelsregister · Musterfirma GmbH','Guten Tag,','für die Bearbeitung benötigen wir einen Nachweis über den Zugang der Erklärung.'],
+    ['Ergänzung der Unterlagen','Bitte reichen Sie den Zugangsnachweis bis zum 07.12.2026 ein.','Aktenzeichen: HRB 18420']
+  ]},
+  office:{ title:'Rückfrage zur Offenlegung', contact:'office', date:'2026-11-17', received:'2026-11-18', ocr:'Text fehlt', pages:[['Rückfrage zur Offenlegung','Musteransicht eines Briefs ohne ausgewertete Textebene.']] },
+  tax:{ title:'Anforderung von Unterlagen', contact:'tax', date:'2026-11-13', received:'2026-11-14', ocr:'Digitaler Text', line:'Referenz: FA-2026-048', pages:[['Unterlagen für die Bearbeitung','Bitte teilen Sie uns den Stand der eingereichten Erklärungen mit.']] }
+};
+const cases = {
+  kfz_demo:{ title:'Muster-Kfz-Schaden', group:'Versicherungen', scope:'front', selected:'k-letter', scopes:{
+    front:{ title:'Frontschaden', status:'Wartet auf Antwort', short:'wartet', owner:'Fallbearbeitung', contacts:['insurer','expert'] },
+    rear:{ title:'Heckschaden', status:'Offen', short:'offen', owner:'Schadenservice', contacts:['insurer','expert'] }
+  }, refs:[{contact:'insurer',label:'Az. KFZ-2026-1842',scope:'front'},{contact:'insurer',label:'Schaden-Nr. KFZ-2026-1857',scope:'rear'}],
+    events:[
+      {id:'k-draft',date:'2026-11-20',type:'Draft',title:'Antwortentwurf',contact:'insurer',scopes:['front'],doc:'draft'},
+      {id:'k-letter',date:'2026-11-18',type:'In',title:'Schreiben der Versicherung',kind:'Schreiben',contact:'insurer',scopes:['front'],doc:'letter'},
+      {id:'k-rear',date:'2026-11-16',type:'In',title:'Bestätigung zum Heckschaden',kind:'Schreiben',contact:'insurer',scopes:['rear'],doc:'rear'},
+      {id:'k-call',date:'2026-11-12',type:'Phone',title:'Telefonat zum Gutachten',contact:'expert',scopes:['front'],detail:'Gutachter kündigt ergänzende Fotos an.',recorded:'2026-11-16'},
+      {id:'k-report',date:'2026-11-10',type:'In',title:'Gutachten',kind:'Gutachten',contact:'expert',scopes:['front','rear'],doc:'report'},
+      {id:'k-notice',date:'2026-10-09',type:'Out',title:'Schadensmeldung',contact:'insurer',scopes:['front'],missing:true}
+    ]},
+  register_demo:{ title:'Musterfirma GmbH', group:'Behörden und Gerichte', scope:'register', selected:'u-court', scopes:{
+    register:{title:'Handelsregister',status:'In Bearbeitung',short:'in Arbeit',owner:'Fallbearbeitung',contacts:['court']},
+    disclosure:{title:'Offenlegung',status:'Wartet auf Antwort',short:'wartet',owner:'Unterlagenprüfung',contacts:['office']},
+    tax:{title:'Finanzamt',status:'Offen',short:'offen',owner:'Fallbearbeitung',contacts:['tax']}
+  }, refs:[{contact:'court',label:'Az. HRB 18420',scope:'register'},{contact:'tax',label:'Ref. FA-2026-048',scope:'tax'}],
+    events:[
+      {id:'u-decision',date:'2026-11-21',type:'Decision',title:'Zugangsnachweis ergänzen',scopes:['register'],detail:'Nachweise zur Zustellung zusammenstellen und mit dem Hinweisschreiben verknüpfen.'},
+      {id:'u-court',date:'2026-11-19',type:'In',title:'Hinweis des Registergerichts',kind:'Hinweis',contact:'court',scopes:['register'],doc:'court'},
+      {id:'u-office',date:'2026-11-17',type:'In',title:'Rückfrage zur Offenlegung',contact:'office',scopes:['disclosure'],doc:'office'},
+      {id:'u-note',date:'2026-11-15',type:'Note',title:'Unterlagen zum Jahresabschluss prüfen',scopes:['disclosure','tax'],recorded:'2026-11-20',detail:'Vorhandene Abschlussunterlagen dem jeweiligen Jahr zuordnen.'},
+      {id:'u-tax',date:'2026-11-13',type:'In',title:'Anforderung von Unterlagen',contact:'tax',scopes:['tax'],doc:'tax'}
+    ]}
+};
+const deadlines = [
+  {id:'d1',caseId:'kfz_demo',scope:'front',type:'reminder',date:'2026-11-30',title:'Bei der Versicherung nachfassen',owner:'Fallbearbeitung'},
+  {id:'d2',caseId:'kfz_demo',scope:'front',type:'deadline',date:'2026-12-04',title:'Stellungnahme einreichen',owner:'Fallbearbeitung',source:{event:'k-letter',page:2}},
+  {id:'d3',caseId:'kfz_demo',scope:'front',type:'deadline',date:'2026-12-11',title:'Nachweis nachreichen',owner:'Fallbearbeitung',source:{event:'k-letter',page:2}},
+  {id:'d4',caseId:'kfz_demo',scope:'front',type:'deadline',date:'2026-12-15',title:'Rückmeldung zur Belegliste',owner:'Fallbearbeitung',source:{event:'k-letter',page:2}},
+  {id:'d5',caseId:'kfz_demo',scope:'rear',type:'reminder',date:'2026-12-02',title:'Schadenfotos prüfen',owner:'Schadenservice'},
+  {id:'d6',caseId:'register_demo',scope:'register',type:'deadline',date:'2026-12-07',title:'Zugangsnachweis einreichen',owner:'Fallbearbeitung',source:{event:'u-court',page:2}},
+  {id:'d7',caseId:'register_demo',scope:'disclosure',type:'reminder',date:'2026-12-03',title:'Stand der Offenlegung abfragen',owner:'Unterlagenprüfung'},
+  {id:'d8',caseId:'register_demo',scope:'tax',type:'reminder',date:'2026-12-01',title:'Belege zusammenstellen',owner:'Fallbearbeitung'}
+];
+const inbox = [{caseId:'kfz_demo',event:'k-rear'},{caseId:'register_demo',event:'u-office'},{caseId:'register_demo',event:'u-tax'}];
+const types = {
+  In:{name:'Eingang',icon:'↓',color:'in',preposition:'von'},
+  Out:{name:'Ausgang',icon:'↑',color:'out',preposition:'an'},
+  Draft:{name:'Entwurf',icon:'✎',color:'draft',preposition:'an'},
+  Phone:{name:'Telefonat',icon:'☎',color:'Phone',preposition:'mit'},
+  Note:{name:'Notiz',icon:'≡',color:'Note',preposition:'von'},
+  Decision:{name:'Entscheidung',icon:'◆',color:'Decision',preposition:'von'}
+};
+const navItems = [['overview','◫','Übersicht'],['inbox','▣','Posteingang'],['case','▤','Beispiele'],['deadlines','◷','Fristen'],['address','♙','Adressbuch']];
+const initialState = { screen:'case',caseId:'kfz_demo',scope:'front',selected:'k-letter',tab:'Chronik',filter:'all',page:1,query:'',mobile:false,metaOpen:false,selection:null,inboxDone:[] };
+const state = structuredClone(initialState);
+const view = document.querySelector('#view');
+const dialog = document.querySelector('#dialog');
+const day = '2026-11-23';
+const esc = value => String(value ?? '').replace(/[&<>"']/g, char => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[char]);
+const dateText = value => /^\d{4}-\d{2}-\d{2}$/.test(value ?? '') ? value.split('-').reverse().join('.') : '–';
+const monthText = value => new Intl.DateTimeFormat('de-DE',{month:'long',year:'numeric',timeZone:'UTC'}).format(new Date(value));
+const currentCase = () => cases[state.caseId];
+const getEvent = (caseId,id) => cases[caseId]?.events.find(entry => entry.id === id);
+const selectedEvent = () => getEvent(state.caseId,state.selected);
+const visibleEvents = () => currentCase().events.filter(entry => state.scope === 'all' || entry.scopes.includes(state.scope));
+const inScope = item => item.caseId === state.caseId && (state.scope === 'all' || item.scope === state.scope);
+const sortEvents = (first,second) => second.date.localeCompare(first.date);
+const sortDue = (first,second) => Number(Boolean(first.done))-Number(Boolean(second.done)) || first.date.localeCompare(second.date);
+const id = prefix => prefix + '-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2,7);
+const action = (name,label,attributes='',className='') => `<button type="button" class="${className}" data-action="${name}" ${attributes}>${label}</button>`;
+const contactButton = (key,label) => action('contact',esc(label ?? contacts[key].name),`data-id="${key}"`);
+let toastTimer;
+function notify(message){
+  const toast = document.querySelector('#toast');
+  toast.textContent = message;
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => {toast.textContent = '';},3600);
+}
+function activeInbox(){return inbox.filter(item=>!state.inboxDone.includes(item.event));}
+function render(){
+  document.querySelector('#nav').innerHTML = navItems.map(([key,icon,label]) =>
+    action('nav',`<span aria-hidden="true">${icon}</span><span>${label}</span>${key === 'inbox' ? '<small>'+activeInbox().length+'</small>' : ''}`,
+      `data-id="${key}"${key === state.screen ? ' aria-current="page"' : ''}`)).join('');
+  document.querySelector('#main').classList.toggle('mobile-preview',state.screen === 'case' && state.mobile);
+  view.innerHTML = state.screen === 'case' ? caseView() : listView();
+}
+function caseView(){
+  const item = currentCase();
+  const keys = [...new Set((state.scope === 'all' ? Object.values(item.scopes).flatMap(scope=>scope.contacts) : item.scopes[state.scope].contacts)
+    .concat(item.refs.filter(ref=>state.scope === 'all' || ref.scope === state.scope).map(ref=>ref.contact)))];
+  const references = keys.flatMap(key=>{
+    const refs = item.refs.filter(ref=>ref.contact === key && (state.scope === 'all' || ref.scope === state.scope));
+    return refs.length ? refs.map(ref=>contactButton(key,contacts[key].name+' · '+ref.label)) : [contactButton(key)];
+  });
+  const tabs = ['Chronik','Dokumente','Beteiligte','Fristen'].map(tab=>action('tab',tab,`data-id="${tab}" aria-pressed="${state.tab===tab}"`)).join('');
+  const segments = [['all','Alle'],...Object.entries(item.scopes).map(([key,scope])=>[key,scope.title+' · '+scope.short])]
+    .map(([key,title])=>action('scope',esc(title),`data-id="${key}" aria-pressed="${state.scope===key}"`)).join('');
+  const person = state.scope === 'all' ? 'Alle Teilvorgänge' : item.scopes[state.scope].status+' · Zuständig: '+item.scopes[state.scope].owner;
+  const previews = selectedEvent();
+  return `<section class="page-head"><div class="crumb">${action('case-list','Vorgänge')} / ${esc(item.group)}</div>
+    <h1>${esc(item.title)}</h1><div class="contacts">${references.join('')}</div><div class="tabs" aria-label="Vorgangsansichten">${tabs}</div></section>
+    <div class="work"><section class="case-panel"><div class="segments" aria-label="Teilvorgänge">${segments}</div><small class="scope-person">${esc(person)}</small>
+    ${dueSummary()}${caseContent(keys)}</section><section class="reader" aria-label="Dokumentvorschau">${preview(previews)}</section></div>`;
+}
+function dueSummary(){
+  const objects = deadlines.filter(item=>inScope(item)&&!item.done).sort(sortDue);
+  const next = ['reminder','deadline'].map(type=>objects.find(item=>item.type===type)).filter(Boolean);
+  const remaining=objects.length-next.length;
+  return next.length ? `<div class="due-list">${next.map(item=>dueCard(item)).join('')}
+    ${remaining && state.tab !== 'Fristen' ? action('tab','+'+remaining+' weitere','data-id="Fristen"','quiet') : ''}</div>` : '';
+}
+function dueCard(item){
+  const sourceEvent = item.source && getEvent(item.caseId,item.source.event);
+  const source = sourceEvent ? action('source', 'aus '+esc(sourceEvent.title)+' vom '+dateText(sourceEvent.date)+', Seite '+item.source.page,
+    `data-case="${item.caseId}" data-id="${sourceEvent.id}" data-page="${item.source.page}" data-scope="${item.scope}" data-hit="${esc(item.source.text ?? dateText(item.originalDate ?? item.date))}"`,'source') : '';
+  const controls = item.done ? action('due','Wieder öffnen',`data-id="${item.id}" data-mode="toggle"`) :
+    [['toggle','Erledigt'],['move','Verschieben'],['owner','Zuständig']].map(([mode,label])=>action('due',label,`data-id="${item.id}" data-mode="${mode}"`)).join('');
+  const scope = cases[item.caseId].scopes[item.scope].title;
+  return `<article class="due ${item.type} ${item.done?'done':''}"><div class="due-head"><strong>${item.type==='deadline'?'Verbindliche Frist':'Wiedervorlage'} · ${dateText(item.date)}</strong>${item.done?'<span class="pill">Erledigt</span>':''}</div>
+    <p>${esc(item.title)}${state.scope==='all'||state.screen!=='case'?' · '+esc(scope):''}</p><small>Zuständig: ${esc(item.owner)}${item.originalDate?' · Ursprünglich: '+dateText(item.originalDate):''}</small>
+    ${item.reason?'<p>'+esc(item.reason)+'</p>':''}${source?'<p>'+source+'</p>':''}
+    <div class="actions">${controls}</div></article>`;
+}
+function caseContent(keys){
+  if(state.tab==='Fristen'){
+    const items=deadlines.filter(inScope).sort(sortDue);
+    return `<h2>Alle Fristen und Wiedervorlagen</h2><div class="due-list">${items.map(dueCard).join('')||'<p class="empty">Keine Fristen in diesem Teilvorgang.</p>'}</div>`;
+  }
+  if(state.tab==='Beteiligte'){
+    return `<h2>Beteiligte</h2><div class="cards">${keys.map(key=>addressCard(key)).join('')}</div>`;
+  }
+  const documents = state.tab==='Dokumente';
+  const entries = visibleEvents().filter(entry=>documents ? entry.doc || entry.missing : state.filter==='all' || entry.type===state.filter).sort(sortEvents);
+  const filter = `<select id="event-filter" aria-label="Chronik nach Typ filtern"><option value="all">Alle Typen</option>${Object.entries(types).map(([key,type])=>`<option value="${key}" ${state.filter===key?'selected':''}>${type.name}</option>`).join('')}</select>`;
+  const header = `<div class="section-head"><h2>${documents?'Dokumente':'Chronik'}</h2><div class="tools">${documents?'':filter}${action('new-entry','+ Eintrag')}</div></div>`;
+  if(!entries.length) return header+'<p class="empty">Keine passenden Einträge.</p>';
+  let previousMonth='';
+  return header+`<div class="timeline">${entries.map(entry=>{
+    const month=entry.date.slice(0,7);
+    const group=!documents&&month!==previousMonth ? `<h3 class="month">${monthText(entry.date)}</h3>` : '';
+    previousMonth=month;
+    return group+eventRow(entry);
+  }).join('')}</div>`;
+}
+function eventRow(entry){
+  const kind=types[entry.type];
+  const participant = entry.contact ? ' · '+kind.preposition+' '+contacts[entry.contact].name : '';
+  const extraScopes=entry.scopes.filter(scope=>scope!==state.scope).map(scope=>currentCase().scopes[scope].title);
+  const cross=entry.scopes.length>1 ? (state.scope==='all'?' · '+extraScopes.join(' und '):' · auch in '+extraScopes.join(' und ')) : (state.scope==='all'?' · '+extraScopes.join(''):'');
+  const badge = entry.type==='Draft' ? '<span class="pill">Entwurf</span>' : entry.missing ? '<span class="pill warn">Original fehlt</span>' : '';
+  const draftAction=entry.type==='Draft' && !entry.sentEvent ? `<div class="row-action"><small>Noch nicht versendet</small>${action('send','Versand erfassen',`data-id="${entry.id}"`)}</div>` : entry.sentEvent ? '<div class="row-action"><small>Versand separat protokolliert</small></div>' : '';
+  return `<article class="event ${entry.id===state.selected?'selected':''}">${action('event',
+    `<span class="event-icon ${kind.color}" title="${kind.name}" aria-hidden="true">${kind.icon}</span><span><span class="row-head"><strong>${esc(entry.title)}</strong>${badge}<small>${dateText(entry.date)}</small></span><small>${esc([kind.name,entry.kind].filter(Boolean).join(' · ')+participant+cross)}${entry.recorded?' · nacherfasst am '+dateText(entry.recorded):''}</small></span>`,
+    `data-id="${entry.id}" aria-pressed="${entry.id===state.selected}"`,'event-main')}${draftAction}</article>`;
+}
+function highlight(text,needle){
+  if(!needle) return esc(text);
+  const offset=text.toLocaleLowerCase('de').indexOf(needle.toLocaleLowerCase('de'));
+  if(offset<0) return esc(text);
+  return esc(text.slice(0,offset))+'<mark>'+esc(text.slice(offset,offset+needle.length))+'</mark>'+esc(text.slice(offset+needle.length));
+}
+function preview(entry){
+  const back = action('back','Zurück zur Akte','','mobile-back');
+  if(!entry) return back+'<p class="empty">Wähle einen Eintrag aus der Akte.</p>';
+  const doc=documentData[entry.doc];
+  if(!doc){
+    return back+`<div class="reader-head"><h2>${esc(entry.title)}</h2></div><p class="notice">${esc(entry.missing?'Das Original fehlt in dieser Akte.':entry.detail||'Dieser Eintrag enthält keine Datei.')}</p>
+      <div class="tools">${entry.contact?contactButton(entry.contact):''}${action('new-entry','Eintrag anlegen')}</div>`;
+  }
+  const page=doc.pages[state.page-1];
+  const hit=state.hit || (entry.id==='k-letter' && state.page===1 ? 'KFZ-2026-1842' : '');
+  const ocrIssue=['Text fehlt','OCR fehlgeschlagen'].includes(doc.ocr);
+  const ocr = `<span class="pill ${ocrIssue?'warn':''}">${doc.ocr}</span>`;
+  const metadata = [['Dokumentdatum',dateText(entry.documentDate||doc.date)],['Zugang',dateText(doc.received)],
+    [entry.type==='In'?'Absender':'Empfänger',contactButton(doc.contact)],['Richtung',types[entry.type].name],['OCR-Status',ocr],
+    ...(entry.dateSource?[['Quelle zum Datum',esc(sourceText(entry.dateSource))]]:[]),
+    ...(entry.sentTo?[['Beim Versand verwendet',esc(entry.sentTo)+' · '+esc(entry.channel)]]:[])];
+  return back+`<div class="reader-head"><div><h2>${esc(entry.title)}</h2><small>Dokumentmuster · ${doc.pages.length} ${doc.pages.length===1?'Seite':'Seiten'}</small></div>${ocr}</div>
+    <details id="doc-meta" ${state.metaOpen?'open':''}><summary>Dokumentdetails</summary><dl class="meta">${metadata.map(([label,value])=>`<dt>${label}</dt><dd>${value}</dd>`).join('')}</dl></details>
+    <div class="tools">${action('reply','Antwort verfassen',`data-id="${entry.id}"`,'primary')}${action('new-entry','Eintrag anlegen')}${entry.type==='Draft'&&!entry.sentEvent?action('send','Versand erfassen',`data-id="${entry.id}"`):''}</div>
+    ${ocrIssue?'<p class="notice">'+doc.ocr+' · Der Dokumenttext ist in der Suche nicht verfügbar.</p>':''}
+    <div class="tools" aria-label="Dokumentseiten">${action('page','Vorherige Seite',`data-id="-1" ${state.page===1?'disabled':''}`)}
+    <small>Seite ${state.page} von ${doc.pages.length}</small>${action('page','Nächste Seite',`data-id="1" ${state.page===doc.pages.length?'disabled':''}`)}</div>
+    <div class="viewer"><article class="paper" id="paper" aria-label="Dokumenttext, Seite ${state.page}">
+      <small>${esc(contacts[doc.contact].name)} · ${dateText(doc.date)}</small>
+      ${state.page===1&&doc.line?'<p>'+highlight(doc.line,hit)+'</p>':''}
+      <h3>${highlight(page[0],hit)}</h3>${page.slice(1).map(line=>'<p>'+highlight(line,hit)+'</p>').join('')}
+      </article></div>
+    ${ocrIssue?'':`<div id="selection" class="selection" hidden><small id="selection-text"></small><div class="tools">
+      ${action('capture','Als Frist übernehmen','data-id="deadline"')}${action('capture','Als Aktenzeichen übernehmen','data-id="reference"')}${action('capture','Als Datum übernehmen','data-id="date"')}</div></div>
+      <details class="text-help"><summary>Text aus dem Dokument übernehmen</summary><p>Markiere Text auf der Seite. Darunter erscheinen die Aktionen für Frist, Aktenzeichen und Datum. Die Fundstelle wird beim Speichern ergänzt.</p></details>`}`;
+}
+function addressCard(key){
+  const item=contacts[key];
+  return action('contact',`<strong>${esc(item.name)}</strong><small>${esc([item.dept,item.person].filter(Boolean).join(' · '))}</small>`,`data-id="${key}"`,'card');
+}
+function caseCard(key){
+  const item=cases[key];
+  const scopes=Object.values(item.scopes).map(scope=>scope.title+' · '+scope.short).join(' / ');
+  return action('open-case',`<strong>${esc(item.title)}</strong><small>${esc(item.group+' · '+scopes)}</small>`,`data-id="${key}"`,'card');
+}
+function itemCard(caseId,entry,page=1,snippet='',hit=''){
+  return action('open-event',`<strong>${esc(entry.title)}</strong><small>${esc(cases[caseId].title)} · ${dateText(entry.date)}${snippet?' · Seite '+page:''}</small>${snippet?'<small>'+highlight(snippet,hit)+'</small>':''}`,
+    `data-case="${caseId}" data-id="${entry.id}" data-page="${page}" data-hit="${esc(hit)}"`,'card');
+}
+function matches(query){
+  const lower=query.toLocaleLowerCase('de');
+  const includes=text=>String(text??'').toLocaleLowerCase('de').includes(lower);
+  return Object.entries(cases).flatMap(([caseId,item])=>item.events.flatMap(entry=>{
+    const doc=documentData[entry.doc];
+    const docReadable=doc && !['Text fehlt','OCR fehlgeschlagen'].includes(doc.ocr);
+    const pageHits=docReadable ? doc.pages.flatMap((lines,index)=>{
+      const candidates=index===0&&doc.line ? [doc.line,...lines] : lines;
+      const snippet=candidates.find(includes);
+      return snippet ? [{caseId,entry,page:index+1,snippet}] : [];
+    }) : [];
+    const metadata=[entry.title,entry.detail,entry.contact&&contacts[entry.contact].name,...item.refs.filter(ref=>entry.scopes.includes(ref.scope)).map(ref=>ref.label)];
+    return pageHits.length ? pageHits : metadata.some(includes) ? [{caseId,entry,page:1,snippet:''}] : [];
+  }));
+}
+function listView(){
+  const templates={
+    overview: ['Übersicht',`<div class="cards">${Object.keys(cases).map(caseCard).join('')}
+      ${action('nav','<strong>'+activeInbox().length+' offene Eingänge</strong>','data-id="inbox"','card')}
+      <h2>Nächste Termine</h2>${deadlines.filter(item=>!item.done).sort(sortDue).slice(0,3).map(dueCard).join('')}</div>`],
+    cases:['Vorgänge',`<div class="cards">${Object.keys(cases).map(caseCard).join('')}</div>`],
+    address:['Adressbuch',`<div class="cards">${Object.keys(contacts).map(addressCard).join('')}</div>`],
+    deadlines:['Fristen und Wiedervorlagen',`<div class="cards">${[...deadlines].sort(sortDue).map(dueCard).join('')}</div>`],
+    inbox:['Posteingang',`<div class="cards">${activeInbox().map(item=>`<article>${itemCard(item.caseId,getEvent(item.caseId,item.event))}
+      ${action('inbox-done','Als geprüft markieren',`data-id="${item.event}"`,'quiet')}</article>`).join('')||'<p class="empty">Alle Eingänge geprüft.</p>'}</div>`],
+    search:['Suchergebnisse',`<div class="cards"><p class="muted">Suche nach „${esc(state.query)}“</p>${state.query ? matches(state.query).map(result=>itemCard(result.caseId,result.entry,result.page,result.snippet,state.query)).join('')||'<p class="empty">Keine Treffer.</p>' : '<p class="empty">Gib einen Suchbegriff ein.</p>'}</div>`]
+  };
+  const [title,body]=templates[state.screen];
+  return `<section class="list-page"><h1>${title}</h1>${body}</section>`;
+}
+function setScreen(screen){
+  state.screen=screen;
+  state.mobile=false;
+  if(screen==='case') state.tab='Chronik';
+  render();
+  window.scrollTo(0,0);
+}
+function openCase(caseId){
+  const item=cases[caseId];
+  Object.assign(state,{caseId,scope:item.scope,selected:item.selected,filter:'all',page:1,hit:'',selection:null,metaOpen:false});
+  setScreen('case');
+}
+function showEntry(entry,{page=1,hit='',mobile=true}={}){
+  Object.assign(state,{selected:entry.id,page,hit,mobile,selection:null,metaOpen:false});
+  window.getSelection()?.removeAllRanges();
+  render();
+  if(mobile && matchMedia('(max-width:780px)').matches) window.scrollTo(0,0);
+}
+function openLinkedEntry(caseId,eventId,page,hit,scope){
+  const entry=getEvent(caseId,eventId);
+  if(!entry) return;
+  if(state.screen!=='case'||state.caseId!==caseId){
+    openCase(caseId);
+    state.scope=scope||entry.scopes[0];
+  }else if(scope && state.scope!=='all'){
+    state.scope=scope;
+  }else if(state.scope!=='all' && !entry.scopes.includes(state.scope)){
+    state.scope=entry.scopes[0];
+  }
+  showEntry(entry,{page,hit});
+}
+function selectScope(scope){
+  state.scope=scope;
+  state.filter='all';
+  const entries=visibleEvents().sort(sortEvents);
+  const entry=entries.find(item=>item.id===state.selected) || entries.find(item=>item.doc) || entries[0];
+  if(entry) showEntry(entry,{mobile:false});
+  else {state.selected='';state.mobile=false;render();}
+}
+function closeDialog(){
+  if(dialog.open) dialog.close();
+}
+function modal(title,body,submit,onSubmit){
+  closeDialog();
+  dialog.innerHTML=`<form id="modal-form"><header><h2 id="dialog-title">${esc(title)}</h2>
+    ${action('close','×','aria-label="Dialog schließen"')}</header>${body}<footer>${submit?
+    action('close','Abbrechen')+`<button class="primary" type="submit">${esc(submit)}</button>`:action('close','Schließen')}</footer></form>`;
+  dialog.setAttribute('aria-labelledby','dialog-title');
+  dialog.showModal();
+  if(onSubmit) dialog.querySelector('form').addEventListener('submit',event=>{
+    event.preventDefault();
+    if(onSubmit(new FormData(event.currentTarget),event.currentTarget)!==false) closeDialog();
+  });
+}
+function showContact(key){
+  const person=contacts[key];
+  const linked=Object.entries(cases).filter(([,item])=>Object.values(item.scopes).some(scope=>scope.contacts.includes(key))||item.refs.some(ref=>ref.contact===key));
+  const events=Object.entries(cases).flatMap(([caseId,item])=>item.events.filter(entry=>entry.contact===key).map(entry=>itemCard(caseId,entry)));
+  const references=linked.flatMap(([caseId,item])=>item.refs.filter(ref=>ref.contact===key&&ref.source).map(ref=>
+    '<li>'+esc(ref.label)+' · '+esc(item.title)+' · '+esc(sourceText({...ref.source,caseId}))+'</li>'));
+  modal(person.name,`<p class="muted">Adressbuch</p><dl class="meta">${Object.entries({Abteilung:person.dept,Ansprechpartner:person.person,Anschrift:person.address,'E-Mail':person.mail})
+    .filter(([,value])=>value).map(([key,value])=>`<dt>${key}</dt><dd>${esc(value)}</dd>`).join('')}</dl>
+    <h3>Verknüpfte Vorgänge</h3><div class="cards">${linked.map(([caseId])=>caseCard(caseId)).join('')}</div>
+    ${references.length?'<h3>Erfasste Referenzen</h3><ul>'+references.join('')+'</ul>':''}<h3 style="margin-top:12px">Korrespondenz</h3><div class="cards">${events.join('')||'<p class="empty">Keine Schreiben erfasst.</p>'}</div>`);
+}
+function field(label,name,value='',type='text',required=true){
+  return `<label>${esc(label)}<input name="${name}" type="${type}" value="${esc(value)}" ${required?'required':''}></label>`;
+}
+function changeDue(key,mode){
+  const item=deadlines.find(deadline=>deadline.id===key);
+  if(!item) return;
+  if(mode==='toggle'){
+    item.done=!item.done;
+    render();
+    notify(item.done?'Termin als erledigt markiert.':'Termin wieder geöffnet.');
+    return;
+  }
+  const move=mode==='move';
+  const binding=move&&item.type==='deadline';
+  const html=move ? field('Neues Fälligkeitsdatum','value',item.date,'date')+
+    (binding?field('Grund oder Nachweis der Friständerung','reason')+'<p class="muted">Das bisherige Datum und die ursprüngliche Fundstelle bleiben sichtbar.</p>':'') : field('Zuständig','value',item.owner);
+  modal(move ? 'Verschieben' : 'Zuständigkeit ändern',html,'Speichern',data=>{
+    if(move){
+      const next=String(data.get('value'));
+      if(next!==item.date && binding){
+        item.originalDate ||= item.date;
+        item.reason=String(data.get('reason')).trim();
+      }
+      item.date=next;
+    } else {
+      const name=String(data.get('value')).trim();
+      if(!name) return false;
+      item.owner=name;
+    }
+    render();
+    notify('Termin aktualisiert.');
+  });
+}
+function scopeFor(source){
+  return state.scope==='all' ? (source?.scopes[0]||currentCase().scope) : state.scope;
+}
+function scopeField(scope){
+  return `<label>Teilvorgang<select name="scope">${Object.entries(currentCase().scopes).map(([key,item])=>
+    `<option value="${key}" ${key===scope?'selected':''}>${esc(item.title)}</option>`).join('')}</select></label>`;
+}
+function sourceText(source){
+  const event=getEvent(source.caseId||state.caseId,source.event);
+  return (event?event.title+' vom '+dateText(event.date):'Dokument')+', Seite '+source.page;
+}
+function createEntry(replyTo){
+  const isReply=Boolean(replyTo);
+  const source=replyTo||selectedEvent();
+  const contact=replyTo?.contact;
+  const contactSelect=`<label>${isReply?'Empfänger':'Beteiligter (optional)'}<select name="contact" ${isReply?'required':''}><option value="">Bitte auswählen</option>
+    ${Object.entries(contacts).map(([key,item])=>`<option value="${key}" ${key===contact?'selected':''}>${esc(item.name)}</option>`).join('')}</select></label>`;
+  const typeSelect=isReply?'':`<label>Typ<select name="type">${['Note','Phone','Decision'].map(key=>`<option value="${key}">${types[key].name}</option>`).join('')}</select></label>`;
+  modal(isReply?'Antwort verfassen':'Eintrag anlegen',scopeField(scopeFor(source))+typeSelect+
+    field(isReply?'Betreff':'Titel','title',isReply?'Antwort auf '+replyTo.title:'')+
+    field('Datum','date',day,'date')+contactSelect+`<label>${isReply?'Entwurfstext':'Beschreibung'}<textarea name="body" ${isReply?'required':''}></textarea></label>`,
+    isReply?'Entwurf speichern':'Eintrag speichern',data=>{
+      const title=String(data.get('title')).trim();
+      const detail=String(data.get('body')).trim();
+      if(!title||(isReply&&!detail)) return false;
+      const entry={id:id('entry'),date:data.get('date'),type:isReply?'Draft':data.get('type'),title,contact:data.get('contact'),scopes:[data.get('scope')],detail};
+      if(entry.date<day) entry.recorded=day;
+      if(isReply){
+        entry.doc=id('doc');
+        entry.replyTo=replyTo.id;
+        documentData[entry.doc]={title,contact:entry.contact,date:entry.date,ocr:'Digitaler Text',pages:[[title,...detail.split(/\n+/).filter(Boolean)]]};
+      }
+      currentCase().events.push(entry);
+      state.tab='Chronik';
+      state.filter='all';
+      if(state.scope!=='all') state.scope=entry.scopes[0];
+      showEntry(entry,{mobile:false});
+      notify(isReply?'Antwortentwurf gespeichert.':'Chronik-Eintrag gespeichert.');
+    });
+}
+function recordSend(entry){
+  if(!entry||entry.type!=='Draft'||entry.sentEvent) return;
+  const contact=contacts[entry.contact];
+  modal('Versand erfassen',`<p>${esc(entry.title)} · ${esc(contact.name)}</p>`+field('Versanddatum','date',day,'date')+
+    '<label>Versandweg<select name="channel"><option>E-Mail</option><option>Brief</option><option>Portal</option></select></label>'+
+    field('Verwendete Anschrift oder E-Mail','address',contact.mail)+field('Versandnachweis (optional)','proof','','text',false),
+    'Versand protokollieren',data=>{
+      const address=String(data.get('address')).trim();
+      if(!address) return false;
+      const title='Versendet: '+entry.title;
+      const newId=id('sent');
+      const docId=id('doc');
+      documentData[docId]={...structuredClone(documentData[entry.doc]),title,date:data.get('date')};
+      const sent={...entry,id:newId,type:'Out',kind:'Schreiben',title,doc:docId,date:data.get('date'),sentTo:address,channel:data.get('channel'),draftFrom:entry.id};
+      if(sent.date<day) sent.recorded=day;
+      entry.sentEvent=newId;
+      const proof=String(data.get('proof')).trim();
+      if(proof) currentCase().events.push({id:id('proof'),type:'Note',title:'Versandnachweis',date:sent.date,scopes:[...entry.scopes],detail:proof,related:newId});
+      currentCase().events.push(sent);
+      showEntry(sent,{mobile:false});
+      notify('Versand in der Chronik erfasst.');
+    });
+  const channel=dialog.querySelector('[name=channel]');
+  channel.addEventListener('change',()=>{
+    dialog.querySelector('[name=address]').value=channel.value==='E-Mail'?contact.mail:channel.value==='Brief'?contact.address:'';
+  });
+}
+function selectedDate(text){
+  const match=text.match(/\b(\d{1,2})\.(\d{1,2})\.(\d{4})\b/);
+  if(!match) return '';
+  const value=[match[3],match[2].padStart(2,'0'),match[1].padStart(2,'0')].join('-');
+  const parsed=new Date(value);
+  return Number.isNaN(parsed.getTime())||parsed.toISOString().slice(0,10)!==value?'':value;
+}
+function capture(mode){
+  const entry=selectedEvent();
+  const selection=state.selection;
+  if(!entry||!selection) return;
+  const src={caseId:state.caseId,event:entry.id,page:state.page,text:selection};
+  const isDeadline=mode==='deadline';
+  const isReference=mode==='reference';
+  const label=isDeadline?'Frist':isReference?'Aktenzeichen':'Datum';
+  const fields=isReference ? field('Aktenzeichen','value',selection.replace(/^Aktenzeichen\s*:\s*/i,'')) :
+    field(isDeadline?'Fälligkeitsdatum':'Dokumentdatum','value',selectedDate(selection),'date');
+  modal(label+' übernehmen',`<p class="muted">${esc(sourceText(src))}</p><p><mark>${esc(selection)}</mark></p>`+fields+
+    (isDeadline?field('Aufgabe','title'):'')+((isDeadline||isReference)?scopeField(scopeFor(entry)):''),
+    'Übernehmen',data=>{
+      const value=String(data.get('value')).trim();
+      const title=String(data.get('title')??'').trim();
+      if(!value||(isDeadline&&!title)) return false;
+      if(isDeadline) deadlines.push({id:id('due'),caseId:state.caseId,scope:data.get('scope'),type:'deadline',date:value,title,owner:currentCase().scopes[data.get('scope')].owner,source:src});
+      else if(isReference) {
+        const scope=data.get('scope');
+        if(!currentCase().refs.some(ref=>ref.label==='Az. '+value&&ref.scope===scope&&ref.contact===entry.contact))
+          currentCase().refs.push({contact:entry.contact,label:'Az. '+value,scope,source:src});
+      } else {
+        entry.documentDate=value;
+        entry.dateSource=src;
+        state.metaOpen=true;
+      }
+      state.selection=null;
+      window.getSelection()?.removeAllRanges();
+      render();
+      notify(label+' mit Fundstelle gespeichert.');
+    });
+}
+function importSample(){
+  modal('Dokument importieren','<p>Hier kannst du den Ablauf mit einem Beispieldokument ausprobieren.</p>'+
+    '<label>Vorgang<select name="case"><option value="kfz_demo">Muster-Kfz-Schaden</option><option value="register_demo">Musterfirma GmbH</option></select></label>',
+    'Beispieldokument übernehmen',data=>{
+      const caseId=data.get('case');
+      const item=cases[caseId];
+      const contact=item.scopes[item.scope].contacts[0];
+      const eventId=id('import');
+      const docId=id('doc');
+      const title='Nachgereichte Unterlagen';
+      documentData[docId]={title,contact,date:day,received:day,ocr:'Text erkannt',pages:[[title,'Anbei erhalten Sie die angeforderten Unterlagen.']]};
+      item.events.push({id:eventId,title,type:'In',date:day,doc:docId,contact,scopes:[item.scope]});
+      inbox.unshift({caseId,event:eventId});
+      setScreen('inbox');
+      notify('Beispieldokument liegt im Posteingang.');
+    });
+}
+const handlers={
+  nav:button=>setScreen(button.dataset.id),
+  'case-list':()=>setScreen('cases'),
+  'open-case':button=>{closeDialog();openCase(button.dataset.id);},
+  'open-event':button=>{closeDialog();openLinkedEntry(button.dataset.case,button.dataset.id,Number(button.dataset.page),button.dataset.hit);},
+  source:button=>{closeDialog();openLinkedEntry(button.dataset.case,button.dataset.id,Number(button.dataset.page),button.dataset.hit,button.dataset.scope);},
+  scope:button=>selectScope(button.dataset.id),
+  tab:button=>{state.tab=button.dataset.id;state.mobile=false;render();},
+  event:button=>showEntry(getEvent(state.caseId,button.dataset.id)),
+  contact:button=>showContact(button.dataset.id),
+  due:button=>changeDue(button.dataset.id,button.dataset.mode),
+  page:button=>showEntry(selectedEvent(),{page:state.page+Number(button.dataset.id),mobile:state.mobile}),
+  back:()=>{state.mobile=false;state.selection=null;render();window.scrollTo(0,0);},
+  'new-entry':()=>createEntry(),
+  reply:button=>createEntry(getEvent(state.caseId,button.dataset.id)),
+  send:button=>recordSend(getEvent(state.caseId,button.dataset.id)),
+  capture:button=>capture(button.dataset.id),
+  close:()=>closeDialog(),
+  import:()=>importSample(),
+  'inbox-done':button=>{state.inboxDone.push(button.dataset.id);render();notify('Eingang als geprüft markiert.');}
+};
+document.addEventListener('click',event=>{
+  const button=event.target.closest('button[data-action]');
+  if(button&&!button.disabled) handlers[button.dataset.action]?.(button);
+});
+document.addEventListener('change',event=>{
+  if(event.target.id==='event-filter'){state.filter=event.target.value;render();}
+});
+document.addEventListener('toggle',event=>{
+  if(event.target.id==='doc-meta') state.metaOpen=event.target.open;
+},true);
+document.querySelector('#search-form').addEventListener('submit',event=>{
+  event.preventDefault();
+  state.query=document.querySelector('#search').value.trim();
+  setScreen('search');
+});
+function showSelectedText(){
+  const selection=window.getSelection();
+  const paper=document.querySelector('#paper');
+  const menu=document.querySelector('#selection');
+  if(!paper||!menu||!selection||!paper.contains(selection.anchorNode)||!paper.contains(selection.focusNode)) return;
+  const text=selection.toString().trim().slice(0,400);
+  if(!text) return;
+  state.selection=text;
+  menu.hidden=false;
+  document.querySelector('#selection-text').textContent='Markiert auf Seite '+state.page+': „'+text+'“';
+}
+document.addEventListener('selectionchange',showSelectedText);
+document.addEventListener('pointerup',showSelectedText);
+render();
+
+function runSelfTests(){
+  const snapshot=structuredClone({state,cases,contacts,documentData,deadlines,inbox});
+  let count=0;
+  function check(condition,label){
+    if(!condition) throw new Error(label);
+    count++;
+  }
+  function click(selector,root=document){
+    const control=root.querySelector(selector);
+    if(!control) throw new Error('Fehlendes Bedienelement: '+selector);
+    control.click();
+  }
+  function fill(name,value){dialog.querySelector('[name='+name+']').value=value;}
+  function submit(){dialog.querySelector('form').requestSubmit();}
+  function select(node){
+    const range=document.createRange();
+    range.selectNodeContents(node);
+    window.getSelection().removeAllRanges();
+    window.getSelection().addRange(range);
+    showSelectedText();
+  }
+  try{
+    check(state.caseId==='kfz_demo'&&state.selected==='k-letter','Muster-Kfz beim Start');
+    check(view.querySelector('.case-panel')!==null&&view.querySelector('.reader')!==null,'Akte und Vorschau vorhanden');
+    const mobile=matchMedia('(max-width:780px)').matches;
+    check((getComputedStyle(view.querySelector('.reader')).display==='none')===mobile,'Vorschau abhängig von der Fensterbreite');
+    click('[data-action=scope][data-id=rear]');
+    check(state.scope==='rear'&&view.textContent.includes('Zuständig: Schadenservice'),'Status und Zuständigkeit im Heckschaden');
+    check(view.textContent.includes('auch in Frontschaden'),'Teilvorgangsübergreifendes Gutachten');
+    click('[data-action=scope][data-id=all]');
+    check(visibleEvents().filter(entry=>entry.id==='k-report').length===1&&visibleEvents().length===6,'Alle Teilvorgänge ohne Doppelung');
+    click('[data-action=tab][data-id=Dokumente]');
+    check(view.textContent.includes('Original fehlt'),'Fehlendes Original');
+    click('[data-action=event][data-id=k-report]');
+    check(view.textContent.includes('OCR fehlgeschlagen'),'OCR-Fehler sichtbar');
+    check(state.mobile,'Vorschauseite geöffnet');
+    if(mobile){
+      check(getComputedStyle(view.querySelector('.case-panel')).display==='none'&&getComputedStyle(view.querySelector('.reader')).display!=='none','Eigene mobile Vorschauseite');
+      click('[data-action=back]');
+      check(getComputedStyle(view.querySelector('.case-panel')).display!=='none','Zurück zur mobilen Akte');
+    }
+    click('[data-action=scope][data-id=front]');
+    click('[data-action=tab][data-id=Chronik]');
+    check(view.textContent.includes('nacherfasst am 16.11.2026'),'Nacherfasste Notiz oder Telefonat');
+    const filter=document.querySelector('#event-filter');
+    filter.value='Phone';filter.dispatchEvent(new Event('change',{bubbles:true}));
+    check(view.querySelectorAll('.event').length===1&&view.textContent.includes('Telefonat zum Gutachten'),'Chronikfilter');
+    click('[data-action=source][data-id=k-letter]');
+    check(state.page===2&&state.selected==='k-letter','Frist springt zur Dokumentseite');
+    if(mobile) click('[data-action=back]');
+    click('[data-action=due][data-id=d2][data-mode=move]');
+    fill('value','2026-12-09');fill('reason','Bestätigte Verlängerung');submit();
+    check(deadlines.find(item=>item.id==='d2').originalDate==='2026-12-04','Friständerung erhält Ursprungsdatum');
+    click('[data-action=due][data-id=d1][data-mode=owner]');
+    fill('value','Assistenz');submit();
+    check(deadlines[0].owner==='Assistenz','Zuständigkeit speicherbar');
+    click('[data-action=due][data-id=d1][data-mode=toggle]');
+    check(deadlines[0].done===true,'Wiedervorlage erledigen');
+    click('[data-action=source][data-id=k-letter]');
+    select(document.querySelector('#paper mark'));
+    check(state.selection==='04.12.2026','Textmarkierung erfasst');
+    click('[data-action=capture][data-id=deadline]');
+    fill('title','OCR-Demofrist');submit();
+    check(deadlines.at(-1).source.page===2&&deadlines.at(-1).date==='2026-12-04','Frist mit Fundstelle übernehmen');
+    click('[data-action=page][data-id="-1"]');
+    select(document.querySelector('#paper p'));
+    click('[data-action=capture][data-id=reference]');
+    fill('value','PRÜF-123');submit();
+    check(cases.kfz_demo.refs.at(-1).source.page===1&&view.textContent.includes('PRÜF-123'),'Aktenzeichen mit Fundstelle');
+    select(document.querySelector('#paper small'));
+    click('[data-action=capture][data-id=date]');
+    fill('value','2026-11-17');submit();
+    check(selectedEvent().dateSource.page===1&&view.querySelector('#doc-meta').open,'Dokumentdatum mit Fundstelle');
+    click('[data-action=contact][data-id=insurer]');
+    check(dialog.open&&dialog.textContent.includes('Kfz-Schadenservice'),'Adressbuchverknüpfung');
+    closeDialog();
+    click('[data-action=reply]');
+    fill('body','Beispieltext für die Antwort.');submit();
+    const reply=selectedEvent();
+    check(reply.type==='Draft'&&reply.replyTo==='k-letter','Antwortentwurf aus Vorschau');
+    click('[data-action=send][data-id="'+reply.id+'"]');
+    fill('proof','Sendeprotokoll 4711');submit();
+    check(selectedEvent().type==='Out'&&selectedEvent().sentTo===contacts.insurer.mail,'Versand mit Adress-Momentaufnahme');
+    check(cases.kfz_demo.events.some(item=>item.related===selectedEvent().id),'Versandnachweis verknüpft');
+    click('[data-action=new-entry]');
+    fill('title','Prüfnotiz');submit();
+    check(selectedEvent().type==='Note','Eintrag aus der Vorschau erfassen');
+    document.querySelector('#search').value='Zugangsnachweis bis zum';
+    document.querySelector('#search-form').requestSubmit();
+    check(view.textContent.includes('Musterfirma')&&view.textContent.includes('Seite 2'),'Volltextsuche über Vorgänge');
+    click('[data-action=open-event][data-id=u-court]');
+    check(state.caseId==='register_demo'&&state.page===2&&view.querySelector('#paper mark')!==null,'Suchtreffer öffnet Musterfirma mit Hervorhebung');
+    click('[data-action=import]');
+    submit();
+    check(state.screen==='inbox'&&activeInbox().length===4,'Beispielimport in den Posteingang');
+    click('[data-action=inbox-done]');
+    check(activeInbox().length===3,'Posteingang geprüft');
+    document.documentElement.dataset.selftest='OK · '+count+' Prüfungen';
+  }catch(error){
+    document.documentElement.dataset.selftest='FEHLER · '+error.message;
+    console.error(error);
+  }finally{
+    closeDialog();
+    Object.assign(state,snapshot.state);
+    delete state.hit;
+    for(const [key,entry] of Object.entries(snapshot.cases)) cases[key]=entry;
+    for(const key of Object.keys(documentData)) delete documentData[key];
+    Object.assign(documentData,snapshot.documentData);
+    deadlines.splice(0,deadlines.length,...snapshot.deadlines);
+    inbox.splice(0,inbox.length,...snapshot.inbox);
+    clearTimeout(toastTimer);
+    document.querySelector('#toast').textContent='';
+    document.querySelector('#search').value='';
+    render();
+  }
+}
+if(new URLSearchParams(location.search).has('selbsttest')) runSelfTests();
+</script>
+<style>
+.archive-tools{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:14px 0}
+.archive-tools input{width:min(100%,420px)}
+.archive-tools select{width:auto}
+.archive-grid{display:grid;grid-template-columns:minmax(0,1.15fr) minmax(0,.85fr);gap:18px;align-items:start}
+.archive-grid .card{overflow-wrap:anywhere}
+.archive-grid .card[aria-pressed=true]{border-color:#92a8ef;background:#f1f4ff}
+.archive-detail{position:sticky;top:12px;padding:14px;border:1px solid var(--line);border-radius:10px;overflow-wrap:anywhere}
+.archive-detail a{color:var(--blue)}
+.archive-detail dl{padding:10px 0}
+.archive-detail img,.archive-detail iframe{max-width:100%;width:100%;border:0}
+.archive-detail iframe{height:58vh}
+.archive-detail p{margin-top:8px}
+@media(max-width:780px){.archive-grid{grid-template-columns:1fr}.archive-detail{position:static}}
+</style>
+<script>
+(() => {
+  const records = [];
+  const state = {query:'',kind:'',active:null};
+  const listing = document.querySelector('#nav');
+  const appView = document.querySelector('#view');
+  const main = document.querySelector('#main');
+  const makeNavigation = () => {
+    if(listing.querySelector('#project-archive-nav')) return;
+    const button = document.createElement('button');
+    button.id = 'project-archive-nav';
+    button.type = 'button';
+    button.innerHTML = '<span aria-hidden="true">▧</span><span>Rechtsberatung</span>';
+    button.addEventListener('click', openArchive);
+    listing.append(button);
+  };
+  const esc = value => String(value ?? '').replace(/[&<>"']/g, char => ({
+    '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'
+  })[char]);
+  const kindOf = item => item.mime === 'application/pdf' ? 'PDF' : item.mime.startsWith('image/') ? 'Bild' : item.mime === 'application/zip' ? 'ZIP' : 'Office';
+  const dateOf = item => new Date(item.added).toLocaleDateString('de-DE',{timeZone:'Europe/Berlin'});
+  const sizeOf = item => new Intl.NumberFormat('de-DE').format(Math.round(item.bytes/1024))+' KB';
+  const sourceOf = item => 'https://chatgpt.com/library?file_id='+encodeURIComponent(item.id)+'&account_id=personal';
+  const observer = new MutationObserver(makeNavigation);
+  observer.observe(listing,{childList:true});
+  makeNavigation();
+  function openArchive(){
+    main.classList.remove('mobile-preview');
+    listing.querySelector('[aria-current]')?.removeAttribute('aria-current');
+    listing.querySelector('#project-archive-nav').setAttribute('aria-current','page');
+    appView.innerHTML = '<section class="list-page" id="project-archive"><h1>Rechtsberatung</h1>'+
+      '<p class="muted">'+records.length+' archivierte Dateien</p><div class="tools"><button type="button" data-open-chat-notes>Chat-Notizen öffnen</button></div>'+
+      '<div class="archive-tools"><input id="archive-query" type="search" aria-label="Dateinamen filtern" placeholder="Dateinamen filtern">'+
+      '<select id="archive-kind" aria-label="Dateityp filtern"><option value="">Alle Dateitypen</option><option>PDF</option><option>Bild</option><option>ZIP</option><option>Office</option></select></div>'+
+      '<div class="archive-grid"><div><p id="archive-count" class="muted" aria-live="polite"></p><div class="cards" id="archive-rows"></div></div>'+
+      '<section class="archive-detail" id="archive-detail" aria-label="Archivdatei"></section></div></section>';
+    const query = document.querySelector('#archive-query');
+    query.value=state.query;
+    query.addEventListener('input',()=>{state.query=query.value;draw();});
+    const kind = document.querySelector('#archive-kind');
+    kind.value=state.kind;
+    kind.addEventListener('change',()=>{state.kind=kind.value;draw();});
+    document.querySelector('#archive-rows').addEventListener('click',event=>{
+      const button = event.target.closest('[data-file-id]');
+      if(!button) return;
+      state.active=button.dataset.fileId;
+      draw();
+      document.querySelector('[data-file-id="'+CSS.escape(state.active)+'"]')?.focus({preventScroll:true});
+      if(matchMedia('(max-width:780px)').matches) document.querySelector('#archive-detail').scrollIntoView();
+    });
+    draw();
+  }
+  function draw(){
+    const query=state.query.trim().normalize('NFC').toLocaleLowerCase('de');
+    const matched=records.filter(item=>(!state.kind||kindOf(item)===state.kind) &&
+      item.name.normalize('NFC').toLocaleLowerCase('de').includes(query));
+    if(!matched.some(item=>item.id===state.active)) state.active=matched[0]?.id;
+    document.querySelector('#archive-count').textContent=matched.length+' Dateien';
+    document.querySelector('#archive-rows').innerHTML=matched.map(item=>
+      '<button type="button" class="card" data-file-id="'+esc(item.id)+'" aria-pressed="'+(item.id===state.active)+'">'+
+      '<strong>'+esc(item.name)+'</strong><small>'+kindOf(item)+' · archiviert am '+dateOf(item)+'</small></button>'
+    ).join('') || '<p class="empty">Keine passenden Dateien.</p>';
+    const item=matched.find(record=>record.id===state.active);
+    document.querySelector('#archive-detail').innerHTML=item ? detail(item) : '<p class="muted">Keine Datei ausgewählt.</p>';
+  }
+  function detail(item){
+    const type=kindOf(item);
+    const status=item.local?'Lokale Kopie vorhanden':'Lokale Kopie ausstehend';
+    let preview='';
+    if(item.local&&type==='PDF') preview='<iframe title="PDF-Vorschau" src="'+esc(item.local)+'"></iframe>';
+    if(item.local&&type==='Bild') preview='<img alt="Archiviertes Original" src="'+esc(item.local)+'">';
+    return '<h2>'+esc(item.name)+'</h2><dl class="meta"><dt>Typ</dt><dd>'+type+'</dd><dt>Größe</dt><dd>'+sizeOf(item)+
+      '</dd><dt>Archiviert am</dt><dd>'+dateOf(item)+'</dd><dt>Importstatus</dt><dd>'+status+'</dd></dl>'+
+      (item.local?'<p><a href="'+esc(item.local)+'" target="_blank" rel="noopener">Lokales Original öffnen</a></p>':'')+
+      '<p><a href="'+esc(sourceOf(item))+'" target="_blank" rel="noopener">Archivdatei in ChatGPT öffnen</a></p>'+preview;
+  }
+  if(!new URLSearchParams(location.search).has('selbsttest')) openArchive();
+})();
+</script>
+
+<script src="./lokale_vorgaenge.js"></script>
+<script src="./chat_notizen.js"></script>
+</body>
+</html>

@@ -1,0 +1,4 @@
+Korrespondenz_Lokal/Daten/
+__pycache__/
+*.pyc
+.DS_Store
